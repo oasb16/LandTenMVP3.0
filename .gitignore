@@ -1,2 +1,26 @@
+# Node
+node_modules/
+.next/
+
+# Python
+__pycache__/
+*.pyc
 venv/
-frontend/
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# VSCode
+.vscode/
+
+# Test/coverage
+coverage/
+*.cover
+
+# Misc
+*.swp
