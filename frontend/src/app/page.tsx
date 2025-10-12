@@ -1,6 +1,10 @@
 import Image from "next/image";
+// @ts-ignore
+import Chat from "../components/Chat.js";
 
 export default function Home() {
+  // TODO: Replace with real user context/auth
+  const user = { id: "demo", role: "tenant" };
   return (
     <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
       <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
@@ -98,6 +102,8 @@ export default function Home() {
           Go to nextjs.org →
         </a>
       </footer>
+      <h1>LandTen MVP Chat</h1>
+      <Chat user={user} />
     </div>
   );
 }
