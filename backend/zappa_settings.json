@@ -1,0 +1,10 @@
+{
+  "production": {
+    "app_function": "app.main.handler",
+    "aws_region": "us-east-1",
+    "profile_name": "default",
+    "project_name": "landtenmvp3-backend",
+    "runtime": "python3.10",
+    "s3_bucket": "landtenmvp30-zappa"
+  }
+}

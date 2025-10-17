@@ -1,0 +1,9 @@
+{
+  "SourceConfiguration": {
+    "ImageRepository": {
+      "ImageIdentifier": "public.ecr.aws/docker/library/python:3.10-slim",
+      "ImageRepositoryType": "ECR_PUBLIC"
+    },
+    "AutoDeploymentsEnabled": false
+  }
+}

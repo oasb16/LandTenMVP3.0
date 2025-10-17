@@ -1,0 +1,18 @@
+# fly.toml app configuration file generated for landtenmvp3-backend on 2025-10-12T20:08:32-05:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'landtenmvp3-backend'
+primary_region = 'sjc'
+
+[build]
+  image = 'python:3.10-slim'
+
+[env]
+  PORT = '8080'
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1

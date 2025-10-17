@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from mangum import Mangum
 from app.routes import chat, incident, job, agent
 
 app = FastAPI()
@@ -9,5 +10,11 @@ app.include_router(job.router)
 app.include_router(agent.router)
 
 @app.get("/")
-def read_root():
-    return {"message": "Hello from FastAPI backend!"}
+def root():
+    return {"status": "ok", "message": "LandTenMVP3 backend is running."}
+
+@app.get("/health")
+def health():
+    return {"status": "healthy"}
+
+handler = Mangum(app)
