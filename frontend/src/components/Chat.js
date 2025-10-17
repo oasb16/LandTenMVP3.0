@@ -15,7 +15,8 @@ export default function Chat({ user }) {
 
   const sendMessage = async (e) => {
     e.preventDefault();
-    await fetch('/api/chat/send', {
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || '/api/chat/send';
+    await fetch(backendUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: user.id, role: user.role, message: input })

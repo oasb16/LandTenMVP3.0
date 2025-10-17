@@ -1,7 +1,6 @@
-// TODO: Replace with your Pusher credentials
 import Pusher from 'pusher-js';
 
-export const pusher = new Pusher('YOUR_PUSHER_KEY', {
-  cluster: 'us2',
+export const pusher = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY, {
+  cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER,
   authEndpoint: '/api/pusher/auth', // If using private/presence channels
 });
