@@ -6,11 +6,15 @@ export default function Chat({ user }) {
   const [input, setInput] = useState('');
 
   useEffect(() => {
-    const channel = pusher.subscribe('chat');
-    channel.bind('message', function(data) {
+    // Align with backend channel/event
+    const channelName = 'chat';
+    const eventName = 'message';
+    const channel = pusher.subscribe(channelName);
+    channel.bind(eventName, function(data) {
+      // Expect { message, user_id, role, timestamp }
       setMessages((prev) => [...prev, data]);
     });
-    return () => { pusher.unsubscribe('chat'); };
+    return () => { pusher.unsubscribe(channelName); };
   }, []);
 
   const sendMessage = async (e) => {

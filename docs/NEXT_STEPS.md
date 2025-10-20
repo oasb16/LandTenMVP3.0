@@ -13,10 +13,14 @@
 - [ ] Confirm `NEXT_PUBLIC_BACKEND_URL` in `.env.local` points to EC2 public IP.
 - [ ] Restart frontend and test chat UI.
 - [ ] Validate chat message flow end-to-end.
+  - Channel/Event standardized to `chat`/`message`.
+  - Ensure Pusher keys/cluster set in `.env.local`.
 
 ## Backend Validation
 - [ ] Test `/health` and `/chat/send` endpoints from local and frontend.
 - [ ] Log and fix any errors recursively.
+  - Dev auth bypass via `AUTH_DISABLED=true` for local/dev.
+  - CORS enabled to allow Next.js origin.
 
 ## Documentation & Repo
 - [ ] Review and update all documentation files in `/docs` and `/non-dev`.

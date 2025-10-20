@@ -8,9 +8,12 @@
 - [ ] Backend: Validate health and chat endpoints with curl.
 - [ ] Error logging: Continue breadth-first recursive fixes for any failures.
 - [ ] Documentation: Expand non-dev docs for business, ops, and future planning.
+ - [ ] Configure Pusher env and verify `chat`/`message` flow.
+ - [ ] Use `.env.example` templates to populate frontend/backend envs.
 
 ## Debugging Notes
 - If backend unreachable, check container status, logs, port, and security group.
 - If Docker permission denied, add ec2-user to docker group and reconnect.
 - If SSH fails, update security group for port 22 from your IP.
 - Always log errors and continue to next actionable fix.
+ - If chat not updating, verify channel/event names and Pusher credentials.
