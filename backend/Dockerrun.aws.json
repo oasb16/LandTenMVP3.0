@@ -1,0 +1,13 @@
+{
+  "AWSEBDockerrunVersion": 1,
+  "Image": {
+    "Name": "python:3.10-slim",
+    "Update": "true"
+  },
+  "Ports": [
+    {
+      "ContainerPort": "8080"
+    }
+  ],
+  "Logging": "/var/log/app"
+}
