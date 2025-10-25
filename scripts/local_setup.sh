@@ -46,7 +46,7 @@ if [ "$RUN_LOCAL_DDB" = "true" ]; then
     if [ $ATTEMPTS -gt 20 ]; then
       warn "DynamoDB local did not become ready on ${DYNAMO_ENDPOINT_URL}. Skipping table creation."
     else
-      info "Creating tables (chat_messages, incidents, jobs)..."
+      info "Creating tables (chat_messages, incidents, jobs, properties, contractors, bids, schedules)..."
       # ensure boto3 available in a tiny temp venv so system Python needn't have it
       TMPVENV="${ROOT_DIR}/.ddb-venv"
       python3 -m venv "$TMPVENV" >/dev/null 2>&1 || true
@@ -85,13 +85,73 @@ def create_jobs():
     try:
         ddb.create_table(
             TableName=name('jobs'),
-            KeySchema=[{'AttributeName':'user_id','KeyType':'HASH'}],
-            AttributeDefinitions=[{'AttributeName':'user_id','AttributeType':'S'}],
+            KeySchema=[{'AttributeName':'job_id','KeyType':'HASH'}],
+            AttributeDefinitions=[{'AttributeName':'job_id','AttributeType':'S'}],
             BillingMode='PAY_PER_REQUEST'
         )
     except ddb.exceptions.ResourceInUseException:
         pass
-create_chat(); create_incidents(); create_jobs(); print('Tables ready')
+def create_properties():
+    try:
+        ddb.create_table(
+            TableName=name('properties'),
+            KeySchema=[{'AttributeName':'property_id','KeyType':'HASH'}],
+            AttributeDefinitions=[{'AttributeName':'property_id','AttributeType':'S'}],
+            BillingMode='PAY_PER_REQUEST'
+        )
+    except ddb.exceptions.ResourceInUseException:
+        pass
+def create_property_tenants():
+    try:
+        ddb.create_table(
+            TableName=name('property_tenants'),
+            KeySchema=[{'AttributeName':'property_id','KeyType':'HASH'},{'AttributeName':'tenant_id','KeyType':'RANGE'}],
+            AttributeDefinitions=[{'AttributeName':'property_id','AttributeType':'S'},{'AttributeName':'tenant_id','AttributeType':'S'}],
+            BillingMode='PAY_PER_REQUEST'
+        )
+    except ddb.exceptions.ResourceInUseException:
+        pass
+def create_contractors():
+    try:
+        ddb.create_table(
+            TableName=name('contractor_profiles'),
+            KeySchema=[{'AttributeName':'contractor_id','KeyType':'HASH'}],
+            AttributeDefinitions=[{'AttributeName':'contractor_id','AttributeType':'S'}],
+            BillingMode='PAY_PER_REQUEST'
+        )
+    except ddb.exceptions.ResourceInUseException:
+        pass
+def create_job_bids():
+    try:
+        ddb.create_table(
+            TableName=name('job_bids'),
+            KeySchema=[{'AttributeName':'bid_id','KeyType':'HASH'}],
+            AttributeDefinitions=[{'AttributeName':'bid_id','AttributeType':'S'}],
+            BillingMode='PAY_PER_REQUEST'
+        )
+    except ddb.exceptions.ResourceInUseException:
+        pass
+def create_schedules():
+    try:
+        ddb.create_table(
+            TableName=name('schedules'),
+            KeySchema=[{'AttributeName':'entity_id','KeyType':'HASH'},{'AttributeName':'schedule_id','KeyType':'RANGE'}],
+            AttributeDefinitions=[{'AttributeName':'entity_id','AttributeType':'S'},{'AttributeName':'schedule_id','AttributeType':'S'}],
+            BillingMode='PAY_PER_REQUEST'
+        )
+    except ddb.exceptions.ResourceInUseException:
+        pass
+def create_documents():
+    try:
+        ddb.create_table(
+            TableName=name('documents'),
+            KeySchema=[{'AttributeName':'document_id','KeyType':'HASH'}],
+            AttributeDefinitions=[{'AttributeName':'document_id','AttributeType':'S'}],
+            BillingMode='PAY_PER_REQUEST'
+        )
+    except ddb.exceptions.ResourceInUseException:
+        pass
+create_chat(); create_incidents(); create_jobs(); create_properties(); create_property_tenants(); create_contractors(); create_job_bids(); create_schedules(); create_documents(); print('Tables ready')
 PY
       deactivate || true
     fi
