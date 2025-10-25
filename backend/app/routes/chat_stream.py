@@ -3,11 +3,26 @@ import re
 from uuid import uuid4
 from typing import List, Dict, Any, Optional, Tuple
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from app.deps.auth import verify_firebase_token
+from app.deps.stream_signing import verify_stream_signature
 from app.services.ai_service import get_ai_response
+from app.services.chatbot import (
+    ensure_agent_user as bot_ensure_agent_user,
+    build_context,
+    agent_reply,
+    post_agent_message,
+)
+from app.services.incident_flow import (
+    classify_issue,
+    diy_suggestions,
+    create_incident_record,
+    summarize_for_landlord,
+    threshold_decision,
+    generate_contractor_bids,
+)
 
 try:
     from stream_chat import StreamChat
@@ -38,6 +53,158 @@ AGENT_DISPLAY_NAME = os.getenv("STREAM_AGENT_NAME", "LandTen Agent")
 AGENT_ROLE = os.getenv("STREAM_AGENT_ROLE", "admin")
 AGENT_PERSONA = os.getenv("STREAM_AGENT_PERSONA", "assistant")
 AUTOJOIN_AGENT = os.getenv("STREAM_AGENT_AUTOJOIN", "true").lower() not in {"false", "0", "no"}
+WEBHOOK_SECRET = os.getenv("STREAM_WEBHOOK_SECRET", "")
+
+DISCOVERY_QUESTIONS = [
+    {"key": "location", "prompt": "Where exactly is the leak or issue located?"},
+    {"key": "severity", "prompt": "How severe is the issue right now (drip, steady leak, flooding, etc.)?"},
+    {"key": "noticed", "prompt": "When did you first notice the problem?"},
+    {"key": "media", "prompt": "Can you upload a photo or short video so I can see what you're seeing?"},
+]
+
+
+def _channel_identifier(channel, channel_state: Dict[str, Any]) -> str:
+    cid = getattr(channel, "id", None)
+    if cid:
+        return cid
+    return (
+        channel_state.get("channel", {}).get("id")
+        or channel_state.get("channel", {}).get("cid")
+        or channel_state.get("channel_id")
+        or "unknown"
+    )
+
+
+def _persist_discovery(channel, discovery: Dict[str, Any]) -> None:
+    try:
+        channel.update({"discovery": discovery})
+    except (KeyError, StreamAPIException) as exc:  # pragma: no cover - logging only
+        print(f"[stream] failed to persist discovery state: {exc}")
+
+
+def _handle_discovery_message(
+    client: "StreamChat",
+    channel,
+    channel_state: Dict[str, Any],
+    message: Dict[str, Any],
+    persona: Optional[str] = None,
+) -> None:
+    channel_data = channel_state.get("channel", {}).get("data", {}) or {}
+    discovery = channel_data.get("discovery") or {}
+    lower_text = (message.get("text") or "").lower()
+    context = build_context(channel_state.get("messages", []))
+    channel_id = _channel_identifier(channel, channel_state)
+
+    def ask_question(index: int, acknowledgement: Optional[str] = None):
+        question = DISCOVERY_QUESTIONS[index]["prompt"]
+        prompt = (
+            f"You are assisting a tenant with a maintenance issue. "
+            f"{acknowledgement or ''} Ask them: {question}. Keep it short and friendly."
+        )
+        reply = agent_reply(prompt, context, persona)
+        post_agent_message(client, channel_id, reply)
+
+    if not discovery or discovery.get("stage") in {None, "complete"} or "start discovery" in lower_text:
+        discovery = {
+            "stage": "questions",
+            "question_index": 0,
+            "answers": {},
+            "history": [],
+        }
+        _persist_discovery(channel, discovery)
+        prompt = (
+            "A tenant requested help with a maintenance issue. "
+            f"Let them know you'll gather a few details and ask the first question: {DISCOVERY_QUESTIONS[0]['prompt']}"
+        )
+        reply = agent_reply(prompt, context, persona)
+        post_agent_message(client, channel_id, reply)
+        return
+
+    if discovery.get("stage") == "questions":
+        idx = discovery.get("question_index", 0)
+        if idx < len(DISCOVERY_QUESTIONS):
+            key = DISCOVERY_QUESTIONS[idx]["key"]
+            discovery.setdefault("answers", {})[key] = message.get("text")
+            discovery.setdefault("history", []).append({"key": key, "value": message.get("text")})
+            discovery["question_index"] = idx + 1
+            _persist_discovery(channel, discovery)
+        idx = discovery.get("question_index", 0)
+        if idx < len(DISCOVERY_QUESTIONS):
+            prev_key = DISCOVERY_QUESTIONS[idx - 1]["key"] if idx > 0 else None
+            ack = f"Thank them for the info about {prev_key}." if prev_key else None
+            ask_question(idx, ack)
+        else:
+            answers = discovery.get("answers", {})
+            summary = "; ".join(f"{k}: {v}" for k, v in answers.items())
+            category, severity, urgency = classify_issue(summary)
+            suggestions = diy_suggestions(category)
+            discovery["stage"] = "diy"
+            discovery["summary"] = summary
+            discovery["classification"] = {
+                "category": category,
+                "severity": severity,
+                "urgency": urgency,
+            }
+            _persist_discovery(channel, discovery)
+            prompt = (
+                f"Summarize the tenant issue: {summary}. "
+                f"Provide DIY suggestions ({'; '.join(suggestions)}). "
+                "Ask them to reply 'Resolved' if it works or 'Not resolved' if it still needs help."
+            )
+            reply = agent_reply(prompt, context, persona)
+            post_agent_message(client, channel_id, reply)
+        return
+
+    if discovery.get("stage") == "diy":
+        lowered = lower_text
+        if "resolve" in lowered and "not" not in lowered:
+            discovery["stage"] = "complete"
+            discovery["diy_result"] = "Resolved via DIY"
+            _persist_discovery(channel, discovery)
+            prompt = (
+                "The tenant says the issue is resolved. Congratulate them, remind them to reach out if it recurs, "
+                "and close the conversation without escalating."
+            )
+            reply = agent_reply(prompt, context, persona)
+            post_agent_message(client, channel_id, reply)
+            return
+
+        discovery["stage"] = "incident"
+        discovery["diy_result"] = "Unresolved"
+        _persist_discovery(channel, discovery)
+        classification = discovery.get("classification", {})
+        summary = discovery.get("summary", message.get("text"))
+        tenant_email = message.get("user", {}).get("id", "tenant")
+        incident = create_incident_record(
+            channel_id,
+            tenant_email,
+            {
+                "category": classification.get("category", "general"),
+                "severity": classification.get("severity", "medium"),
+                "urgency": classification.get("urgency", "routine"),
+                "summary": summary,
+                "diy_attempted": True,
+                "diy_result": "Unresolved",
+                "media": discovery.get("media", []),
+            },
+        )
+        bids = generate_contractor_bids(classification.get("category", "general"))
+        decision = threshold_decision(bids[0]["quote"])
+        landlord_summary = summarize_for_landlord(incident)
+        prompt = (
+            f"Inform the tenant that Incident {incident['incident_id']} has been created and will be shared with the landlord. "
+            f"Summarize the findings:\n{landlord_summary}\n"
+            f"Explain that approval recommendation is '{decision}'. "
+            "Let them know they'll receive updates about contractor scheduling."
+        )
+        reply = agent_reply(prompt, context, persona)
+        post_agent_message(client, channel_id, reply)
+        bids_text = "\n".join(f"- {b['name']}: ${b['quote']} ({b['eta']})" for b in bids)
+        post_agent_message(
+            client,
+            channel_id,
+            f"Sample contractor options:\n{bids_text}\nWe'll finalize once the landlord approves.",
+        )
 
 
 def _get_stream_client() -> "StreamChat":
@@ -48,22 +215,6 @@ def _get_stream_client() -> "StreamChat":
     if not api_key or not api_secret:
         raise HTTPException(status_code=501, detail="Stream Chat credentials not configured")
     return StreamChat(api_key, api_secret)
-
-
-def _ensure_agent_user(client: "StreamChat") -> Optional[str]:
-    if not AGENT_USER_ID:
-        return None
-    payload = {
-        "id": AGENT_USER_ID,
-        "role": AGENT_ROLE,
-        "name": AGENT_DISPLAY_NAME,
-        "persona": AGENT_PERSONA,
-    }
-    try:
-        client.upsert_user(payload)
-    except (KeyError, StreamAPIException) as exc:  # pragma: no cover - logging only
-        print(f"[stream] failed to upsert agent user: {exc}")
-    return AGENT_USER_ID
 
 
 def _sanitize_members(members: List[str]) -> Tuple[List[str], Dict[str, Dict[str, str]]]:
@@ -88,7 +239,7 @@ def get_stream_token(user_id: str, persona: str, token: str = Depends(verify_fir
 
     try:
         client = _get_stream_client()
-        _ensure_agent_user(client)
+        bot_ensure_agent_user(client)
 
         sanitized_user_id = _slugify(user_id, allow_at=True)
         if not sanitized_user_id:
@@ -185,7 +336,7 @@ def create_stream_thread(req: StreamThreadCreate, token: str = Depends(verify_fi
         raise HTTPException(status_code=400, detail="At least one participant is required")
 
     client = _get_stream_client()
-    _ensure_agent_user(client)
+    bot_ensure_agent_user(client)
 
     # Ensure creator is part of participants
     all_participants = list(dict.fromkeys([req.creator, *req.participants]))
@@ -328,7 +479,7 @@ def post_agent_reply(req: AgentMessageRequest, token: str = Depends(verify_fireb
         raise HTTPException(status_code=400, detail="channel_id required")
 
     client = _get_stream_client()
-    agent_id = _ensure_agent_user(client)
+    agent_id = bot_ensure_agent_user(client)
     if not agent_id:
         raise HTTPException(status_code=500, detail="Agent user not configured")
 
@@ -359,3 +510,50 @@ def post_agent_reply(req: AgentMessageRequest, token: str = Depends(verify_fireb
         raise HTTPException(status_code=500, detail=f"Stream error posting agent reply: {exc}")
 
     return {"status": "sent", "agent_id": agent_id, "message": ai_response}
+@router.post("/chat/stream/webhook")
+async def stream_webhook(request: Request):
+    if not WEBHOOK_SECRET:
+        raise HTTPException(status_code=501, detail="Stream webhook secret not configured")
+
+    body = await request.body()
+    signature = request.headers.get("X-Signature", "")
+    if not verify_stream_signature(body, signature, WEBHOOK_SECRET):
+        raise HTTPException(status_code=401, detail="Invalid Stream signature")
+
+    try:
+        payload = json.loads(body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    if payload.get("type") != "message.new":
+        return {"status": "ignored"}
+
+    message = payload.get("message") or {}
+    if message.get("user", {}).get("id") == AGENT_USER_ID:
+        return {"status": "ignored"}
+
+    cid = message.get("cid")
+    if not cid or ":" not in cid:
+        return {"status": "ignored"}
+    channel_type, channel_id = cid.split(":", 1)
+
+    client = _get_stream_client()
+    bot_ensure_agent_user(client)
+    channel = client.channel(channel_type, channel_id)
+    channel_state = channel.query(state=True, watch=False)
+    channel_data = channel_state.get("channel", {}).get("data", {}) or {}
+    persona = channel_data.get("persona")
+    discovery = channel_data.get("discovery") or {}
+
+    lower_text = (message.get("text") or "").lower()
+    should_handle = False
+    if "agent" in lower_text or "start discovery" in lower_text:
+        should_handle = True
+    if discovery.get("stage") in {"questions", "diy"}:
+        should_handle = True
+
+    if not should_handle:
+        return {"status": "ignored"}
+
+    _handle_discovery_message(client, channel, channel_state, message, persona)
+    return {"status": "ok"}

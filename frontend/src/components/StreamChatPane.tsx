@@ -244,6 +244,16 @@ export default function StreamChatPane({ persona }: Props) {
     [channel, persona, userInfo?.email],
   );
 
+  const triggerDiscovery = useCallback(async () => {
+    if (!channel) return;
+    try {
+      await channel.sendMessage({ text: "@agent start discovery" });
+    } catch (err) {
+      console.error("Failed to trigger discovery", err);
+      setError(err instanceof Error ? err.message : "Failed to trigger discovery");
+    }
+  }, [channel]);
+
   if (error) {
     return <div className="text-sm text-emerald-300">{error}</div>;
   }
@@ -258,12 +268,21 @@ export default function StreamChatPane({ persona }: Props) {
         <div className="flex" style={{ minHeight: 420 }}>
           <div style={{ width: 260, borderRight: "1px solid #1f2937" }} className="flex flex-col">
             <div className="p-3 border-b border-slate-800">
-              <button
-                className="w-full rounded bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
-                onClick={() => setShowComposer((prev) => !prev)}
-              >
-                {showComposer ? "Cancel" : "New Conversation"}
-              </button>
+              <div className="flex flex-col gap-2">
+                <button
+                  className="w-full rounded bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+                  onClick={() => setShowComposer((prev) => !prev)}
+                >
+                  {showComposer ? "Cancel" : "New Conversation"}
+                </button>
+                <button
+                  className="w-full rounded border border-emerald-700 px-3 py-2 text-xs font-semibold text-emerald-200 hover:bg-emerald-800"
+                  onClick={triggerDiscovery}
+                  disabled={!channel}
+                >
+                  Start Incident Discovery
+                </button>
+              </div>
               {showComposer && (
                 <form onSubmit={handleCreateConversation} className="mt-3 flex flex-col gap-2 text-xs text-slate-200">
                   <textarea
@@ -323,4 +342,3 @@ export default function StreamChatPane({ persona }: Props) {
     </div>
   );
 }
-

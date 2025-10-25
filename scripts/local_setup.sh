@@ -75,8 +75,8 @@ def create_incidents():
     try:
         ddb.create_table(
             TableName=name('incidents'),
-            KeySchema=[{'AttributeName':'user_id','KeyType':'HASH'}],
-            AttributeDefinitions=[{'AttributeName':'user_id','AttributeType':'S'}],
+            KeySchema=[{'AttributeName':'incident_id','KeyType':'HASH'}],
+            AttributeDefinitions=[{'AttributeName':'incident_id','AttributeType':'S'}],
             BillingMode='PAY_PER_REQUEST'
         )
     except ddb.exceptions.ResourceInUseException:

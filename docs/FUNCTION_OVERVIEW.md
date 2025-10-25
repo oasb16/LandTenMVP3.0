@@ -8,8 +8,9 @@
 
 ## Backend
 - **FastAPI App:** Serves REST for chat, incident, job, media, and new Stream helpers.
-- **Stream Chat router:** `app/routes/chat_stream.py` issues auth tokens, creates/list channels, and posts agent replies. It also ensures a dedicated `STREAM_AGENT_*` user is present in every room.
-- **Agent service:** `app/services/ai_service.py` now integrates with OpenAI (when configured) and falls back to offline responses.
+- **Stream Chat router:** `app/routes/chat_stream.py` issues auth tokens, creates/list channels, posts agent replies, and exposes `/chat/stream/webhook` for Stream’s chatbot events.
+- **Chatbot & Incident Flow:** `app/services/chatbot.py` + `app/services/incident_flow.py` coordinate the guided discovery → DIY → incident creation pipeline, persisting structured ledger entries via `app/repos/incident_repo.py`.
+- **Agent service:** `app/services/ai_service.py` integrates with OpenAI (when configured) and falls back to offline responses.
 - **Repositories:** DynamoDB-backed chat/job/incident repos remain available for persistence beyond Stream.
 - **Middleware:** Logging + rate limiting in `app/main.py`; CORS stays minimal for Next.js.
 
