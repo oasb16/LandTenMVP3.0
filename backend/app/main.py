@@ -12,6 +12,7 @@ from app.routes import (
     profile,
     task,
     chat_stream,
+    property,
 )
 from starlette.middleware.base import BaseHTTPMiddleware
 import time, uuid, logging
@@ -80,6 +81,7 @@ app.include_router(media.router)
 app.include_router(profile.router)
 app.include_router(task.router)
 app.include_router(chat_stream.router)
+app.include_router(property.router)
 
 @app.get("/")
 def root():
