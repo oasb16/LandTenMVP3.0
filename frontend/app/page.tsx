@@ -20,10 +20,16 @@ export default async function LandingPage() {
         </p>
         <div className="flex flex-col sm:flex-row gap-4 justify-center">
           <Link
+            href="/property-ai"
+            className="inline-flex items-center justify-center rounded-md bg-gradient-to-r from-blue-600 to-purple-600 px-6 py-3 font-semibold text-white hover:from-blue-700 hover:to-purple-700 transition shadow-lg"
+          >
+            Try PropertyAI (New UI)
+          </Link>
+          <Link
             href={hasSession ? "/dashboard" : "/dashboard"}
             className="inline-flex items-center justify-center rounded-md bg-emerald-500 px-6 py-3 font-semibold text-slate-900 hover:bg-emerald-400 transition"
           >
-            {hasSession ? "Continue to dashboard" : "Sign in with Google"}
+            {hasSession ? "Continue to dashboard" : "Classic Dashboard"}
           </Link>
           <a
             href="https://github.com/oasb16/LandTenMVP2.0"
