@@ -57,11 +57,13 @@ export interface Job {
 }
 
 export interface Property {
-  id: number;
+  id: string;
   name: string;
-  tenants: number;
-  incidents: number;
+  address: string;
+  landlord_id: string;
+  tenants: string[];
   status: string;
+  created_at?: string;
 }
 
 export interface Profile {
@@ -277,4 +279,56 @@ export async function uploadMedia(file: File): Promise<string> {
   }
 
   return asset_url;
+}
+
+// ==================== PROPERTIES ====================
+
+export async function createProperty(property: Omit<Property, 'id' | 'created_at'>): Promise<Property> {
+  const backendUrl = getBackendUrl();
+  if (!backendUrl) throw new Error('Backend URL not configured');
+
+  const response = await fetch(`${backendUrl}/property/create`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify(property),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to create property: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return data.property;
+}
+
+export async function listProperties(landlordId: string): Promise<Property[]> {
+  const backendUrl = getBackendUrl();
+  if (!backendUrl) throw new Error('Backend URL not configured');
+
+  const response = await fetch(`${backendUrl}/property/list/${encodeURIComponent(landlordId)}`, {
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to list properties: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return data.properties || [];
+}
+
+export async function getTenantProperty(tenantId: string): Promise<Property | null> {
+  const backendUrl = getBackendUrl();
+  if (!backendUrl) throw new Error('Backend URL not configured');
+
+  const response = await fetch(`${backendUrl}/property/tenant/${encodeURIComponent(tenantId)}`, {
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to get tenant property: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return data.property;
 }
