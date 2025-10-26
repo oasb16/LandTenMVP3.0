@@ -6,7 +6,7 @@ import { useSession, signIn, signOut } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { useIncidents, useTasks, useJobs, useProperties, useMediaUpload } from '@/hooks/usePropertyData';
 import * as api from '@/lib/api';
-import PropertyAIChat from './PropertyAIChat';
+import StreamChatPane from './StreamChatPane';
 
 export default function PropertyAIApp() {
   const { data: session, status } = useSession();
@@ -616,7 +616,9 @@ function LandlordDashboard({ session }: { session: any }) {
           </div>
 
           <div className="flex-1 overflow-hidden">
-            <PropertyAIChat persona="landlord" userId={userId} />
+            <div className="h-full w-full">
+              <StreamChatPane persona="landlord" />
+            </div>
           </div>
 
           <BottomNav active="chat" role="landlord" onNavigate={(view) => {
@@ -857,7 +859,9 @@ function TenantDashboard({ session }: { session: any }) {
           </div>
 
           <div className="flex-1 overflow-hidden">
-            <PropertyAIChat persona="tenant" userId={userId} />
+            <div className="h-full w-full">
+              <StreamChatPane persona="tenant" />
+            </div>
           </div>
 
           <BottomNav active="chat" role="tenant" onNavigate={(view) => {
