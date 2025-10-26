@@ -1,0 +1,120 @@
+/* PropertyAI Stream Chat Mobile Optimizations */
+
+/* Make Stream Chat fit in mobile PropertyAI layout */
+.str-chat {
+  height: 100% !important;
+}
+
+.str-chat__container {
+  height: 100% !important;
+}
+
+.str-chat__main-panel {
+  height: 100% !important;
+}
+
+.str-chat__channel {
+  height: 100% !important;
+}
+
+.str-chat__list {
+  height: 100% !important;
+  max-height: none !important;
+}
+
+.str-chat__message-list-scroll {
+  height: 100% !important;
+}
+
+/* Hide channel list in mobile view - we already have navigation */
+.str-chat__channel-list {
+  display: none !important;
+}
+
+/* Adjust message input for mobile */
+.str-chat__input-flat {
+  border-radius: 1.5rem !important;
+  padding: 0.75rem 1rem !important;
+}
+
+.str-chat__input-flat-wrapper {
+  padding: 0.75rem 1rem !important;
+  background: #F9FAFB !important;
+}
+
+/* Mobile-friendly message bubbles */
+.str-chat__message-text-inner {
+  border-radius: 1rem !important;
+  padding: 0.75rem 1rem !important;
+}
+
+/* Optimize header for mobile */
+.str-chat__header-livestream {
+  padding: 0.75rem 1rem !important;
+  min-height: auto !important;
+}
+
+/* Better scroll behavior on mobile */
+.str-chat__message-list {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Hide unnecessary elements in mobile view */
+.str-chat__thread {
+  display: none !important;
+}
+
+/* Adjust avatar sizes for mobile */
+.str-chat__avatar {
+  width: 32px !important;
+  height: 32px !important;
+}
+
+/* Make reactions more touch-friendly */
+.str-chat__message-reactions-list-item {
+  min-width: 40px !important;
+  min-height: 40px !important;
+}
+
+/* Optimize emoji picker for mobile */
+.str-chat__emoji-picker {
+  max-height: 300px !important;
+}
+
+/* Better message spacing on mobile */
+.str-chat__li {
+  padding: 0.5rem !important;
+}
+
+/* Optimize attachment previews */
+.str-chat__attachment {
+  max-width: 100% !important;
+}
+
+/* Make sure images fit mobile screen */
+.str-chat__attachment--image img {
+  max-width: 100% !important;
+  height: auto !important;
+}
+
+/* Adjust typing indicator */
+.str-chat__typing-indicator {
+  padding: 0.5rem 1rem !important;
+}
+
+/* Better button sizing for mobile */
+.str-chat__send-button {
+  min-width: 40px !important;
+  min-height: 40px !important;
+}
+
+/* Hide desktop-only features */
+@media (max-width: 768px) {
+  .str-chat__channel-preview-messenger {
+    padding: 0.75rem !important;
+  }
+
+  .str-chat__message-team {
+    padding: 0.5rem !important;
+  }
+}
