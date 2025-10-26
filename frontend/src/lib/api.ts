@@ -332,3 +332,95 @@ export async function getTenantProperty(tenantId: string): Promise<Property | nu
   const data = await response.json();
   return data.property;
 }
+
+// ==================== AI BOT ====================
+
+export interface AIAction {
+  name: string;
+  text: string;
+  style?: string;
+  value: string;
+}
+
+export interface AIBotStatus {
+  status: string;
+  bots: {
+    [persona: string]: {
+      id: string;
+      name: string;
+      description: string;
+    };
+  };
+  webhook_configured: boolean;
+}
+
+/**
+ * Initialize AI bot in a channel
+ */
+export async function initializeAIChannel(channelId: string, persona: string): Promise<any> {
+  const backendUrl = getBackendUrl();
+  if (!backendUrl) throw new Error('Backend URL not configured');
+
+  const response = await fetch(`${backendUrl}/ai/init-channel`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({
+      channel_id: channelId,
+      persona: persona,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to initialize AI channel: ${response.statusText}`);
+  }
+
+  return await response.json();
+}
+
+/**
+ * Send AI message with action buttons
+ */
+export async function sendAIAction(
+  channelId: string,
+  persona: string,
+  text: string,
+  actions: AIAction[]
+): Promise<any> {
+  const backendUrl = getBackendUrl();
+  if (!backendUrl) throw new Error('Backend URL not configured');
+
+  const response = await fetch(`${backendUrl}/ai/send-action`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({
+      channel_id: channelId,
+      persona: persona,
+      text: text,
+      actions: actions,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to send AI action: ${response.statusText}`);
+  }
+
+  return await response.json();
+}
+
+/**
+ * Get AI bot status
+ */
+export async function getAIBotStatus(): Promise<AIBotStatus> {
+  const backendUrl = getBackendUrl();
+  if (!backendUrl) throw new Error('Backend URL not configured');
+
+  const response = await fetch(`${backendUrl}/ai/bot-status`, {
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to get AI bot status: ${response.statusText}`);
+  }
+
+  return await response.json();
+}
