@@ -132,15 +132,47 @@ export function useJobs(contractorId: string | null) {
 
 // ==================== PROPERTIES ====================
 
-export function useProperties(landlordId: string | null) {
-  // TODO: Backend doesn't have property API yet
-  // For now, return mock data
-  const [properties] = useState<api.Property[]>([
-    { id: 1, name: '123 Oakwood Ave', tenants: 1, incidents: 0, status: 'Active' },
-    { id: 2, name: '456 Maple St', tenants: 1, incidents: 0, status: 'Active' }
-  ]);
+export function useProperties(landlordId: string | null, persona?: string) {
+  const [properties, setProperties] = useState<api.Property[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  return { properties, loading: false, error: null };
+  const fetchProperties = useCallback(async () => {
+    if (!landlordId) return;
+    setLoading(true);
+    setError(null);
+    try {
+      if (persona === 'tenant') {
+        // Tenants see only their property
+        const data = await api.getTenantProperty(landlordId);
+        setProperties(data ? [data] : []);
+      } else {
+        // Landlords see all their properties
+        const data = await api.listProperties(landlordId);
+        setProperties(data);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load properties');
+    } finally {
+      setLoading(false);
+    }
+  }, [landlordId, persona]);
+
+  useEffect(() => {
+    fetchProperties();
+  }, [fetchProperties]);
+
+  const createProperty = async (property: Omit<api.Property, 'id' | 'created_at'>) => {
+    try {
+      const newProperty = await api.createProperty(property);
+      setProperties(prev => [newProperty, ...prev]);
+      return newProperty;
+    } catch (err) {
+      throw err;
+    }
+  };
+
+  return { properties, loading, error, refetch: fetchProperties, createProperty };
 }
 
 // ==================== MEDIA UPLOAD ====================
