@@ -15,6 +15,15 @@ except ImportError:
     StreamAPIException = Exception
 
 from app.services.ai_service import get_ai_response
+from app.services.card_builder import CardBuilder, send_card_message
+from app.services.incident_flow import (
+    classify_issue,
+    diy_suggestions,
+    create_incident_record,
+    generate_contractor_bids
+)
+import json
+import re
 
 
 class PropertyAIBot:
@@ -287,6 +296,35 @@ Current conversation context: {context if context else 'New conversation'}
             bot_id = self.get_bot_id(persona)
             message_text = message.get("text", "")
             user_id = user.get("id")
+            user_name = user.get("name", user_id)
+
+            # Check if message is an action trigger
+            if message_text.startswith("action:") or "@agent action:" in message_text:
+                action_value = message_text.replace("@agent ", "").strip()
+                return self.handle_action(action_value, user_id, channel_id, persona)
+
+            # Detect incident in message (for tenant persona)
+            if persona == "tenant":
+                incident_data = self.detect_incident_in_message(message_text)
+                if incident_data:
+                    # Send incident detection card
+                    self.send_incident_card(
+                        channel_id=channel_id,
+                        persona=persona,
+                        incident_data=incident_data,
+                        user_name=user_name
+                    )
+                    # Also send a conversational response
+                    response_text = self.process_tenant_message(
+                        message=message_text,
+                        user_id=user_id,
+                        channel_id=channel_id
+                    )
+                    return self.send_message(
+                        channel_id=channel_id,
+                        bot_id=bot_id,
+                        text=response_text
+                    )
 
             # Process message based on persona
             if persona == "tenant":
@@ -320,6 +358,300 @@ Current conversation context: {context if context else 'New conversation'}
         except Exception as e:
             print(f"[stream-bot] Error handling message event: {e}")
             return None
+
+    def handle_action(
+        self,
+        action_value: str,
+        user_id: str,
+        channel_id: str,
+        persona: str
+    ) -> Optional[Dict]:
+        """
+        Handle action button clicks from cards
+
+        Action format: "action:action_name:param1:param2"
+        """
+        try:
+            parts = action_value.split(":")
+            if len(parts) < 2 or parts[0] != "action":
+                return None
+
+            action_name = parts[1]
+            params = parts[2:] if len(parts) > 2 else []
+
+            print(f"[stream-bot] Handling action: {action_name} with params: {params}")
+
+            # Route to appropriate handler
+            if action_name == "start_discovery":
+                return self._handle_start_discovery(channel_id, user_id, persona, params)
+            elif action_name == "upload_photos":
+                return self._handle_upload_photos(channel_id, user_id, persona, params)
+            elif action_name == "create_work_order":
+                return self._handle_create_work_order(channel_id, user_id, persona, params)
+            elif action_name == "view_bids":
+                return self._handle_view_bids(channel_id, user_id, persona, params)
+            elif action_name == "approve_contractor":
+                return self._handle_approve_contractor(channel_id, user_id, persona, params)
+            elif action_name == "approve_job":
+                return self._handle_approve_job(channel_id, user_id, persona, params)
+            elif action_name == "dismiss":
+                return self._handle_dismiss(channel_id, user_id, persona, params)
+            else:
+                print(f"[stream-bot] Unknown action: {action_name}")
+                return None
+
+        except Exception as e:
+            print(f"[stream-bot] Error handling action: {e}")
+            return None
+
+    def _handle_start_discovery(self, channel_id, user_id, persona, params):
+        """Handle start discovery action"""
+        incident_id = params[0] if params else f"INC-{int(datetime.now().timestamp())}"
+        bot_id = self.get_bot_id(persona)
+
+        # Send discovery message
+        self.send_message(
+            channel_id=channel_id,
+            bot_id=bot_id,
+            text="Great! Let's gather some details about the issue. I'll ask you a few questions."
+        )
+
+        # Send first discovery question
+        self.send_message(
+            channel_id=channel_id,
+            bot_id=bot_id,
+            text="📍 First, can you tell me exactly where the issue is located? (e.g., 'kitchen sink', 'bedroom ceiling')"
+        )
+
+        # Send discovery progress card
+        discovery_card = CardBuilder.discovery_card(
+            incident_id=incident_id,
+            questions_asked=0,
+            questions_total=4,
+            current_question="Where is the issue located?",
+            images_uploaded=0
+        )
+
+        return send_card_message(
+            self.client,
+            channel_id,
+            bot_id,
+            discovery_card
+        )
+
+    def _handle_upload_photos(self, channel_id, user_id, persona, params):
+        """Handle upload photos action"""
+        bot_id = self.get_bot_id(persona)
+
+        self.send_message(
+            channel_id=channel_id,
+            bot_id=bot_id,
+            text="📸 Please upload photos of the issue. You can attach images directly in the chat or use the attachment button."
+        )
+
+        return {"status": "prompted_for_photos"}
+
+    def _handle_create_work_order(self, channel_id, user_id, persona, params):
+        """Handle create work order action"""
+        incident_id = params[0] if params else f"INC-{int(datetime.now().timestamp())}"
+        job_id = f"JOB-{int(datetime.now().timestamp())}"
+        bot_id = self.get_bot_id(persona)
+
+        # Simulate incident analysis
+        category = "plumbing"
+        estimated_cost = "$150-200"
+        urgency = "routine"
+
+        # Send confirmation message
+        self.send_message(
+            channel_id=channel_id,
+            bot_id=bot_id,
+            text="✅ Creating work order for this issue..."
+        )
+
+        # Send work order card
+        work_order_card = CardBuilder.work_order_card(
+            incident_id=incident_id,
+            job_id=job_id,
+            title="Plumbing Repair",
+            category=category,
+            estimated_cost=estimated_cost,
+            urgency=urgency,
+            status="created"
+        )
+
+        result = send_card_message(
+            self.client,
+            channel_id,
+            bot_id,
+            work_order_card,
+            "🔧 Work order has been created! Your landlord will be notified."
+        )
+
+        # Notify landlord (simplified - in real system, send to landlord's channel)
+        self.send_message(
+            channel_id=channel_id,
+            bot_id=bot_id,
+            text="I've notified your landlord. They should respond within 24 hours."
+        )
+
+        return result
+
+    def _handle_view_bids(self, channel_id, user_id, persona, params):
+        """Handle view contractor bids action"""
+        incident_id = params[0] if params else "INC-unknown"
+        job_id = f"JOB-{int(datetime.now().timestamp())}"
+        bot_id = self.get_bot_id(persona)
+
+        # Generate contractor bids
+        bids = generate_contractor_bids("plumbing")
+
+        # Enhance bids with additional data
+        enhanced_bids = []
+        for idx, bid in enumerate(bids):
+            enhanced_bids.append({
+                **bid,
+                "rating": 4.8 - (idx * 0.2),
+                "distance": f"{2 + idx} miles"
+            })
+
+        # Send bids card
+        bids_card = CardBuilder.bids_card(
+            incident_id=incident_id,
+            job_id=job_id,
+            bids=enhanced_bids,
+            recommended_bid_index=0
+        )
+
+        return send_card_message(
+            self.client,
+            channel_id,
+            bot_id,
+            bids_card,
+            "💼 Here are the qualified contractors in your area:"
+        )
+
+    def _handle_approve_contractor(self, channel_id, user_id, persona, params):
+        """Handle approve contractor action"""
+        if len(params) < 3:
+            return None
+
+        job_id = params[0]
+        contractor_name = params[1]
+        cost = float(params[2]) if params[2] else 0
+        incident_id = params[3] if len(params) > 3 else "INC-unknown"
+
+        bot_id = self.get_bot_id(persona)
+
+        # Send approval card
+        approval_card = CardBuilder.approval_card(
+            incident_id=incident_id,
+            job_id=job_id,
+            contractor_name=contractor_name,
+            cost=cost,
+            scheduled_date="Tomorrow, 9:00 AM",
+            status="approved"
+        )
+
+        result = send_card_message(
+            self.client,
+            channel_id,
+            bot_id,
+            approval_card,
+            f"✅ {contractor_name} has been hired for this job!"
+        )
+
+        # Send follow-up message
+        self.send_message(
+            channel_id=channel_id,
+            bot_id=bot_id,
+            text=f"The contractor will arrive tomorrow at 9:00 AM. You'll receive a notification when they're on their way."
+        )
+
+        return result
+
+    def _handle_approve_job(self, channel_id, user_id, persona, params):
+        """Handle approve job action (landlord approval)"""
+        job_id = params[0] if params else "JOB-unknown"
+        bot_id = self.get_bot_id(persona)
+
+        self.send_message(
+            channel_id=channel_id,
+            bot_id=bot_id,
+            text="✅ Job approved! Now let's find qualified contractors."
+        )
+
+        # Automatically show bids after approval
+        return self._handle_view_bids(channel_id, user_id, persona, [])
+
+    def _handle_dismiss(self, channel_id, user_id, persona, params):
+        """Handle dismiss incident action"""
+        bot_id = self.get_bot_id(persona)
+
+        self.send_message(
+            channel_id=channel_id,
+            bot_id=bot_id,
+            text="Okay, I've dismissed this incident. Let me know if you need help with anything else!"
+        )
+
+        return {"status": "dismissed"}
+
+    def detect_incident_in_message(self, message_text: str) -> Optional[Dict[str, Any]]:
+        """
+        Analyze message to detect if it describes an incident
+        Returns incident data if detected, None otherwise
+        """
+        # Keywords that indicate potential incidents
+        incident_keywords = [
+            "leak", "broken", "damage", "not working", "broken", "crack",
+            "flooding", "water", "electric", "smell", "noise", "stuck"
+        ]
+
+        lower_text = message_text.lower()
+
+        # Check if message contains incident keywords
+        if any(keyword in lower_text for keyword in incident_keywords):
+            # Classify the issue
+            category, severity, urgency = classify_issue(message_text)
+
+            return {
+                "detected": True,
+                "description": message_text,
+                "category": category,
+                "severity": severity,
+                "urgency": urgency,
+                "title": message_text[:50] + "..." if len(message_text) > 50 else message_text
+            }
+
+        return None
+
+    def send_incident_card(
+        self,
+        channel_id: str,
+        persona: str,
+        incident_data: Dict[str, Any],
+        user_name: Optional[str] = None
+    ) -> Optional[Dict]:
+        """Send an incident detection card"""
+        incident_id = f"INC-{int(datetime.now().timestamp())}"
+        bot_id = self.get_bot_id(persona)
+
+        card = CardBuilder.incident_card(
+            incident_id=incident_id,
+            title=incident_data.get("title", "Maintenance Issue"),
+            description=incident_data.get("description", ""),
+            severity=incident_data.get("severity", "medium"),
+            tenant_name=user_name,
+            status="detected"
+        )
+
+        return send_card_message(
+            self.client,
+            channel_id,
+            bot_id,
+            card,
+            "🔍 I detected a potential maintenance issue. Would you like me to help with this?"
+        )
 
 
 # Singleton instance
