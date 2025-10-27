@@ -11,8 +11,10 @@ import {
   Thread,
   Window,
   ChannelList,
+  Message,
 } from "stream-chat-react";
 import "stream-chat-react/dist/css/v2/index.css";
+import { CustomMessageUI } from "./ai/CustomMessageUI";
 
 type Props = {
   persona: string;
@@ -251,6 +253,20 @@ export default function StreamChatPane({ persona }: Props) {
     } catch (err) {
       console.error("Failed to trigger discovery", err);
       setError(err instanceof Error ? err.message : "Failed to trigger discovery");
+    }
+  }, [channel]);
+
+  const handleActionClick = useCallback(async (actionValue: string) => {
+    if (!channel) return;
+    try {
+      // Send action message to trigger backend workflow
+      await channel.sendMessage({
+        text: `@agent ${actionValue}`,
+        silent: true  // Don't notify other users
+      });
+    } catch (err) {
+      console.error("Failed to handle action", err);
+      setError(err instanceof Error ? err.message : "Failed to process action");
     }
   }, [channel]);
 
