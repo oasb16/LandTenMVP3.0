@@ -124,7 +124,7 @@ class PropertyAIBot:
 
             message_data = {
                 "text": text,
-                "type": "ai-message"
+                "type": "regular"
             }
 
             if attachments:
