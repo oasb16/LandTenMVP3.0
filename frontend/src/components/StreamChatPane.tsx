@@ -11,7 +11,7 @@ import {
   Thread,
   Window,
   ChannelList,
-  Message,
+  MessageSimple,
 } from "stream-chat-react";
 import "stream-chat-react/dist/css/v2/index.css";
 import { CustomMessageUI } from "./ai/CustomMessageUI";
@@ -257,18 +257,25 @@ export default function StreamChatPane({ persona }: Props) {
   }, [channel]);
 
   const handleActionClick = useCallback(async (actionValue: string) => {
-    if (!channel) return;
+    if (!channel || !client) return;
+
     try {
       // Send action message to trigger backend workflow
+      // Use the actual user ID from the client
+      const userId = client.userID;
+
       await channel.sendMessage({
-        text: `@agent ${actionValue}`,
-        silent: true  // Don't notify other users
+        text: actionValue, // Already includes "action:" prefix from card
+        user_id: userId,
+        silent: false  // Allow notifications for workflow tracking
       });
+
+      console.log('[StreamChatPane] Action sent:', actionValue);
     } catch (err) {
       console.error("Failed to handle action", err);
-      setError(err instanceof Error ? err.message : "Failed to process action");
+      // Don't show error to user - workflow will continue
     }
-  }, [channel]);
+  }, [channel, client]);
 
   if (error) {
     return <div className="text-sm text-emerald-300">{error}</div>;
@@ -355,13 +362,23 @@ export default function StreamChatPane({ persona }: Props) {
               />
             </div>
           </div>
-
           {/* Chat Window */}
           <div className="stream-chat-main">
             <Channel channel={channel} doSendMessageRequest={handleSendMessage}>
               <Window>
                 <ChannelHeader live />
-                <MessageList disableDateSeparator />
+                <MessageList
+                  disableDateSeparator
+                  Message={(messageProps) => (
+                    <MessageSimple
+                      {...messageProps}
+                      messageActions={['react', 'reply']}
+                      MessageText={(textProps) => (
+                        <CustomMessageUI {...textProps} onActionClick={handleActionClick} />
+                      )}
+                    />
+                  )}
+                />
                 <MessageInput focus />
               </Window>
               <Thread />
