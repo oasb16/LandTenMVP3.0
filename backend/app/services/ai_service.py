@@ -1,4 +1,4 @@
-import os
+import os,json
 from typing import Optional
 
 try:  # pragma: no cover - optional dependency
@@ -21,35 +21,88 @@ def _get_openai_client() -> Optional["OpenAI"]:
     return _openai_client
 
 
-def get_ai_response(message: str, persona: Optional[str] = None, context: Optional[str] = None) -> str:
-    """Return an agent response using OpenAI when configured, else lightweight fallback."""
+def get_ai_response(message: str,
+                    persona: Optional[str] = None,
+                    context: Optional[str] = None,
+                    n_refine: int = 3) -> str:
+    """
+    TRM-style recursive reasoning loop for a stateless OpenAI API.
+    Each loop refines the previous reasoning (z) and answer (y).
+    """
 
     system_prompt = os.getenv(
         "AGENT_SYSTEM_PROMPT",
-        "You are LandTen's helpful assistant. Provide concise, actionable guidance for property management scenarios.",
+        "You are LandTen's property-management assistant. "
+        "Infer issues, incidents, and actions intelligently."
     )
     if persona:
-        system_prompt += f" You are currently supporting the {persona} persona."
+        system_prompt += f" You are assisting a {persona}."
     if context:
         system_prompt += f" Context: {context}."
 
     client = _get_openai_client()
-    if client:
-        model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-        try:
-            completion = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": message},
-                ],
-                temperature=float(os.getenv("OPENAI_TEMPERATURE", "0.2")),
-            )
-            content = completion.choices[0].message.content if completion.choices else None
-            if content:
-                return content.strip()
-        except Exception as exc:  # pragma: no cover - best effort logging
-            print(f"[agent] OpenAI error: {exc}")
+    if not client:
+        return f"(Agent offline) {message[::-1]}"
 
-    # Fallback when OpenAI not configured or errors out
-    return f"(Agent offline) {message[::-1]}"
+    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    temperature = float(os.getenv("OPENAI_TEMPERATURE", "0.3"))
+
+    reasoning, answer = "", ""
+    for step in range(n_refine):
+        prompt = f"""
+Step {step+1}/{n_refine}.
+Previous reasoning: {reasoning or "None"}.
+Previous answer: {answer or "None"}.
+
+Analyze the chat below. Decide whether it relates to property
+management or maintenance, and if it contains incident-worthy
+information. If so, summarize and propose next actions.
+
+Chat:
+{message}
+"""
+    for step in range(n_refine):
+        completion = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt + "\n\nRespond strictly in JSON format."},
+            ],
+            temperature=temperature,
+            response_format={"type": "json_object"},
+        )
+
+        raw_content = completion.choices[0].message.content
+        print(f"[agent-debug] step={step+1} raw_content={raw_content}")
+
+        try:
+            data = json.loads(raw_content)
+            reasoning = data.get("reasoning", reasoning)
+
+            # 🧠 Select best field, supporting lists/dicts
+            answer = (
+                data.get("answer")
+                or data.get("reply")
+                or data.get("summary")
+                or data.get("next_actions")
+                or data.get("response")
+                or data
+                or answer
+            )
+
+            # 🔄 Normalize lists/dicts to string for display
+            if isinstance(answer, (list, dict)):
+                answer = json.dumps(answer, indent=2)
+
+        except Exception as e:
+            print(f"[agent-debug] JSON parse error: {e}")
+            reasoning += "\n" + str(raw_content)
+            answer = str(raw_content).strip()
+
+    # ✅ Safe text fallback
+    if not isinstance(answer, str):
+        answer = json.dumps(answer, indent=2)
+    if not answer.strip():
+        answer = "(Agent found no actionable reply.)"
+
+    return answer.strip()

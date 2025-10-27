@@ -484,34 +484,35 @@ def post_agent_reply(req: AgentMessageRequest, token: str = Depends(verify_fireb
     if not agent_id:
         raise HTTPException(status_code=500, detail="Agent user not configured")
 
-    prompt = req.prompt.strip()
-    if not prompt:
+    if not req.prompt.strip():
         raise HTTPException(status_code=400, detail="prompt cannot be empty")
 
-    # Basic context assembly for AI
     context_lines = []
     if req.context:
         context_lines.append(req.context)
     if req.requesting_user:
         context_lines.append(f"Request from {req.requesting_user}")
+    conversation = "\n".join(context_lines) if context_lines else None
 
-    context_text = "\n".join(context_lines) if context_lines else None
-    ai_response = get_ai_response(prompt, persona=req.persona, context=context_text)
+    smart_reply = get_ai_response(
+        req.prompt,
+        persona=req.persona,
+        context=conversation,
+        n_refine=3
+    )
 
     channel = client.channel("messaging", req.channel_id)
     try:
         channel.send_message(
-            {
-                "text": ai_response,
-                "type": "regular",
-            },
+            {"text": smart_reply or "(no reply generated)", "type": "regular"},
             user_id=agent_id,
         )
     except (KeyError, StreamAPIException) as exc:
         print(f"[stream] failed to post agent reply: {exc}")
         raise HTTPException(status_code=500, detail=f"Stream error posting agent reply: {exc}")
 
-    return {"status": "sent", "agent_id": agent_id, "message": ai_response}
+    return {"status": "sent", "agent_id": agent_id, "message": smart_reply}
+
 @router.post("/chat/stream/webhook")
 async def stream_webhook(request: Request):
     if not WEBHOOK_SECRET:
