@@ -58,6 +58,8 @@ export function MessageCards({ message, onActionClick }: MessageCardsProps) {
             return <ApprovalCard key={index} data={attachment} onActionClick={handleActionClick} loadingAction={loadingAction} />;
           case 'completion':
             return <CompletionCard key={index} data={attachment} onActionClick={handleActionClick} loadingAction={loadingAction} />;
+          case 'actions':
+            return <BaseCard key={index} data={attachment} onActionClick={handleActionClick} loadingAction={loadingAction} />;
           default:
             return null;
         }

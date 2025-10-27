@@ -25,7 +25,7 @@ export const CustomMessageUI = memo(function CustomMessageUI({
 
   const attachments = message.attachments || [];
   const cardAttachments = attachments.filter((att: any) =>
-    ["incident", "discovery", "job", "bids", "approval", "completion"].includes(att.type)
+    ["incident", "discovery", "job", "bids", "approval", "completion","actions"].includes(att.type)
   );
 
   // Safely check if message and user exist
@@ -35,7 +35,7 @@ export const CustomMessageUI = memo(function CustomMessageUI({
 
   // Check if message has card attachments
   const hasCardAttachments = message.attachments?.some((att: any) =>
-    ['incident', 'discovery', 'job', 'bids', 'approval', 'completion'].includes(att.type)
+    ['incident', 'discovery', 'job', 'bids', 'approval', 'completion','actions'].includes(att.type)
   );
 
   // Check if this is an AI bot message
