@@ -1,0 +1,378 @@
+/* Interactive Message Cards for LandTen Chat */
+
+.message-cards-container {
+  margin: 0.5rem 0;
+}
+
+/* Base Card Styles */
+.card {
+  background: #ffffff;
+  border-radius: 12px;
+  border-left: 4px solid #6b7280;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+  margin: 0.5rem 0;
+  max-width: 100%;
+  transition: box-shadow 0.2s ease;
+}
+
+.card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* Card Header */
+.card-header {
+  padding: 1rem 1rem 0.5rem 1rem;
+}
+
+.card-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #111827;
+  margin: 0;
+}
+
+/* Card Image */
+.card-image {
+  width: 100%;
+  max-height: 200px;
+  overflow: hidden;
+}
+
+.card-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Card Body */
+.card-body {
+  padding: 0.75rem 1rem;
+}
+
+.card-text {
+  color: #4b5563;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  margin: 0 0 0.75rem 0;
+}
+
+/* Card Fields */
+.card-fields {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.card-field {
+  padding: 0.5rem;
+  background: #f9fafb;
+  border-radius: 6px;
+}
+
+.card-field-full {
+  grid-column: 1 / -1;
+}
+
+.card-field-short {
+  /* Default: takes 1 column */
+}
+
+.field-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+  margin-bottom: 0.25rem;
+}
+
+.field-value {
+  font-size: 0.875rem;
+  color: #111827;
+  font-weight: 500;
+  white-space: pre-line;
+}
+
+/* Discovery Progress */
+.discovery-progress {
+  margin-bottom: 1rem;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 8px;
+  background: #e5e7eb;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 0.5rem;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #3b82f6, #60a5fa);
+  transition: width 0.3s ease;
+  border-radius: 4px;
+}
+
+.progress-text {
+  font-size: 0.75rem;
+  color: #6b7280;
+  font-weight: 600;
+}
+
+/* Bids List */
+.bids-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.bid-item {
+  padding: 0.75rem;
+  background: #f9fafb;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+}
+
+.bid-contractor {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #111827;
+  margin-bottom: 0.25rem;
+}
+
+.bid-details {
+  font-size: 0.8125rem;
+  color: #6b7280;
+  white-space: pre-line;
+}
+
+/* Card Actions */
+.card-actions {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem 1rem 1rem;
+  flex-wrap: wrap;
+}
+
+.card-actions-vertical {
+  flex-direction: column;
+}
+
+.card-button {
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex: 1;
+  min-width: fit-content;
+}
+
+.card-button-full {
+  width: 100%;
+  flex: none;
+}
+
+.card-button-primary {
+  background: #3b82f6;
+  color: white;
+}
+
+.card-button-primary:hover {
+  background: #2563eb;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
+}
+
+.card-button-default {
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #d1d5db;
+}
+
+.card-button-default:hover {
+  background: #e5e7eb;
+  border-color: #9ca3af;
+}
+
+.card-button-danger {
+  background: #ef4444;
+  color: white;
+}
+
+.card-button-danger:hover {
+  background: #dc2626;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(239, 68, 68, 0.3);
+}
+
+.card-button:active {
+  transform: translateY(0);
+}
+
+.card-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Card Footer */
+.card-footer {
+  padding: 0.75rem 1rem;
+  background: #f9fafb;
+  border-top: 1px solid #e5e7eb;
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+/* Card Type Specific Styles */
+.incident-card {
+  border-left-width: 4px;
+}
+
+.discovery-card {
+  border-left-color: #3b82f6;
+}
+
+.job-card {
+  border-left-color: #8b5cf6;
+}
+
+.bids-card {
+  border-left-color: #059669;
+}
+
+.approval-card {
+  border-left-color: #f59e0b;
+}
+
+.completion-card {
+  border-left-color: #10b981;
+}
+
+/* Dark Mode Adjustments (for Stream Chat dark theme) */
+.str-chat__theme-dark .card {
+  background: #1f2937;
+  border-color: #374151;
+}
+
+.str-chat__theme-dark .card-title {
+  color: #f9fafb;
+}
+
+.str-chat__theme-dark .card-text {
+  color: #d1d5db;
+}
+
+.str-chat__theme-dark .card-field {
+  background: #111827;
+}
+
+.str-chat__theme-dark .field-title {
+  color: #9ca3af;
+}
+
+.str-chat__theme-dark .field-value {
+  color: #f3f4f6;
+}
+
+.str-chat__theme-dark .bid-item {
+  background: #111827;
+  border-color: #374151;
+}
+
+.str-chat__theme-dark .bid-contractor {
+  color: #f9fafb;
+}
+
+.str-chat__theme-dark .bid-details {
+  color: #9ca3af;
+}
+
+.str-chat__theme-dark .card-footer {
+  background: #111827;
+  border-top-color: #374151;
+  color: #9ca3af;
+}
+
+.str-chat__theme-dark .card-button-default {
+  background: #374151;
+  color: #f3f4f6;
+  border-color: #4b5563;
+}
+
+.str-chat__theme-dark .card-button-default:hover {
+  background: #4b5563;
+  border-color: #6b7280;
+}
+
+/* Mobile Responsive */
+@media (max-width: 640px) {
+  .card-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .card-field-short {
+    grid-column: 1;
+  }
+
+  .card-actions {
+    flex-direction: column;
+  }
+
+  .card-button {
+    width: 100%;
+  }
+}
+
+/* Animation for card appearance */
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.card {
+  animation: slideIn 0.3s ease-out;
+}
+
+/* Status badges (can be used in field values) */
+.status-badge {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+}
+
+.status-badge-pending {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.status-badge-approved {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.status-badge-completed {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.status-badge-rejected {
+  background: #fee2e2;
+  color: #991b1b;
+}

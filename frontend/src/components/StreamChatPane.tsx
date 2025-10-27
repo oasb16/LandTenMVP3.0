@@ -11,8 +11,10 @@ import {
   Thread,
   Window,
   ChannelList,
+  Message,
 } from "stream-chat-react";
 import "stream-chat-react/dist/css/v2/index.css";
+import { CustomMessageUI } from "./ai/CustomMessageUI";
 
 type Props = {
   persona: string;
@@ -254,6 +256,20 @@ export default function StreamChatPane({ persona }: Props) {
     }
   }, [channel]);
 
+  const handleActionClick = useCallback(async (actionValue: string) => {
+    if (!channel) return;
+    try {
+      // Send action message to trigger backend workflow
+      await channel.sendMessage({
+        text: `@agent ${actionValue}`,
+        silent: true  // Don't notify other users
+      });
+    } catch (err) {
+      console.error("Failed to handle action", err);
+      setError(err instanceof Error ? err.message : "Failed to process action");
+    }
+  }, [channel]);
+
   if (error) {
     return <div className="text-sm text-emerald-300">{error}</div>;
   }
@@ -332,7 +348,18 @@ export default function StreamChatPane({ persona }: Props) {
           <Channel channel={channel} doSendMessageRequest={handleSendMessage}>
             <Window>
               <ChannelHeader live />
-              <MessageList disableDateSeparator />
+              <MessageList
+                disableDateSeparator
+                Message={(messageProps) => (
+                  <Message
+                    {...messageProps}
+                    messageActions={['react', 'reply']}
+                    MessageText={(textProps) => (
+                      <CustomMessageUI {...textProps} onActionClick={handleActionClick} />
+                    )}
+                  />
+                )}
+              />
               <MessageInput focus />
             </Window>
             <Thread />
