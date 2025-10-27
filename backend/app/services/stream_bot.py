@@ -22,6 +22,13 @@ from app.services.incident_flow import (
     create_incident_record,
     generate_contractor_bids
 )
+from app.services.dynamo_service import (
+    IncidentDB,
+    JobDB,
+    BidDB,
+    UserDB,
+    PropertyDB
+)
 import json
 import re
 
@@ -452,15 +459,54 @@ Current conversation context: {context if context else 'New conversation'}
         return {"status": "prompted_for_photos"}
 
     def _handle_create_work_order(self, channel_id, user_id, persona, params):
-        """Handle create work order action"""
+        """Handle create work order action - WITH DYNAMODB PERSISTENCE"""
         incident_id = params[0] if params else f"INC-{int(datetime.now().timestamp())}"
         job_id = f"JOB-{int(datetime.now().timestamp())}"
         bot_id = self.get_bot_id(persona)
 
-        # Simulate incident analysis
-        category = "plumbing"
-        estimated_cost = "$150-200"
-        urgency = "routine"
+        print(f"[PropertyAIBot] Creating work order - incident: {incident_id}, job: {job_id}")
+
+        # Get incident data if available
+        incident_data = IncidentDB.get_incident(incident_id) if incident_id else None
+
+        # Determine category, cost, urgency from incident or use defaults
+        category = incident_data.get("category", "plumbing") if incident_data else "plumbing"
+        severity = incident_data.get("severity", "medium") if incident_data else "medium"
+        urgency = incident_data.get("urgency", "routine") if incident_data else "routine"
+
+        # Map severity to estimated cost
+        cost_map = {
+            "low": "$100-150",
+            "medium": "$150-200",
+            "high": "$200-350",
+            "emergency": "$350-500"
+        }
+        estimated_cost = cost_map.get(severity, "$150-200")
+
+        # Persist job to DynamoDB
+        try:
+            job_record = JobDB.create_job({
+                "job_id": job_id,
+                "incident_id": incident_id,
+                "property_id": incident_data.get("property_id", "unknown") if incident_data else "unknown",
+                "landlord_id": user_id,  # Assuming user creating job is landlord
+                "title": incident_data.get("title", "Maintenance Repair") if incident_data else "Plumbing Repair",
+                "category": category,
+                "estimated_cost": estimated_cost,
+                "urgency": urgency,
+                "status": "created",
+                "channel_id": channel_id
+            })
+            print(f"[PropertyAIBot] Job persisted to DynamoDB: {job_id}")
+
+            # Update incident status to work_order
+            if incident_id:
+                IncidentDB.update_incident_status(incident_id, "work_order", job_id=job_id)
+                print(f"[PropertyAIBot] Updated incident {incident_id} status to work_order")
+
+        except Exception as e:
+            print(f"[PropertyAIBot] ERROR persisting job to DynamoDB: {e}")
+            # Continue anyway - don't block UI
 
         # Send confirmation message
         self.send_message(
@@ -473,7 +519,7 @@ Current conversation context: {context if context else 'New conversation'}
         work_order_card = CardBuilder.work_order_card(
             incident_id=incident_id,
             job_id=job_id,
-            title="Plumbing Repair",
+            title=incident_data.get("title", "Maintenance Repair") if incident_data else "Plumbing Repair",
             category=category,
             estimated_cost=estimated_cost,
             urgency=urgency,
@@ -498,22 +544,51 @@ Current conversation context: {context if context else 'New conversation'}
         return result
 
     def _handle_view_bids(self, channel_id, user_id, persona, params):
-        """Handle view contractor bids action"""
+        """Handle view contractor bids action - WITH DYNAMODB PERSISTENCE"""
         incident_id = params[0] if params else "INC-unknown"
-        job_id = f"JOB-{int(datetime.now().timestamp())}"
+        job_id = params[1] if len(params) > 1 else f"JOB-{int(datetime.now().timestamp())}"
         bot_id = self.get_bot_id(persona)
+
+        print(f"[PropertyAIBot] Viewing bids for job: {job_id}")
 
         # Generate contractor bids
         bids = generate_contractor_bids("plumbing")
 
-        # Enhance bids with additional data
+        # Enhance bids with additional data and persist each to DynamoDB
         enhanced_bids = []
         for idx, bid in enumerate(bids):
-            enhanced_bids.append({
+            bid_id = f"BID-{int(datetime.now().timestamp())}-{idx}"
+            contractor_name = bid.get("name", f"Contractor {idx+1}")
+            quote = bid.get("quote", 150 + (idx * 25))
+            eta = bid.get("eta", "Tomorrow")
+            rating = 4.8 - (idx * 0.2)
+            distance = f"{2 + idx} miles"
+
+            enhanced_bid = {
                 **bid,
-                "rating": 4.8 - (idx * 0.2),
-                "distance": f"{2 + idx} miles"
-            })
+                "bid_id": bid_id,
+                "rating": rating,
+                "distance": distance
+            }
+            enhanced_bids.append(enhanced_bid)
+
+            # Persist bid to DynamoDB
+            try:
+                BidDB.create_bid({
+                    "bid_id": bid_id,
+                    "job_id": job_id,
+                    "contractor_id": f"contractor-{idx}",
+                    "contractor_name": contractor_name,
+                    "quote": quote,
+                    "eta": eta,
+                    "rating": rating,
+                    "distance": distance,
+                    "status": "pending"
+                })
+                print(f"[PropertyAIBot] Bid persisted to DynamoDB: {bid_id} from {contractor_name}")
+            except Exception as e:
+                print(f"[PropertyAIBot] ERROR persisting bid to DynamoDB: {e}")
+                # Continue anyway - don't block UI
 
         # Send bids card
         bids_card = CardBuilder.bids_card(
@@ -532,7 +607,7 @@ Current conversation context: {context if context else 'New conversation'}
         )
 
     def _handle_approve_contractor(self, channel_id, user_id, persona, params):
-        """Handle approve contractor action"""
+        """Handle approve contractor action - WITH DYNAMODB PERSISTENCE"""
         if len(params) < 3:
             return None
 
@@ -542,6 +617,28 @@ Current conversation context: {context if context else 'New conversation'}
         incident_id = params[3] if len(params) > 3 else "INC-unknown"
 
         bot_id = self.get_bot_id(persona)
+
+        print(f"[PropertyAIBot] Approving contractor {contractor_name} for job: {job_id}")
+
+        # Update job in DynamoDB with contractor assignment
+        try:
+            JobDB.update_job(
+                job_id=job_id,
+                contractor_id=contractor_name,
+                final_cost=f"${cost}",
+                status="approved",
+                scheduled_date="Tomorrow, 9:00 AM"
+            )
+            print(f"[PropertyAIBot] Job {job_id} updated with contractor {contractor_name}")
+
+            # Update incident status to "scheduled" if we have incident_id
+            if incident_id and incident_id != "INC-unknown":
+                IncidentDB.update_incident_status(incident_id, "scheduled")
+                print(f"[PropertyAIBot] Updated incident {incident_id} status to scheduled")
+
+        except Exception as e:
+            print(f"[PropertyAIBot] ERROR updating job in DynamoDB: {e}")
+            # Continue anyway - don't block UI
 
         # Send approval card
         approval_card = CardBuilder.approval_card(
@@ -632,9 +729,31 @@ Current conversation context: {context if context else 'New conversation'}
         incident_data: Dict[str, Any],
         user_name: Optional[str] = None
     ) -> Optional[Dict]:
-        """Send an incident detection card"""
+        """Send an incident detection card - WITH DYNAMODB PERSISTENCE"""
         incident_id = f"INC-{int(datetime.now().timestamp())}"
         bot_id = self.get_bot_id(persona)
+
+        print(f"[PropertyAIBot] Creating incident: {incident_id}")
+
+        # Persist incident to DynamoDB
+        try:
+            incident_record = IncidentDB.create_incident({
+                "incident_id": incident_id,
+                "tenant_id": user_name or "unknown",
+                "property_id": "unknown",  # TODO: Get from user context/session
+                "title": incident_data.get("title", "Maintenance Issue"),
+                "description": incident_data.get("description", ""),
+                "category": incident_data.get("category", "general"),
+                "severity": incident_data.get("severity", "medium"),
+                "urgency": incident_data.get("urgency", "routine"),
+                "status": "detected",
+                "channel_id": channel_id,
+                "media_urls": []
+            })
+            print(f"[PropertyAIBot] Incident persisted to DynamoDB: {incident_id}")
+        except Exception as e:
+            print(f"[PropertyAIBot] ERROR persisting incident to DynamoDB: {e}")
+            # Continue anyway - don't block UI
 
         card = CardBuilder.incident_card(
             incident_id=incident_id,
