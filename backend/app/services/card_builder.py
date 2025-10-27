@@ -91,7 +91,7 @@ class CardBuilder:
 
         # Build card structure
         card = {
-            "type": "incident",
+            "type": "actions",
             "title": title,
             "title_link": f"#incident-{incident_id}",
             "text": description,
@@ -575,7 +575,7 @@ def send_card_message(
         message = {
             "text": message_text or card_data.get("text", ""),
             "attachments": [card_data],
-            "type": "card"
+            "type": "regular"
         }
 
         response = channel.send_message(message, bot_id)

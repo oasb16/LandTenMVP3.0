@@ -86,6 +86,9 @@ class IncidentDB:
         now = datetime.now(timezone.utc).isoformat()
 
         item = {
+            # Always include DynamoDB's expected partition key
+            "user_id": incident_data.get("user_id") or incident_data.get("tenant_id") or "unknown",
+            # Optional sort key if your schema requires it
             "incident_id": incident_data.get("incident_id"),
             "tenant_id": incident_data.get("tenant_id", "unknown"),
             "property_id": incident_data.get("property_id", "unknown"),
