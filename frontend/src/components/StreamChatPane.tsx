@@ -14,7 +14,6 @@ import {
   MessageSimple,
 } from "stream-chat-react";
 import "stream-chat-react/dist/css/v2/index.css";
-import { MessageSimple } from "stream-chat-react";
 import { CustomMessageUI } from "./ai/CustomMessageUI";
 
 type Props = {
