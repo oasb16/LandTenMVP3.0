@@ -208,7 +208,7 @@ async def handle_reaction(payload: Dict[str, Any]) -> Dict[str, str]:
 @router.post("/ai/init-channel")
 async def initialize_ai_channel(request: Request):
     """
-    Initialize a new channel with AI bot
+    Initialize or repair an AI channel and ensure the persona bot is a member.
 
     Request body:
     {
@@ -225,45 +225,90 @@ async def initialize_ai_channel(request: Request):
         print(f"[ai-webhook]   - Channel ID: {channel_id}")
         print(f"[ai-webhook]   - Persona: {persona}")
 
+        # --- Validation ---
         if not channel_id:
-            print("[ai-webhook] ERROR: Missing channel_id in request")
             raise HTTPException(
                 status_code=400,
                 detail={"error": "channel_id is required", "hint": "Provide channel_id in request body"}
             )
 
         if persona not in ["tenant", "landlord", "contractor"]:
-            print(f"[ai-webhook] ERROR: Invalid persona '{persona}'")
             raise HTTPException(
                 status_code=400,
-                detail={
-                    "error": f"Invalid persona: {persona}",
-                    "hint": "Must be one of: tenant, landlord, contractor"
-                }
+                detail={"error": f"Invalid persona: {persona}",
+                        "hint": "Must be one of: tenant, landlord, contractor"}
             )
 
+        # --- Get bot + client ---
         bot = get_bot()
-        success = bot.add_bot_to_channel(channel_id, persona)
+        client = bot.client
+        bot_id = bot.get_bot_id(persona)
 
-        if success:
-            bot_id = bot.get_bot_id(persona)
-            print(f"[ai-webhook] SUCCESS: Added bot {bot_id} to channel {channel_id}")
-            return {
-                "status": "success",
-                "channel_id": channel_id,
-                "bot_id": bot_id,
+        print(f"[ai-webhook] Ensuring channel '{channel_id}' exists...")
+
+        # --- Ensure channel exists or create it ---
+        try:
+            channel = client.channel("messaging", channel_id)
+            channel.query()  # check existence
+            print(f"[ai-webhook] Channel '{channel_id}' already exists.")
+        except Exception:
+            print(f"[ai-webhook] Channel '{channel_id}' not found, creating...")
+            channel = client.channel("messaging", channel_id, {
+                "name": f"{persona.capitalize()} Channel",
                 "persona": persona,
-                "message": f"AI bot initialized for {persona} persona"
-            }
-        else:
-            print(f"[ai-webhook] ERROR: Failed to add bot to channel {channel_id}")
-            raise HTTPException(
-                status_code=500,
-                detail={
-                    "error": "Failed to initialize AI channel",
-                    "hint": "Check if channel exists and bot has permissions"
-                }
-            )
+                "description": f"AI-managed {persona} channel",
+            })
+            # Create the channel using the bot as creator
+            channel.create(user_id=bot_id)
+            print(f"[ai-webhook] Channel '{channel_id}' created by {bot_id}")
+
+        # --- Safely update channel metadata ---
+        try:
+            channel.update({
+                "persona": persona,
+                "description": f"AI-managed {persona} chat channel",
+                "last_initialized_at": __import__("datetime").datetime.utcnow().isoformat(),
+            })
+            print(f"[ai-webhook] Updated metadata for '{channel_id}'")
+        except TypeError:
+            # Older SDK fallback
+            channel.update({"data": {
+                "persona": persona,
+                "description": f"AI-managed {persona} chat channel",
+                "last_initialized_at": __import__("datetime").datetime.utcnow().isoformat(),
+            }})
+            print(f"[ai-webhook] Fallback metadata update for '{channel_id}'")
+        except Exception as e:
+            print(f"[ai-webhook] Warning: could not update channel metadata ({e})")
+
+        # --- Ensure bot membership ---
+        try:
+            state = channel.query(state=True)
+            members = [m.get("user_id") for m in state.get("members", [])]
+            if bot_id in members:
+                print(f"[ai-webhook] Bot '{bot_id}' already a member of '{channel_id}'")
+            else:
+                channel.add_members(
+                    [bot_id],
+                    message={
+                        "text": f"🤖 {bot_id} joined as PropertyAI assistant",
+                        "user": {"id": bot_id},  # ✅ required for server-side auth
+                    },
+                )
+                print(f"[ai-webhook] Added bot '{bot_id}' to channel '{channel_id}'")
+        except Exception as e:
+            print(f"[ai-webhook] Warning: could not add bot ({e})")
+
+        channel.send_message({"text": f"{bot_id} joined the channel"}, user_id=bot_id)
+
+        # --- Return success ---
+        return {
+            "status": "success",
+            "channel_id": channel_id,
+            "bot_id": bot_id,
+            "persona": persona,
+            "message": f"AI bot ensured and ready for {persona} persona"
+        }
 
     except HTTPException:
         raise
@@ -273,12 +318,8 @@ async def initialize_ai_channel(request: Request):
         traceback.print_exc()
         raise HTTPException(
             status_code=500,
-            detail={
-                "error": str(e),
-                "hint": "Check backend logs for stack trace"
-            }
+            detail={"error": str(e), "hint": "Check backend logs for stack trace"}
         )
-
 
 @router.post("/ai/send-action")
 async def send_ai_action(request: Request):

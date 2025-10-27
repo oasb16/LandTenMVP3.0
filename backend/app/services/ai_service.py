@@ -61,12 +61,28 @@ information. If so, summarize and propose next actions.
 Chat:
 {message}
 """
+    def normalize_role(msg_type: str) -> str:
+        """
+        Normalize StreamChat message types to valid OpenAI chat roles.
+        """
+        if not msg_type:
+            return "user"
+        msg_type = msg_type.lower()
+        mapping = {
+            "regular": "user",
+            "agent": "assistant",
+            "ai-message": "assistant",
+            "card": "assistant",
+            "system": "system",
+        }
+        return mapping.get(msg_type, "user")
+    
     for step in range(n_refine):
         completion = client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt + "\n\nRespond strictly in JSON format."},
+                {"role": normalize_role("regular"), "content": prompt + "\n\nRespond strictly in JSON format."},
             ],
             temperature=temperature,
             response_format={"type": "json_object"},

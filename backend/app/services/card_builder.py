@@ -575,7 +575,7 @@ def send_card_message(
         message = {
             "text": message_text or card_data.get("text", ""),
             "attachments": [card_data],
-            "type": "system"
+            "type": "regular"
         }
 
         response = channel.send_message(message, bot_id)
