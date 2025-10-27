@@ -380,17 +380,18 @@ def create_stream_thread(req: StreamThreadCreate, token: str = Depends(verify_fi
 
     try:
         print("[stream] creating channel:", channel_id, "with members:", sanitized_members)
-        members_payload = [{"user_id": mid} for mid in sanitized_members]
-        members_payload = json.loads(members_payload)
+        # Convert list to dict (object)
+        members_payload = {mid: {} for mid in sanitized_members}
         print("[stream] members payload:", members_payload)
+
         channel.create(
             user_id=creator_sanitized,
             data={
-                "created_by": {creator_sanitized},
+                "created_by_id": AGENT_USER_ID,
                 "name": name or "Conversation",
                 "members_meta": member_meta,
                 **({"persona": req.persona} if req.persona else {}),
-                **req.extra_data
+                **req.extra_data,
             },
             members=members_payload,
         )
@@ -483,33 +484,35 @@ def post_agent_reply(req: AgentMessageRequest, token: str = Depends(verify_fireb
     if not agent_id:
         raise HTTPException(status_code=500, detail="Agent user not configured")
 
-    prompt = req.prompt.strip()
-    if not prompt:
+    if not req.prompt.strip():
         raise HTTPException(status_code=400, detail="prompt cannot be empty")
 
-    # Basic context assembly for AI
     context_lines = []
     if req.context:
         context_lines.append(req.context)
     if req.requesting_user:
         context_lines.append(f"Request from {req.requesting_user}")
+    conversation = "\n".join(context_lines) if context_lines else None
 
-    context_text = "\n".join(context_lines) if context_lines else None
-    ai_response = get_ai_response(prompt, persona=req.persona, context=context_text)
+    smart_reply = get_ai_response(
+        req.prompt,
+        persona=req.persona,
+        context=conversation,
+        n_refine=3
+    )
 
     channel = client.channel("messaging", req.channel_id)
     try:
         channel.send_message(
-            {
-                "text": ai_response,
-                "type": "agent",
-            },
+            {"text": smart_reply or "(no reply generated)", "type": "regular"},
             user_id=agent_id,
         )
     except (KeyError, StreamAPIException) as exc:
+        print(f"[stream] failed to post agent reply: {exc}")
         raise HTTPException(status_code=500, detail=f"Stream error posting agent reply: {exc}")
 
-    return {"status": "sent", "agent_id": agent_id, "message": ai_response}
+    return {"status": "sent", "agent_id": agent_id, "message": smart_reply}
+
 @router.post("/chat/stream/webhook")
 async def stream_webhook(request: Request):
     if not WEBHOOK_SECRET:
