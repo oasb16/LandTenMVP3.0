@@ -1,22 +1,32 @@
 "use client";
 
-import React, { useCallback } from 'react';
-import { MessageCards } from './MessageCards';
-import type { StreamMessage } from 'stream-chat';
-import type { MessageUIComponentProps } from 'stream-chat-react';
+import React, { useCallback, memo } from "react";
+import { MessageCards } from "./MessageCards";
+import type { StreamMessage } from "stream-chat";
+import type { MessageUIComponentProps } from "stream-chat-react";
 
 interface CustomMessageUIProps extends MessageUIComponentProps {
   onActionClick?: (actionValue: string) => void;
 }
 
-export function CustomMessageUI(props: CustomMessageUIProps) {
-  const { message, onActionClick } = props;
+export const CustomMessageUI = memo(function CustomMessageUI({
+  message,
+  onActionClick,
+}: CustomMessageUIProps) {
+  // Guard against undefined messages (important for SSR)
+  if (!message) return null;
 
-  const handleActionClick = useCallback((actionValue: string) => {
-    if (onActionClick) {
-      onActionClick(actionValue);
-    }
-  }, [onActionClick]);
+  const handleActionClick = useCallback(
+    (actionValue: string) => {
+      if (onActionClick) onActionClick(actionValue);
+    },
+    [onActionClick]
+  );
+
+  const attachments = message.attachments || [];
+  const cardAttachments = attachments.filter((att: any) =>
+    ["incident", "discovery", "job", "bids", "approval", "completion"].includes(att.type)
+  );
 
   // Safely check if message and user exist
   if (!message) {
@@ -246,4 +256,4 @@ export function CustomMessageUI(props: CustomMessageUIProps) {
       `}</style>
     </div>
   );
-}
+});

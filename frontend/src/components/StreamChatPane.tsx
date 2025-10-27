@@ -14,6 +14,7 @@ import {
   MessageSimple,
 } from "stream-chat-react";
 import "stream-chat-react/dist/css/v2/index.css";
+import { MessageSimple } from "stream-chat-react";
 import { CustomMessageUI } from "./ai/CustomMessageUI";
 
 type Props = {
@@ -220,7 +221,9 @@ export default function StreamChatPane({ persona }: Props) {
       if (!channel) return;
       const response = await channel.sendMessage(message);
       const text: string = message?.text ?? "";
-      if (text.toLowerCase().includes("@agent")) {
+      const triggers = ["@agent", "@landten-agent", "landten agent"];
+
+      if (triggers.some(t => text.toLowerCase().includes(t))) {        
         try {
           const history = channel.state.messages
             .slice(-10)
@@ -363,7 +366,7 @@ export default function StreamChatPane({ persona }: Props) {
             </div>
           </div>
           {/* Chat Window */}
-          <div className="stream-chat-main">
+          {/* <div className="stream-chat-main">
             <Channel channel={channel} doSendMessageRequest={handleSendMessage}>
               <Window>
                 <ChannelHeader live />
@@ -383,7 +386,27 @@ export default function StreamChatPane({ persona }: Props) {
               </Window>
               <Thread />
             </Channel>
-          </div>
+          </div> */}
+          <div className="stream-chat-main">
+          <Channel channel={channel} doSendMessageRequest={handleSendMessage}>
+            <Window>
+              <ChannelHeader live />
+              <MessageList
+                disableDateSeparator
+                Message={(props) => (
+                  <MessageSimple
+                    {...props}
+                    MessageText={(textProps) => (
+                      <CustomMessageUI {...textProps} onActionClick={handleActionClick} />
+                    )}
+                  />
+                )}
+              />
+              <MessageInput focus />
+            </Window>
+            <Thread />
+          </Channel>
+          </div> 
         </div>
       </Chat>
 
