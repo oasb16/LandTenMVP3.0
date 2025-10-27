@@ -476,6 +476,12 @@ def list_stream_threads(user_id: str, token: str = Depends(verify_firebase_token
 
 @router.post("/chat/stream/agent_reply")
 def post_agent_reply(req: AgentMessageRequest, token: str = Depends(verify_firebase_token)):
+    """
+    Agent reply endpoint that:
+    1. Generates AI response via get_ai_response()
+    2. Posts response to Stream Chat
+    3. Triggers PropertyAIBot incident detection pipeline
+    """
     if not req.channel_id:
         raise HTTPException(status_code=400, detail="channel_id required")
 
@@ -487,6 +493,9 @@ def post_agent_reply(req: AgentMessageRequest, token: str = Depends(verify_fireb
     if not req.prompt.strip():
         raise HTTPException(status_code=400, detail="prompt cannot be empty")
 
+    print(f"[agent_reply] Processing request for channel: {req.channel_id}")
+    print(f"[agent_reply] Prompt: {req.prompt[:100]}{'...' if len(req.prompt) > 100 else ''}")
+
     context_lines = []
     if req.context:
         context_lines.append(req.context)
@@ -494,6 +503,7 @@ def post_agent_reply(req: AgentMessageRequest, token: str = Depends(verify_fireb
         context_lines.append(f"Request from {req.requesting_user}")
     conversation = "\n".join(context_lines) if context_lines else None
 
+    # Generate AI response
     smart_reply = get_ai_response(
         req.prompt,
         persona=req.persona,
@@ -501,17 +511,64 @@ def post_agent_reply(req: AgentMessageRequest, token: str = Depends(verify_fireb
         n_refine=3
     )
 
+    # Post AI response to Stream Chat
     channel = client.channel("messaging", req.channel_id)
     try:
         channel.send_message(
             {"text": smart_reply or "(no reply generated)", "type": "regular"},
             user_id=agent_id,
         )
+        print(f"[agent_reply] AI response posted to channel {req.channel_id}")
     except (KeyError, StreamAPIException) as exc:
-        print(f"[stream] failed to post agent reply: {exc}")
+        print(f"[agent_reply] ERROR: failed to post agent reply: {exc}")
         raise HTTPException(status_code=500, detail=f"Stream error posting agent reply: {exc}")
 
-    return {"status": "sent", "agent_id": agent_id, "message": smart_reply}
+    # Trigger PropertyAIBot incident detection
+    # This handles incident detection, card creation, and DynamoDB persistence
+    try:
+        from app.services.stream_bot import get_bot
+
+        print(f"[agent_reply] Triggering PropertyAIBot incident detection...")
+
+        # Construct webhook-like payload for PropertyAIBot
+        webhook_payload = {
+            "type": "message.new",
+            "channel_id": req.channel_id,
+            "user": {
+                "id": req.requesting_user or "user-unknown",
+                "name": req.requesting_user or "Unknown User",
+                "is_bot": False,
+                "persona": req.persona or "tenant"
+            },
+            "message": {
+                "id": f"msg-{hash(req.prompt) % 100000}",
+                "text": req.prompt,
+                "type": "regular",
+                "attachments": []
+            }
+        }
+
+        property_ai_bot = get_bot()
+        result = property_ai_bot.handle_message_event(webhook_payload)
+
+        if result:
+            print(f"[agent_reply] PropertyAIBot processed message - incident detection completed")
+        else:
+            print(f"[agent_reply] PropertyAIBot ignored message (no incident detected or bot message)")
+
+    except Exception as exc:
+        # Don't fail the entire request if incident detection fails
+        # Log the error and continue
+        print(f"[agent_reply] WARNING: PropertyAIBot incident detection failed: {exc}")
+        import traceback
+        traceback.print_exc()
+
+    return {
+        "status": "sent",
+        "agent_id": agent_id,
+        "message": smart_reply,
+        "incident_detection": "processed"
+    }
 
 @router.post("/chat/stream/webhook")
 async def stream_webhook(request: Request):

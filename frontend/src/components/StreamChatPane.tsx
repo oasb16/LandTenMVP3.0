@@ -14,8 +14,8 @@ import {
   MessageSimple,
 } from "stream-chat-react";
 import "stream-chat-react/dist/css/v2/index.css";
-import { MessageSimple } from "stream-chat-react";
 import { CustomMessageUI } from "./ai/CustomMessageUI";
+import { AgentToggleButton } from "./ai/AgentToggleButton";
 
 type Props = {
   persona: string;
@@ -37,6 +37,8 @@ export default function StreamChatPane({ persona }: Props) {
   const [participantInput, setParticipantInput] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [agentEnabled, setAgentEnabled] = useState(true);
+  const [channelListKey, setChannelListKey] = useState(0); // Force re-render
 
   useEffect(() => {
     let chatClient: StreamChat | null = null;
@@ -125,7 +127,7 @@ export default function StreamChatPane({ persona }: Props) {
 
   const filters = useMemo(() => {
     if (!activeUserId) return {};
-    return { members: { $in: [activeUserId] } };
+    return { members: { $in: [activeUserId] }, type: "messaging" };
   }, [activeUserId]);
 
   const handleSelectChannel = useCallback(
@@ -172,7 +174,7 @@ export default function StreamChatPane({ persona }: Props) {
           body: JSON.stringify({
             creator: userInfo.email,
             participants,
-            include_agent: true,
+            include_agent: agentEnabled,
             persona,
           }),
         });
@@ -182,6 +184,10 @@ export default function StreamChatPane({ persona }: Props) {
           throw new Error(message);
         }
 
+        // Force ChannelList refresh
+        setChannelListKey(prev => prev + 1);
+
+        // Switch to new channel
         const newChannel = client.channel("messaging", payload.channel_id);
         await newChannel.watch();
         await newChannel.markRead();
@@ -196,7 +202,7 @@ export default function StreamChatPane({ persona }: Props) {
         setIsCreating(false);
       }
     },
-    [client, participantInput, persona, userInfo?.email],
+    [client, participantInput, persona, userInfo?.email, agentEnabled],
   );
 
   const openNotification = useCallback(
@@ -219,16 +225,30 @@ export default function StreamChatPane({ persona }: Props) {
   const handleSendMessage = useCallback(
     async (_cid: string, message: any) => {
       if (!channel) return;
+
+      console.log('[StreamChatPane] Sending message, agent enabled:', agentEnabled);
+
       const response = await channel.sendMessage(message);
       const text: string = message?.text ?? "";
-      const triggers = ["@agent", "@landten-agent", "landten agent"];
 
-      if (triggers.some(t => text.toLowerCase().includes(t))) {        
+      // Check if we should trigger agent processing
+      const hasAgentTrigger = text.toLowerCase().includes("@agent") ||
+                              text.toLowerCase().includes("@landten-agent") ||
+                              text.toLowerCase().includes("landten agent");
+      const shouldProcessAgent = agentEnabled || hasAgentTrigger;
+
+      if (shouldProcessAgent) {
+        console.log('[StreamChatPane] Triggering agent processing for:', text.substring(0, 50));
+
         try {
           const history = channel.state.messages
             .slice(-10)
             .map((msg) => `${msg.user?.name || msg.user?.id}: ${msg.text || ""}`)
             .join("\n");
+
+          // Call backend agent endpoint which will:
+          // 1. Generate AI response via get_ai_response()
+          // 2. Trigger PropertyAIBot.handle_message_event() for incident detection
           await fetch("/api/chat/agent", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -240,13 +260,18 @@ export default function StreamChatPane({ persona }: Props) {
               requesting_user: userInfo?.email,
             }),
           });
+
+          console.log('[StreamChatPane] Agent processing initiated');
         } catch (err) {
-          console.error("Agent trigger failed", err);
+          console.error("[StreamChatPane] Agent trigger failed:", err);
         }
+      } else {
+        console.log('[StreamChatPane] Agent OFF - message sent without AI processing');
       }
+
       return response;
     },
-    [channel, persona, userInfo?.email],
+    [channel, persona, userInfo?.email, agentEnabled],
   );
 
   const triggerDiscovery = useCallback(async () => {
@@ -263,29 +288,41 @@ export default function StreamChatPane({ persona }: Props) {
     if (!channel || !client) return;
 
     try {
-      // Send action message to trigger backend workflow
-      // Use the actual user ID from the client
       const userId = client.userID;
 
       await channel.sendMessage({
-        text: actionValue, // Already includes "action:" prefix from card
+        text: actionValue,
         user_id: userId,
-        silent: false  // Allow notifications for workflow tracking
+        silent: false
       });
 
       console.log('[StreamChatPane] Action sent:', actionValue);
     } catch (err) {
       console.error("Failed to handle action", err);
-      // Don't show error to user - workflow will continue
     }
   }, [channel, client]);
 
+  const handleAgentToggle = useCallback((enabled: boolean) => {
+    setAgentEnabled(enabled);
+    console.log('[StreamChatPane] Agent toggled:', enabled ? 'ON' : 'OFF');
+  }, []);
+
   if (error) {
-    return <div className="text-sm text-emerald-300">{error}</div>;
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-sm text-red-400 bg-red-950 border border-red-800 rounded px-4 py-2">
+          {error}
+        </div>
+      </div>
+    );
   }
 
   if (!client || !channel || !activeUserId) {
-    return <div>Connecting to Stream chat…</div>;
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-slate-400">Connecting to Stream chat…</div>
+      </div>
+    );
   }
 
   return (
@@ -294,42 +331,52 @@ export default function StreamChatPane({ persona }: Props) {
         <div className="stream-chat-layout">
           {/* Sidebar */}
           <div className="stream-chat-sidebar">
-            <div className="p-3 border-b border-slate-800">
-              <div className="flex flex-col gap-2">
-                <button
-                  className="w-full rounded bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
-                  onClick={() => setShowComposer((prev) => !prev)}
-                >
-                  {showComposer ? "Cancel" : "New Conversation"}
-                </button>
-                <button
-                  className="w-full rounded border border-emerald-700 px-3 py-2 text-xs font-semibold text-emerald-200 hover:bg-emerald-800"
-                  onClick={triggerDiscovery}
-                  disabled={!channel}
-                >
-                  Start Incident Discovery
-                </button>
-              </div>
+            <div className="p-3 border-b border-slate-800 space-y-2">
+              {/* Agent Toggle */}
+              <AgentToggleButton
+                initialState={agentEnabled}
+                onChange={handleAgentToggle}
+              />
 
+              {/* New Conversation Button */}
+              <button
+                className="w-full rounded bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 transition-colors"
+                onClick={() => setShowComposer((prev) => !prev)}
+              >
+                {showComposer ? "Cancel" : "New Conversation"}
+              </button>
+
+              {/* Discovery Button */}
+              <button
+                className="w-full rounded border border-emerald-700 px-3 py-2 text-xs font-semibold text-emerald-200 hover:bg-emerald-800 transition-colors disabled:opacity-50"
+                onClick={triggerDiscovery}
+                disabled={!channel}
+              >
+                Start Incident Discovery
+              </button>
+
+              {/* New Conversation Form */}
               {showComposer && (
                 <form
                   onSubmit={handleCreateConversation}
                   className="mt-3 flex flex-col gap-2 text-xs text-slate-200"
                 >
                   <textarea
-                    className="rounded border border-slate-700 bg-slate-900 p-2 text-xs text-slate-100"
+                    className="rounded border border-slate-700 bg-slate-900 p-2 text-xs text-slate-100 focus:border-emerald-600 focus:outline-none"
                     rows={3}
                     placeholder="Invite participants by email (comma or space separated)"
                     value={participantInput}
                     onChange={(event) => setParticipantInput(event.target.value)}
                   />
                   <p className="text-[11px] text-slate-400">
-                    All participants plus the LandTen agent will join this conversation.
+                    {agentEnabled
+                      ? "All participants plus the LandTen agent will join this conversation."
+                      : "Participants will join this conversation. Agent is OFF."}
                   </p>
                   <button
                     type="submit"
                     disabled={isCreating}
-                    className="rounded bg-slate-700 px-3 py-1 text-xs font-semibold text-white hover:bg-slate-600 disabled:opacity-60"
+                    className="rounded bg-slate-700 px-3 py-1 text-xs font-semibold text-white hover:bg-slate-600 disabled:opacity-60 transition-colors"
                   >
                     {isCreating ? "Creating…" : "Create"}
                   </button>
@@ -337,16 +384,17 @@ export default function StreamChatPane({ persona }: Props) {
               )}
             </div>
 
+            {/* Notifications */}
             {notifications.length > 0 && (
-              <div className="space-y-1 border-b border-slate-800 bg-emerald-950 px-3 py-2 text-xs text-emerald-100 overflow-y-auto">
+              <div className="space-y-1 border-b border-slate-800 bg-emerald-950 px-3 py-2 text-xs text-emerald-100 max-h-32 overflow-y-auto">
                 {notifications.map((note) => (
                   <div
                     key={`${note.channelId}-${note.at}`}
                     className="flex items-center justify-between gap-2"
                   >
-                    <span className="line-clamp-2">{note.text}</span>
+                    <span className="line-clamp-2 flex-1">{note.text}</span>
                     <button
-                      className="rounded bg-emerald-700 px-2 py-0.5 text-[11px] text-white hover:bg-emerald-600"
+                      className="rounded bg-emerald-700 px-2 py-0.5 text-[11px] text-white hover:bg-emerald-600 transition-colors shrink-0"
                       onClick={() => openNotification(note)}
                     >
                       Open
@@ -356,25 +404,28 @@ export default function StreamChatPane({ persona }: Props) {
               </div>
             )}
 
+            {/* Channel List */}
             <div className="flex-1 overflow-y-auto">
               <ChannelList
+                key={channelListKey}
                 filters={filters}
                 sort={{ last_message_at: -1 }}
-                options={{ state: true, watch: true, presence: true }}
+                options={{ state: true, watch: true, presence: true, limit: 30 }}
                 onSelect={handleSelectChannel}
               />
             </div>
           </div>
+
           {/* Chat Window */}
-          {/* <div className="stream-chat-main">
+          <div className="stream-chat-main">
             <Channel channel={channel} doSendMessageRequest={handleSendMessage}>
               <Window>
                 <ChannelHeader live />
                 <MessageList
-                  disableDateSeparator
-                  Message={(messageProps) => (
+                  disableDateSeparator={false}
+                  Message={(props) => (
                     <MessageSimple
-                      {...messageProps}
+                      {...props}
                       messageActions={['react', 'reply']}
                       MessageText={(textProps) => (
                         <CustomMessageUI {...textProps} onActionClick={handleActionClick} />
@@ -386,79 +437,91 @@ export default function StreamChatPane({ persona }: Props) {
               </Window>
               <Thread />
             </Channel>
-          </div> */}
-          <div className="stream-chat-main">
-          <Channel channel={channel} doSendMessageRequest={handleSendMessage}>
-            <Window>
-              <ChannelHeader live />
-              <MessageList
-                disableDateSeparator
-                Message={(props) => (
-                  <MessageSimple
-                    {...props}
-                    MessageText={(textProps) => (
-                      <CustomMessageUI {...textProps} onActionClick={handleActionClick} />
-                    )}
-                  />
-                )}
-              />
-              <MessageInput focus />
-            </Window>
-            <Thread />
-          </Channel>
-          </div> 
+          </div>
         </div>
       </Chat>
 
-
       <style jsx>{`
-      .stream-chat-wrapper {
-        display: flex;
-        flex-direction: column;
-        height: 100%;
-        width: 100%;
-        overflow: hidden;
-      }
-      .stream-chat-layout {
-        display: flex;
-        flex: 1;
-        height: 100%;
-        width: 100%;
-        overflow: hidden;
-      }
-      .stream-chat-sidebar {
-        display: flex;
-        flex-direction: column;
-        width: 260px;
-        max-width: 40%;
-        background: #0f172a;
-        border-right: 1px solid #1f2937;
-        overflow: hidden;
-      }
-      .stream-chat-main {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-        overflow: hidden;
-        height: 100%;
-      }
-      .stream-chat-sidebar .flex-1,
-      .stream-chat-main .str-chat__list {
-        overflow-y: auto;
-      }
-      @media (max-width: 768px) {
+        .stream-chat-wrapper {
+          display: flex;
+          flex-direction: column;
+          height: 100%;
+          width: 100%;
+          overflow: hidden;
+          background: #0f172a;
+        }
+
         .stream-chat-layout {
+          display: flex;
+          flex: 1;
+          height: 100%;
+          width: 100%;
+          overflow: hidden;
+        }
+
+        .stream-chat-sidebar {
+          display: flex;
+          flex-direction: column;
+          width: 280px;
+          max-width: 40%;
+          background: #0f172a;
+          border-right: 1px solid #1e293b;
+          overflow: hidden;
+        }
+
+        .stream-chat-main {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+          height: 100%;
+          min-width: 0; /* Allow flex shrinking */
+        }
+
+        /* Fix Stream Chat container */
+        .stream-chat-main :global(.str-chat__container) {
+          height: 100%;
+          display: flex;
           flex-direction: column;
         }
-        .stream-chat-sidebar {
-          width: 100%;
-          max-height: 220px;
-          border-right: none;
-          border-bottom: 1px solid #1f2937;
+
+        .stream-chat-main :global(.str-chat__main-panel) {
+          height: 100%;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
         }
-      }
-    `}</style>
-    
+
+        /* Fix message list scrolling */
+        .stream-chat-main :global(.str-chat__list) {
+          flex: 1;
+          overflow-y: auto;
+          overflow-x: hidden;
+        }
+
+        /* Ensure proper dark theme */
+        :global(.str-chat__theme-dark) {
+          --str-chat__primary-color: #10b981;
+          --str-chat__background-color: #0f172a;
+          --str-chat__secondary-background-color: #1e293b;
+          --str-chat__border-color: #334155;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+          .stream-chat-layout {
+            flex-direction: column;
+          }
+
+          .stream-chat-sidebar {
+            width: 100%;
+            max-width: 100%;
+            max-height: 250px;
+            border-right: none;
+            border-bottom: 1px solid #1e293b;
+          }
+        }
+      `}</style>
     </div>
   );
 }
