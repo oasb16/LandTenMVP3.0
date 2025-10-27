@@ -8,6 +8,8 @@ import { useIncidents, useTasks, useJobs, useProperties, useMediaUpload } from '
 import * as api from '@/lib/api';
 import StreamChatPane from './StreamChatPane';
 
+
+
 export default function PropertyAIApp() {
   const { data: session, status } = useSession();
   const router = useRouter();
@@ -591,7 +593,7 @@ function LandlordDashboard({ session }: { session: any }) {
   if (currentView === 'chat') {
     return (
       <>
-        <div className="flex flex-col h-screen bg-gray-50 max-w-md mx-auto">
+        <div className="flex flex-col h-[100dvh] bg-gray-50 max-w-md mx-auto">
           <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-6 py-4">
             <div className="flex items-center justify-between mb-4">
               <h1 className="text-2xl font-bold">Chat</h1>
@@ -615,19 +617,26 @@ function LandlordDashboard({ session }: { session: any }) {
             </div>
           </div>
 
-          <div className="flex-1 overflow-hidden">
-            <div className="h-full w-full">
-              <StreamChatPane persona="landlord" />
+          {/* Chat body */}
+          <div className="relative flex-1 overflow-hidden">
+            <div className="absolute inset-0 flex flex-col">
+              <div className="flex-1 overflow-y-auto">
+                <StreamChatPane persona="landlord" />
+              </div>
             </div>
           </div>
 
-          <BottomNav active="chat" role="landlord" onNavigate={(view) => {
-            if (view === 'profile') {
-              setShowSettings(true);
-            } else {
-              setCurrentView(view);
-            }
-          }} />
+          <BottomNav
+            active="chat"
+            role="landlord"
+            onNavigate={(view) => {
+              if (view === 'profile') {
+                setShowSettings(true);
+              } else {
+                setCurrentView(view);
+              }
+            }}
+          />
         </div>
 
         <SettingsModal
@@ -848,29 +857,50 @@ function TenantDashboard({ session }: { session: any }) {
   if (currentView === 'chat') {
     return (
       <>
-        <div className="flex flex-col h-screen bg-gray-50 max-w-md mx-auto">
-          <div className="bg-gradient-to-r from-green-600 to-teal-600 text-white px-6 py-4">
-            <div className="flex items-center gap-3">
-              <button onClick={() => setCurrentView('dashboard')} className="p-1">
-                <X className="w-6 h-6" />
+        <div className="flex flex-col h-[100dvh] bg-gray-50 max-w-md mx-auto">
+          <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-6 py-4">
+            <div className="flex items-center justify-between mb-4">
+              <h1 className="text-2xl font-bold">Chat</h1>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setCurrentView('properties')}
+                className="flex-1 bg-white/20 text-white px-4 py-2 rounded-lg font-medium"
+              >
+                Properties
               </button>
-              <h1 className="text-xl font-bold">Chat</h1>
+              <button
+                onClick={() => setCurrentView('incidents')}
+                className="flex-1 bg-white/20 text-white px-4 py-2 rounded-lg font-medium"
+              >
+                Incidents
+              </button>
+              <button className="flex-1 bg-white text-blue-600 px-4 py-2 rounded-lg font-medium">
+                Chat
+              </button>
             </div>
           </div>
 
-          <div className="flex-1 overflow-hidden">
-            <div className="h-full w-full">
-              <StreamChatPane persona="tenant" />
+          {/* Chat body */}
+          <div className="relative flex-1 overflow-hidden">
+            <div className="absolute inset-0 flex flex-col">
+              <div className="flex-1 overflow-y-auto">
+                <StreamChatPane persona="tenant" />
+              </div>
             </div>
           </div>
 
-          <BottomNav active="chat" role="tenant" onNavigate={(view) => {
-            if (view === 'profile') {
-              setShowSettings(true);
-            } else if (view === 'home') {
-              setCurrentView('dashboard');
-            }
-          }} />
+          <BottomNav
+            active="chat"
+            role="tenant"
+            onNavigate={(view) => {
+              if (view === 'profile') {
+                setShowSettings(true);
+              } else {
+                setCurrentView(view);
+              }
+            }}
+          />
         </div>
 
         <SettingsModal

@@ -279,10 +279,11 @@ export default function StreamChatPane({ persona }: Props) {
   }
 
   return (
-    <div className="stream-chat-container">
+    <div className="stream-chat-wrapper">
       <Chat client={client} theme="str-chat__theme-dark">
-        <div className="flex" style={{ minHeight: 420 }}>
-          <div style={{ width: 260, borderRight: "1px solid #1f2937" }} className="flex flex-col">
+        <div className="stream-chat-layout">
+          {/* Sidebar */}
+          <div className="stream-chat-sidebar">
             <div className="p-3 border-b border-slate-800">
               <div className="flex flex-col gap-2">
                 <button
@@ -299,8 +300,12 @@ export default function StreamChatPane({ persona }: Props) {
                   Start Incident Discovery
                 </button>
               </div>
+
               {showComposer && (
-                <form onSubmit={handleCreateConversation} className="mt-3 flex flex-col gap-2 text-xs text-slate-200">
+                <form
+                  onSubmit={handleCreateConversation}
+                  className="mt-3 flex flex-col gap-2 text-xs text-slate-200"
+                >
                   <textarea
                     className="rounded border border-slate-700 bg-slate-900 p-2 text-xs text-slate-100"
                     rows={3}
@@ -308,7 +313,9 @@ export default function StreamChatPane({ persona }: Props) {
                     value={participantInput}
                     onChange={(event) => setParticipantInput(event.target.value)}
                   />
-                  <p className="text-[11px] text-slate-400">All participants plus the LandTen agent will join this conversation.</p>
+                  <p className="text-[11px] text-slate-400">
+                    All participants plus the LandTen agent will join this conversation.
+                  </p>
                   <button
                     type="submit"
                     disabled={isCreating}
@@ -321,9 +328,12 @@ export default function StreamChatPane({ persona }: Props) {
             </div>
 
             {notifications.length > 0 && (
-              <div className="space-y-1 border-b border-slate-800 bg-emerald-950 px-3 py-2 text-xs text-emerald-100">
+              <div className="space-y-1 border-b border-slate-800 bg-emerald-950 px-3 py-2 text-xs text-emerald-100 overflow-y-auto">
                 {notifications.map((note) => (
-                  <div key={`${note.channelId}-${note.at}`} className="flex items-center justify-between gap-2">
+                  <div
+                    key={`${note.channelId}-${note.at}`}
+                    className="flex items-center justify-between gap-2"
+                  >
                     <span className="line-clamp-2">{note.text}</span>
                     <button
                       className="rounded bg-emerald-700 px-2 py-0.5 text-[11px] text-white hover:bg-emerald-600"
@@ -336,7 +346,7 @@ export default function StreamChatPane({ persona }: Props) {
               </div>
             )}
 
-            <div className="flex-1 overflow-hidden">
+            <div className="flex-1 overflow-y-auto">
               <ChannelList
                 filters={filters}
                 sort={{ last_message_at: -1 }}
@@ -345,27 +355,70 @@ export default function StreamChatPane({ persona }: Props) {
               />
             </div>
           </div>
-          <Channel channel={channel} doSendMessageRequest={handleSendMessage}>
-            <Window>
-              <ChannelHeader live />
-              <MessageList
-                disableDateSeparator
-                Message={(messageProps) => (
-                  <Message
-                    {...messageProps}
-                    messageActions={['react', 'reply']}
-                    MessageText={(textProps) => (
-                      <CustomMessageUI {...textProps} onActionClick={handleActionClick} />
-                    )}
-                  />
-                )}
-              />
-              <MessageInput focus />
-            </Window>
-            <Thread />
-          </Channel>
+
+          {/* Chat Window */}
+          <div className="stream-chat-main">
+            <Channel channel={channel} doSendMessageRequest={handleSendMessage}>
+              <Window>
+                <ChannelHeader live />
+                <MessageList disableDateSeparator />
+                <MessageInput focus />
+              </Window>
+              <Thread />
+            </Channel>
+          </div>
         </div>
       </Chat>
+
+
+      <style jsx>{`
+      .stream-chat-wrapper {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        width: 100%;
+        overflow: hidden;
+      }
+      .stream-chat-layout {
+        display: flex;
+        flex: 1;
+        height: 100%;
+        width: 100%;
+        overflow: hidden;
+      }
+      .stream-chat-sidebar {
+        display: flex;
+        flex-direction: column;
+        width: 260px;
+        max-width: 40%;
+        background: #0f172a;
+        border-right: 1px solid #1f2937;
+        overflow: hidden;
+      }
+      .stream-chat-main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        height: 100%;
+      }
+      .stream-chat-sidebar .flex-1,
+      .stream-chat-main .str-chat__list {
+        overflow-y: auto;
+      }
+      @media (max-width: 768px) {
+        .stream-chat-layout {
+          flex-direction: column;
+        }
+        .stream-chat-sidebar {
+          width: 100%;
+          max-height: 220px;
+          border-right: none;
+          border-bottom: 1px solid #1f2937;
+        }
+      }
+    `}</style>
+    
     </div>
   );
 }

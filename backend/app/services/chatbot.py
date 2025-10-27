@@ -12,7 +12,7 @@ except ImportError:  # pragma: no cover
 
 AGENT_USER_ID = os.getenv("STREAM_AGENT_USER_ID", "landten-agent")
 AGENT_DISPLAY_NAME = os.getenv("STREAM_AGENT_NAME", "LandTen Agent")
-AGENT_ROLE = os.getenv("STREAM_AGENT_ROLE", "agent")
+AGENT_ROLE = os.getenv("STREAM_AGENT_ROLE", "user")
 AGENT_PERSONA = os.getenv("STREAM_AGENT_PERSONA", "assistant")
 
 
