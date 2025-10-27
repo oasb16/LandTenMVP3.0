@@ -131,7 +131,7 @@ class PropertyAIBot:
 
             message_data = {
                 "text": text,
-                "type": "regular"
+                "type": "ai-message"
             }
 
             if attachments:
@@ -304,7 +304,9 @@ Current conversation context: {context if context else 'New conversation'}
             message_text = message.get("text", "")
             user_id = user.get("id")
             user_name = user.get("name", user_id)
+            message_type = message.get("type", "not_mentioned")
 
+            print(f"[stream-bot] Handling message from {user_name} ({user_id}) in channel {channel_id} as persona {persona}: {message_text} with type {message_type}")
             # Check if message is an action trigger
             if message_text.startswith("action:") or "@agent action:" in message_text:
                 action_value = message_text.replace("@agent ", "").strip()
@@ -737,8 +739,13 @@ Current conversation context: {context if context else 'New conversation'}
 
         # Persist incident to DynamoDB
         try:
+            if "user_id" not in incident_data:
+                inferred = incident_data.get("tenant_id") or incident_data.get("landlord_id") or "unknown"
+                incident_data["user_id"] = inferred
+            print(f"[IncidentDB] Creating incident: {incident_data}")
             incident_record = IncidentDB.create_incident({
                 "incident_id": incident_id,
+                "user_id": user_name or "unknown",
                 "tenant_id": user_name or "unknown",
                 "property_id": "unknown",  # TODO: Get from user context/session
                 "title": incident_data.get("title", "Maintenance Issue"),
