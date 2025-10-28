@@ -25,7 +25,7 @@ export const CustomMessageUI = memo(function CustomMessageUI({
 
   const attachments = message.attachments || [];
   const cardAttachments = attachments.filter((att: any) =>
-    ["incident", "discovery", "job", "bids", "approval", "completion","actions"].includes(att.type)
+    ["incident", "discovery", "job", "bids", "approval", "completion", "custom_actions"].includes(att.type)
   );
 
   // Safely check if message and user exist
@@ -38,6 +38,19 @@ export const CustomMessageUI = memo(function CustomMessageUI({
     ['incident', 'discovery', 'job', 'bids', 'approval', 'completion','actions'].includes(att.type)
   );
 
+      // Inside CustomMessageUI (before rendering)
+  let aiType = "regular";
+  let messageText = message.text || "";
+
+  // Trojan horse detection
+  if (messageText.startsWith("[AI_TYPE:")) {
+    const match = messageText.match(/^\[AI_TYPE:(.*?)\]\n/);
+    if (match) {
+      aiType = match[1].trim();
+      messageText = messageText.replace(/^\[AI_TYPE:.*?\]\n/, ""); // remove prefix
+    }
+  }
+
   // Check if this is an AI bot message
   const isAIMessage = message.user?.id?.startsWith('ai-') ||
                       message.user?.name?.includes('PropertyHelper') ||
@@ -47,9 +60,6 @@ export const CustomMessageUI = memo(function CustomMessageUI({
                       message.type === 'ai-message' ||
                       message.type === 'agent' ||
                       message.type === 'card';
-
-  // Get message text safely
-  const messageText = message.text || '';
 
   // Filter out action messages from being displayed as regular text
   const isActionMessage = messageText.startsWith('action:') || messageText.includes('@agent action:');

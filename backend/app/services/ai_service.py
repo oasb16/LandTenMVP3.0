@@ -70,7 +70,7 @@ Chat:
         msg_type = msg_type.lower()
         mapping = {
             "regular": "user",
-            "agent": "assistant",
+            "agent": "assistant", 
             "ai-message": "assistant",
             "card": "assistant",
             "system": "system",

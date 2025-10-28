@@ -46,7 +46,11 @@ export function MessageCards({ message, onActionClick }: MessageCardsProps) {
         const cardType = attachment.type;
 
         switch (cardType) {
-          case 'incident':
+          case 'incident': 
+            return <IncidentCard key={index} data={attachment} onActionClick={handleActionClick} loadingAction={loadingAction} />;
+          case 'custom_card' : 
+            return <IncidentCard key={index} data={attachment} onActionClick={handleActionClick} loadingAction={loadingAction} />;            
+          case 'custom_actions':
             return <IncidentCard key={index} data={attachment} onActionClick={handleActionClick} loadingAction={loadingAction} />;
           case 'discovery':
             return <DiscoveryCard key={index} data={attachment} onActionClick={handleActionClick} loadingAction={loadingAction} />;
@@ -87,30 +91,42 @@ function BaseCard({ data, children, onActionClick, loadingAction }: CardProps & 
     <div className="card" style={{ borderLeftColor: data.color || '#6b7280' }}>
       {children}
 
-      {data.actions && data.actions.length > 0 && (
+      {(data.buttons && data.buttons.length > 0) ? (
         <div className="card-actions">
-          {data.actions.map((action: CardAction, idx: number) => (
+          {data.buttons.map((btn: any, idx: number) => (
             <button
               key={idx}
-              onClick={() => onActionClick(action.value)}
+              onClick={() => onActionClick(btn.value)}
               disabled={loadingAction !== null}
-              className={`card-button card-button-${action.style || 'default'}`}
+              className={`card-button card-button-${btn.style || 'default'}`}
               style={{
                 position: 'relative',
                 opacity: loadingAction !== null ? 0.7 : 1,
                 cursor: loadingAction !== null ? 'wait' : 'pointer'
               }}
             >
-              {loadingAction === action.value && (
-                <span className="button-spinner" />
-              )}
-              <span style={{ visibility: loadingAction === action.value ? 'hidden' : 'visible' }}>
-                {action.text}
+              {loadingAction === btn.value && <span className="button-spinner" />}
+              <span style={{ visibility: loadingAction === btn.value ? 'hidden' : 'visible' }}>
+                {btn.label || btn.text}
               </span>
             </button>
           ))}
         </div>
-      )}
+      ) : data.actions && data.actions.length > 0 ? (
+        <div className="card-actions">
+          {data.actions.map((action: any, idx: number) => (
+            <button
+              key={idx}
+              onClick={() => onActionClick(action.value)}
+              disabled={loadingAction !== null}
+              className={`card-button card-button-${action.style || 'default'}`}
+            >
+              {action.text}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
 
       {data.footer && (
         <div className="card-footer">

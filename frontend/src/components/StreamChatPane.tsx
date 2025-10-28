@@ -422,16 +422,17 @@ export default function StreamChatPane({ persona }: Props) {
               <Window>
                 <ChannelHeader live />
                 <MessageList
-                  disableDateSeparator={false}
+                  disableDateSeparator
                   Message={(props) => (
                     <MessageSimple
                       {...props}
-                      messageActions={['react', 'reply']}
                       MessageText={(textProps) => (
                         <CustomMessageUI {...textProps} onActionClick={handleActionClick} />
                       )}
                     />
                   )}
+                  // Prevent Stream from executing actions
+                  actionsEnabled={false}
                 />
                 <MessageInput focus />
               </Window>

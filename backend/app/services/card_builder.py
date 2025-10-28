@@ -50,14 +50,14 @@ class CardBuilder:
                     "name": "start_discovery",
                     "text": "Start Discovery",
                     "style": "primary",
-                    "type": "button",
+                    "type": "custom_button",
                     "value": f"action:start_discovery:{incident_id}"
                 },
                 {
                     "name": "dismiss",
                     "text": "Dismiss",
                     "style": "default",
-                    "type": "button",
+                    "type": "custom_button",
                     "value": f"action:dismiss:{incident_id}"
                 }
             ]
@@ -67,14 +67,14 @@ class CardBuilder:
                     "name": "upload_photos",
                     "text": "📸 Upload Photos",
                     "style": "primary",
-                    "type": "button",
+                    "type": "custom_button",
                     "value": f"action:upload_photos:{incident_id}"
                 },
                 {
                     "name": "create_work_order",
                     "text": "Create Work Order",
                     "style": "primary",
-                    "type": "button",
+                    "type": "custom_button",
                     "value": f"action:create_work_order:{incident_id}"
                 }
             ]
@@ -84,14 +84,14 @@ class CardBuilder:
                     "name": "view_bids",
                     "text": "View Contractor Bids",
                     "style": "primary",
-                    "type": "button",
+                    "type": "custom_button",
                     "value": f"action:view_bids:{incident_id}"
                 }
             ]
 
         # Build card structure
         card = {
-            "type": "actions",
+            "type": "custom_actions",
             "title": title,
             "title_link": f"#incident-{incident_id}",
             "text": description,
@@ -111,7 +111,7 @@ class CardBuilder:
             "footer": f"Incident {incident_id}",
             "footer_icon": "https://api.dicebear.com/7.x/shapes/svg?seed=incident",
             "ts": datetime.now().isoformat(),
-            "actions": actions,
+            "buttons": actions,
             "incident_id": incident_id,
             "incident_data": {
                 "id": incident_id,
@@ -282,7 +282,7 @@ class CardBuilder:
             ],
             "footer": f"Job {job_id} • Incident {incident_id}",
             "ts": datetime.now().isoformat(),
-            "actions": actions,
+            "buttons": actions,
             "job_data": {
                 "job_id": job_id,
                 "incident_id": incident_id,
@@ -374,7 +374,7 @@ class CardBuilder:
             "fields": fields,
             "footer": f"Job {job_id} • Incident {incident_id}",
             "ts": datetime.now().isoformat(),
-            "actions": actions,
+            "buttons": actions,
             "bids_data": {
                 "job_id": job_id,
                 "incident_id": incident_id,
@@ -451,7 +451,7 @@ class CardBuilder:
             ],
             "footer": f"Job {job_id} • Incident {incident_id}",
             "ts": datetime.now().isoformat(),
-            "actions": actions,
+            "buttons": actions,
             "approval_data": {
                 "job_id": job_id,
                 "incident_id": incident_id,
@@ -533,7 +533,7 @@ class CardBuilder:
             "fields": fields,
             "footer": f"Job {job_id} • Incident {incident_id}",
             "ts": datetime.now().isoformat(),
-            "actions": actions,
+            "buttons": actions,
             "completion_data": {
                 "job_id": job_id,
                 "incident_id": incident_id,
