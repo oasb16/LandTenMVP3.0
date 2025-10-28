@@ -90,8 +90,10 @@ class CardBuilder:
             ]
 
         # Build card structure
+        # Use custom type "incident" instead of "actions" to avoid Stream Chat command processing
         card = {
-            "type": "actions",
+            "type": "incident",  # Custom type for frontend rendering
+            "fallback": f"🔍 Incident detected: {title}",  # Fallback text for unsupported clients
             "title": title,
             "title_link": f"#incident-{incident_id}",
             "text": description,
@@ -166,6 +168,7 @@ class CardBuilder:
 
         card = {
             "type": "discovery",
+            "fallback": "Issue Discovery in Progress",
             "title": "🔍 Issue Discovery in Progress",
             "text": current_question or "Gathering information about the issue...",
             "color": "#3b82f6",  # blue
@@ -255,6 +258,7 @@ class CardBuilder:
 
         card = {
             "type": "job",
+            "fallback": f"Work Order: {title}",
             "title": f"🔧 Work Order: {title}",
             "text": f"A work order has been created for this {category} issue.",
             "color": "#8b5cf6",  # purple
@@ -321,6 +325,7 @@ class CardBuilder:
         if not bids:
             return {
                 "type": "bids",
+                "fallback": "No Bids Available",
                 "title": "No Bids Available",
                 "text": "No contractors have submitted bids yet.",
                 "color": "#6b7280"
@@ -368,6 +373,7 @@ class CardBuilder:
 
         card = {
             "type": "bids",
+            "fallback": f"Found {len(bids)} contractor bids",
             "title": "💼 Contractor Bids",
             "text": f"Found {len(bids)} qualified contractors. Review and select one to proceed.",
             "color": "#059669",  # emerald
@@ -429,6 +435,7 @@ class CardBuilder:
 
         card = {
             "type": "approval",
+            "fallback": f"Approval {status.title()} for {contractor_name}",
             "title": f"{status_emoji.get(status, '📋')} Approval {status.title()}",
             "text": f"Contractor {contractor_name} is ready to start work.",
             "color": status_color.get(status, "#6b7280"),
@@ -527,6 +534,7 @@ class CardBuilder:
 
         card = {
             "type": "completion",
+            "fallback": f"Job Completed by {contractor_name}",
             "title": "✅ Job Completed",
             "text": f"The work has been completed by {contractor_name}.",
             "color": "#10b981",  # green
