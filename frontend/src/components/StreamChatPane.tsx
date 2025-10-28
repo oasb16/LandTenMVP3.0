@@ -286,25 +286,49 @@ export default function StreamChatPane({ persona }: Props) {
     }
   }, [channel]);
 
-  const handleActionClick = useCallback(async (actionValue: string) => {
-    if (!channel || !client) return;
+  const handleActionClick = useCallback(
+    async (actionValue: string) => {
+      if (!channel || !client) return;
+      console.log("[StreamChatPane] Action clicked:", actionValue);
 
-    console.log('[StreamChatPane] → Button action triggered:', actionValue);
+      const user = client.user || {};
+      try {
+        const payload = {
+          type: "message.new",
+          message: {
+            text: actionValue,
+            user: {
+              id: user.id || "unknown",
+              name: user.name || "Anonymous User",
+              is_bot: false
+            }
+          },
+          user: {
+            id: user.id || "unknown",
+            name: user.name || "Anonymous User",
+            is_bot: false
+          },
+          channel_id: channel.id
+        };
 
-    try {
-      const userId = client.userID;
+        const response = await fetch("http://localhost:8080/ai/stream-webhook", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
 
-      await channel.sendMessage({
-        text: actionValue,
-        user_id: userId,
-        silent: false
-      });
+        if (!response.ok) {
+          console.error("[StreamChatPane] Action webhook failed", await response.text());
+        } else {
+          console.log("[StreamChatPane] Action sent successfully", actionValue);
+        }
+      } catch (err) {
+        console.error("[StreamChatPane] Action send error:", err);
+      }
+    },
+    [channel, client]
+  );
 
-      console.log('[StreamChatPane] ✓ Action message sent:', actionValue);
-    } catch (err) {
-      console.error('[StreamChatPane] ✗ Failed to handle action:', actionValue, err);
-    }
-  }, [channel, client]);
 
   const handleAgentToggle = useCallback((enabled: boolean) => {
     setAgentEnabled(enabled);
