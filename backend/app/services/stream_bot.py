@@ -32,6 +32,8 @@ from app.services.dynamo_service import (
 import json
 import re
 
+def is_ai_trojan_message(text: str) -> bool:
+    return bool(re.match(r"^\[AI_TYPE:.*?\]", text or ""))
 
 class PropertyAIBot:
     """AI Bot manager for PropertyAI multi-persona system"""
@@ -109,7 +111,8 @@ class PropertyAIBot:
             self.send_message(
                 channel_id=channel_id,
                 bot_id=bot_id,
-                text=welcome_messages.get(persona, "Hi! How can I help?")
+                text=welcome_messages.get(persona, "Hi! How can I help?"),
+                internal_type="ai-message"
             )
 
             return True
@@ -123,24 +126,38 @@ class PropertyAIBot:
         bot_id: str,
         text: str,
         attachments: Optional[List[Dict]] = None,
-        custom_data: Optional[Dict] = None
+        custom_data: Optional[Dict] = None,
+        internal_type: str = "ai-message"
     ) -> Optional[Dict]:
-        """Send a message from AI bot to channel"""
+        """Send a message from AI bot to channel (Stream-safe)"""
         try:
             channel = self.client.channel("messaging", channel_id)
 
+            # Trojan horse technique: send 'ai-message' metadata inside text
+            text_payload = f"[AI_TYPE:{internal_type}]\n{text}"
+
             message_data = {
-                "text": text,
-                "type": "ai-message"
+                "text": text_payload,
+                "type": "regular",  # Only valid values: 'regular', 'system'
+                "ai_type": internal_type,  # preserved in metadata
             }
 
             if attachments:
                 message_data["attachments"] = attachments
-
             if custom_data:
                 message_data.update(custom_data)
 
-            response = channel.send_message(message_data, bot_id)
+            print(f"[stream-bot] Sending AI message (Trojan) as regular: {internal_type} -> {text}")
+            # Send message to Stream safely
+            response = channel.send_message(
+                {
+                    "text": f"[AI_CARD] {text}",
+                    "attachments": attachments if attachments else [],
+                    "type": "regular",  # Only valid values: 'regular', 'system'
+                    "ai_type": internal_type,
+                },
+                user_id=bot_id,
+            )
             return response
         except Exception as e:
             print(f"[stream-bot] Error sending message: {e}")
@@ -155,25 +172,30 @@ class PropertyAIBot:
     ) -> Optional[Dict]:
         """Send a message with action buttons"""
         attachments = [{
-            "type": "actions",
+            "type": "custom_card",
+            "fallback": text,  # prevents stripping by Stream API
             "text": text,
-            "actions": [
+            "buttons": [
                 {
-                    "name": action.get("name", "action"),
-                    "text": action.get("text", "Action"),
-                    "style": action.get("style", "primary"),
-                    "type": "button",
-                    "value": action.get("value", "")
-                }
-                for action in actions
-            ]
+                    "label": "Start Discovery",
+                    "style": "primary",
+                    "value": f"action:start_discovery:{incident_id}",
+                },
+                {
+                    "label": "Dismiss",
+                    "style": "default",
+                    "value": "action:dismiss",
+                },
+            ],
         }]
+
 
         return self.send_message(
             channel_id=channel_id,
             bot_id=bot_id,
             text=text,
-            attachments=attachments
+            attachments=attachments,
+            internal_type="ai-message"
         )
 
     def process_tenant_message(
@@ -305,6 +327,10 @@ Current conversation context: {context if context else 'New conversation'}
             user_id = user.get("id")
             user_name = user.get("name", user_id)
             message_type = message.get("type", "not_mentioned")
+            
+            if is_ai_trojan_message(message_text):
+                print("[stream-bot] Skipping AI Trojan message echo loop")
+                return None
 
             print(f"[stream-bot] Handling message from {user_name} ({user_id}) in channel {channel_id} as persona {persona}: {message_text} with type {message_type}")
             # Check if message is an action trigger
@@ -332,7 +358,8 @@ Current conversation context: {context if context else 'New conversation'}
                     return self.send_message(
                         channel_id=channel_id,
                         bot_id=bot_id,
-                        text=response_text
+                        text=response_text,
+                        internal_type="ai-message"
                     )
 
             # Process message based on persona
@@ -361,7 +388,8 @@ Current conversation context: {context if context else 'New conversation'}
             return self.send_message(
                 channel_id=channel_id,
                 bot_id=bot_id,
-                text=response_text
+                text=response_text,
+                internal_type="ai-message"
             )
 
         except Exception as e:
@@ -388,7 +416,7 @@ Current conversation context: {context if context else 'New conversation'}
             action_name = parts[1]
             params = parts[2:] if len(parts) > 2 else []
 
-            print(f"[stream-bot] Handling action: {action_name} with params: {params}")
+            print(f"[stream-bot] Handling action: {action_value.split(':')[1] if ':' in action_value else action_value} with params: {action_value.split(':')[2:]}")
 
             # Route to appropriate handler
             if action_name == "start_discovery":
@@ -417,19 +445,22 @@ Current conversation context: {context if context else 'New conversation'}
         """Handle start discovery action"""
         incident_id = params[0] if params else f"INC-{int(datetime.now().timestamp())}"
         bot_id = self.get_bot_id(persona)
+        print(f"[PropertyAIBot] Starting discovery for incident {incident_id}")
 
         # Send discovery message
         self.send_message(
             channel_id=channel_id,
             bot_id=bot_id,
-            text="Great! Let's gather some details about the issue. I'll ask you a few questions."
+            text="Great! Let's gather some details about the issue. I'll ask you a few questions.",
+            internal_type="ai-message"
         )
 
         # Send first discovery question
         self.send_message(
             channel_id=channel_id,
             bot_id=bot_id,
-            text="📍 First, can you tell me exactly where the issue is located? (e.g., 'kitchen sink', 'bedroom ceiling')"
+            text="📍 First, can you tell me exactly where the issue is located? (e.g., 'kitchen sink', 'bedroom ceiling')",
+            internal_type="ai-message"
         )
 
         # Send discovery progress card
@@ -455,7 +486,8 @@ Current conversation context: {context if context else 'New conversation'}
         self.send_message(
             channel_id=channel_id,
             bot_id=bot_id,
-            text="📸 Please upload photos of the issue. You can attach images directly in the chat or use the attachment button."
+            text="📸 Please upload photos of the issue. You can attach images directly in the chat or use the attachment button.",
+            internal_type="ai-message"
         )
 
         return {"status": "prompted_for_photos"}
@@ -514,7 +546,8 @@ Current conversation context: {context if context else 'New conversation'}
         self.send_message(
             channel_id=channel_id,
             bot_id=bot_id,
-            text="✅ Creating work order for this issue..."
+            text="✅ Creating work order for this issue...",
+            internal_type="ai-message"
         )
 
         # Send work order card
@@ -540,7 +573,8 @@ Current conversation context: {context if context else 'New conversation'}
         self.send_message(
             channel_id=channel_id,
             bot_id=bot_id,
-            text="I've notified your landlord. They should respond within 24 hours."
+            text="I've notified your landlord. They should respond within 24 hours.",
+            internal_type="ai-message"
         )
 
         return result
@@ -664,7 +698,8 @@ Current conversation context: {context if context else 'New conversation'}
         self.send_message(
             channel_id=channel_id,
             bot_id=bot_id,
-            text=f"The contractor will arrive tomorrow at 9:00 AM. You'll receive a notification when they're on their way."
+            text=f"The contractor will arrive tomorrow at 9:00 AM. You'll receive a notification when they're on their way.",
+            internal_type="ai-message"
         )
 
         return result
@@ -677,7 +712,8 @@ Current conversation context: {context if context else 'New conversation'}
         self.send_message(
             channel_id=channel_id,
             bot_id=bot_id,
-            text="✅ Job approved! Now let's find qualified contractors."
+            text="✅ Job approved! Now let's find qualified contractors.",
+            internal_type="ai-message"
         )
 
         # Automatically show bids after approval
@@ -690,7 +726,8 @@ Current conversation context: {context if context else 'New conversation'}
         self.send_message(
             channel_id=channel_id,
             bot_id=bot_id,
-            text="Okay, I've dismissed this incident. Let me know if you need help with anything else!"
+            text="Okay, I've dismissed this incident. Let me know if you need help with anything else!",
+            internal_type="ai-message"
         )
 
         return {"status": "dismissed"}
