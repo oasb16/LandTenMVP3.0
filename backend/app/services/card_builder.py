@@ -586,8 +586,21 @@ def send_card_message(
             "type": "regular"
         }
 
+        print(f"[card-builder] ========== SENDING CARD ==========")
+        print(f"[card-builder] Channel: {channel_id}, Bot: {bot_id}")
+        print(f"[card-builder] Card type: {card_data.get('type')}")
+        print(f"[card-builder] Has buttons: {bool(card_data.get('buttons'))}")
+        print(f"[card-builder] Button count: {len(card_data.get('buttons', []))}")
+        if card_data.get('buttons'):
+            for btn in card_data.get('buttons', []):
+                print(f"[card-builder]   - {btn.get('text')}: {btn.get('value')}")
+
         response = channel.send_message(message, bot_id)
+
+        print(f"[card-builder] ✓ Card sent successfully")
         return response
     except Exception as e:
-        print(f"[card-builder] Error sending card: {e}")
+        print(f"[card-builder] ✗ Error sending card: {e}")
+        import traceback
+        traceback.print_exc()
         return None

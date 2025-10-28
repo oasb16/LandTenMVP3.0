@@ -15,6 +15,8 @@ import {
 } from "stream-chat-react";
 import "stream-chat-react/dist/css/v2/index.css";
 import { CustomMessageUI } from "./ai/CustomMessageUI";
+import { CustomAttachment } from "./ai/CustomAttachment";
+import { CustomChannelHeader } from "./ai/CustomChannelHeader";
 import { AgentToggleButton } from "./ai/AgentToggleButton";
 
 type Props = {
@@ -420,9 +422,18 @@ export default function StreamChatPane({ persona }: Props) {
 
           {/* Chat Window */}
           <div className="stream-chat-main">
-            <Channel channel={channel} doSendMessageRequest={handleSendMessage}>
+            <Channel
+              channel={channel}
+              doSendMessageRequest={handleSendMessage}
+              Attachment={(attachmentProps) => (
+                <CustomAttachment {...attachmentProps} onActionClick={handleActionClick} />
+              )}
+            >
               <Window>
-                <ChannelHeader live />
+                <CustomChannelHeader
+                  agentEnabled={agentEnabled}
+                  onAgentToggle={handleAgentToggle}
+                />
                 <MessageList
                   disableDateSeparator
                   Message={(props) => (
