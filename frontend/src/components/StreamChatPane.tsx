@@ -287,6 +287,8 @@ export default function StreamChatPane({ persona }: Props) {
   const handleActionClick = useCallback(async (actionValue: string) => {
     if (!channel || !client) return;
 
+    console.log('[StreamChatPane] → Button action triggered:', actionValue);
+
     try {
       const userId = client.userID;
 
@@ -296,9 +298,9 @@ export default function StreamChatPane({ persona }: Props) {
         silent: false
       });
 
-      console.log('[StreamChatPane] Action sent:', actionValue);
+      console.log('[StreamChatPane] ✓ Action message sent:', actionValue);
     } catch (err) {
-      console.error("Failed to handle action", err);
+      console.error('[StreamChatPane] ✗ Failed to handle action:', actionValue, err);
     }
   }, [channel, client]);
 
@@ -484,13 +486,15 @@ export default function StreamChatPane({ persona }: Props) {
           height: 100%;
           display: flex;
           flex-direction: column;
+          background: #0b0f1a;
         }
 
         .stream-chat-main :global(.str-chat__main-panel) {
           height: 100%;
           display: flex;
           flex-direction: column;
-          overflow: hidden;
+          overflow-y: auto;
+          padding-bottom: 1rem;
         }
 
         /* Fix message list scrolling */

@@ -158,6 +158,7 @@ class PropertyAIBot:
                 },
                 user_id=bot_id,
             )
+            print(f"[stream-bot] Message sent to {channel_id} from {bot_id}")
             return response
         except Exception as e:
             print(f"[stream-bot] Error sending message: {e}")
@@ -408,15 +409,20 @@ Current conversation context: {context if context else 'New conversation'}
 
         Action format: "action:action_name:param1:param2"
         """
+        print(f"[stream-bot] ========== ACTION RECEIVED ==========")
+        print(f"[stream-bot] Raw action value: {action_value}")
+        print(f"[stream-bot] User: {user_id}, Channel: {channel_id}, Persona: {persona}")
+
         try:
             parts = action_value.split(":")
             if len(parts) < 2 or parts[0] != "action":
+                print(f"[stream-bot] Invalid action format: {action_value}")
                 return None
 
             action_name = parts[1]
             params = parts[2:] if len(parts) > 2 else []
 
-            print(f"[stream-bot] Handling action: {action_value.split(':')[1] if ':' in action_value else action_value} with params: {action_value.split(':')[2:]}")
+            print(f"[stream-bot] → Routing to handler: {action_name} with params: {params}")
 
             # Route to appropriate handler
             if action_name == "start_discovery":

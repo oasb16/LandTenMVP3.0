@@ -31,9 +31,13 @@ export function MessageCards({ message, onActionClick }: MessageCardsProps) {
   }
 
   const handleActionClick = async (actionValue: string) => {
+    console.log('[MessageCards] Button clicked:', actionValue);
     setLoadingAction(actionValue);
     try {
       await onActionClick(actionValue);
+      console.log('[MessageCards] Button action completed:', actionValue);
+    } catch (error) {
+      console.error('[MessageCards] Button action failed:', actionValue, error);
     } finally {
       // Clear loading state after a short delay
       setTimeout(() => setLoadingAction(null), 500);
@@ -44,6 +48,7 @@ export function MessageCards({ message, onActionClick }: MessageCardsProps) {
     <div className="message-cards-container">
       {attachments.map((attachment: any, index: number) => {
         const cardType = attachment.type;
+        console.log('[MessageCards] Rendering card:', { type: cardType, hasButtons: !!(attachment.buttons || attachment.actions) });
 
         switch (cardType) {
           case 'incident': 
@@ -87,13 +92,16 @@ interface CardProps {
 }
 
 function BaseCard({ data, children, onActionClick, loadingAction }: CardProps & { children: React.ReactNode }) {
+  // Support both "buttons" and "actions" field names for backward compatibility
+  const buttons = data.buttons || data.actions || [];
+
   return (
     <div className="card" style={{ borderLeftColor: data.color || '#6b7280' }}>
       {children}
 
-      {(data.buttons && data.buttons.length > 0) ? (
+      {buttons && buttons.length > 0 ? (
         <div className="card-actions">
-          {data.buttons.map((btn: any, idx: number) => (
+          {buttons.map((btn: any, idx: number) => (
             <button
               key={idx}
               onClick={() => onActionClick(btn.value)}
@@ -109,19 +117,6 @@ function BaseCard({ data, children, onActionClick, loadingAction }: CardProps & 
               <span style={{ visibility: loadingAction === btn.value ? 'hidden' : 'visible' }}>
                 {btn.label || btn.text}
               </span>
-            </button>
-          ))}
-        </div>
-      ) : data.actions && data.actions.length > 0 ? (
-        <div className="card-actions">
-          {data.actions.map((action: any, idx: number) => (
-            <button
-              key={idx}
-              onClick={() => onActionClick(action.value)}
-              disabled={loadingAction !== null}
-              className={`card-button card-button-${action.style || 'default'}`}
-            >
-              {action.text}
             </button>
           ))}
         </div>
