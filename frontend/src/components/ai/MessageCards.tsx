@@ -34,7 +34,7 @@ export function MessageCards({ message, onActionClick }: MessageCardsProps) {
     console.log('[MessageCards] Button clicked:', actionValue);
     setLoadingAction(actionValue);
     try {
-      await onActionClick(actionValue);
+      if (onActionClick) onActionClick(actionValue);
       console.log('[MessageCards] Button action completed:', actionValue);
     } catch (error) {
       console.error('[MessageCards] Button action failed:', actionValue, error);
@@ -51,13 +51,17 @@ export function MessageCards({ message, onActionClick }: MessageCardsProps) {
         console.log('[MessageCards] Rendering card:', { type: cardType, hasButtons: !!(attachment.buttons || attachment.actions) });
 
         switch (cardType) {
-          case 'incident': 
+          case 'incident':
+            console.log('[MessageCards] Incident card data:', attachment);
             return <IncidentCard key={index} data={attachment} onActionClick={handleActionClick} loadingAction={loadingAction} />;
           case 'custom_card' : 
+            console.log('[MessageCards] Custom Actions card data:', attachment);
             return <IncidentCard key={index} data={attachment} onActionClick={handleActionClick} loadingAction={loadingAction} />;            
           case 'custom_actions':
+            console.log('[MessageCards] Custom Actions card data:', attachment);
             return <IncidentCard key={index} data={attachment} onActionClick={handleActionClick} loadingAction={loadingAction} />;
           case 'discovery':
+            console.log('[MessageCards] Discovery card data:', attachment);
             return <DiscoveryCard key={index} data={attachment} onActionClick={handleActionClick} loadingAction={loadingAction} />;
           case 'job':
             return <JobCard key={index} data={attachment} onActionClick={handleActionClick} loadingAction={loadingAction} />;
@@ -94,7 +98,7 @@ interface CardProps {
 function BaseCard({ data, children, onActionClick, loadingAction }: CardProps & { children: React.ReactNode }) {
   // Support both "buttons" and "actions" field names for backward compatibility
   const buttons = data.buttons || data.actions || [];
-
+  console.log('[BaseCard] Rendering card with data:', data);
   return (
     <div className="card" style={{ borderLeftColor: data.color || '#6b7280' }}>
       {children}
@@ -104,7 +108,7 @@ function BaseCard({ data, children, onActionClick, loadingAction }: CardProps & 
           {buttons.map((btn: any, idx: number) => (
             <button
               key={idx}
-              onClick={() => onActionClick(btn.value)}
+              onClick={() => onActionClick(data.type)}
               disabled={loadingAction !== null}
               className={`card-button card-button-${btn.style || 'default'}`}
               style={{

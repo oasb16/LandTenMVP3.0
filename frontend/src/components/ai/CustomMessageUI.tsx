@@ -18,8 +18,12 @@ export const CustomMessageUI = memo(function CustomMessageUI({
 
   const handleActionClick = useCallback(
     (actionValue: string) => {
-      if (onActionClick) onActionClick(actionValue);
-    },
+      if (onActionClick){
+        console.log("[CustomMessageUI] Action click:", actionValue); 
+        onActionClick(actionValue);
+    } else {
+        console.warn("[CustomMessageUI] No onActionClick prop passed!");
+      }},
     [onActionClick]
   );
 
