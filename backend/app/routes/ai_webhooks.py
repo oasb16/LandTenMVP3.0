@@ -1,15 +1,20 @@
 """
-AI Webhooks Route
-Handles Stream Chat webhooks for AI bot interactions
+AI Webhooks Route - Intelligent Intent Routing System
+Handles Stream Chat webhooks with context-aware, policy-bounded AI interactions
 """
 
 import os
 import hashlib
 import hmac
-from typing import Dict, Any
+import logging
+from typing import Dict, Any, Optional
 from fastapi import APIRouter, Request, HTTPException, Header
 from app.services.stream_bot import get_bot
+from app.services.context_manager import get_context_manager
+from app.services.ai_reasoning import get_ai_reasoning
+from app.services.policy_validator import get_policy_validator
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -125,40 +130,150 @@ async def handle_stream_webhook(
 
 
 async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, str]:
-    """Handle new message event with comprehensive logging"""
+    """
+    Intelligent message handler with context-aware intent routing.
+
+    This replaces the rigid button-driven flow with adaptive AI reasoning:
+    1. Retrieve or create conversational context
+    2. Detect user intent using AI reasoning
+    3. Validate actions against persona policies
+    4. Route to appropriate handler dynamically
+    5. Update context with new information
+    """
     try:
+        # Extract message data
         message = payload.get("message", {})
         user = payload.get("user", {})
         channel_id = payload.get("channel_id", "unknown")
         message_text = message.get("text", "")
+        user_id = user.get("id", "unknown")
+        is_bot = user.get("role") == "admin" or user.get("name", "").startswith("ai-")
 
-        print(f"[ai-webhook] Processing message.new event:")
-        print(f"[ai-webhook]   - Channel: {channel_id}")
-        print(f"[ai-webhook]   - User: {user.get('id', 'unknown')} ({user.get('name', 'unknown')})")
-        print(f"[ai-webhook]   - Message: {message_text[:100]}{'...' if len(message_text) > 100 else ''}")
-        print(f"[ai-webhook]   - Is bot: {user.get('is_bot', False)}")
+        logger.info(f"[ai-webhook] ========== Incoming Message ==========")
+        logger.info(f"[ai-webhook] Channel: {channel_id}")
+        logger.info(f"[ai-webhook] User: {user_id} ({user.get('name', 'unknown')})")
+        logger.info(f"[ai-webhook] Message: {message_text[:100]}")
+        logger.info(f"[ai-webhook] Is bot: {is_bot}")
 
+        # Ignore messages from bots
+        if is_bot:
+            logger.info("[ai-webhook] Ignoring bot message")
+            return {"status": "ignored", "reason": "bot_message"}
+
+        # Check if message has metadata indicating agent is disabled
+        metadata = message.get("metadata", {})
+        agent_enabled = metadata.get("agentEnabled", True)
+
+        if not agent_enabled:
+            logger.info("[ai-webhook] Agent disabled by user - ignoring message")
+            return {"status": "ignored", "reason": "agent_disabled"}
+
+        # Get services
+        context_manager = get_context_manager()
+        ai_reasoning = get_ai_reasoning()
+        policy_validator = get_policy_validator()
         bot = get_bot()
-        result = bot.handle_message_event(payload)
+
+        # Get or create context
+        context = context_manager.get_context(user_id, channel_id, create_if_missing=True)
+
+        if not context:
+            logger.error("[ai-webhook] Failed to get/create context")
+            return {"status": "error", "error": "context_creation_failed"}
+
+        logger.info(f"[ai-webhook] Context retrieved: flow_type={context.get('flow_type')}, "
+                   f"last_intent={context.get('last_intent')}")
+
+        # Detect persona from channel or context
+        persona = await _detect_persona(channel_id, context, bot)
+        logger.info(f"[ai-webhook] Detected persona: {persona}")
+
+        # Update context with persona if not set
+        if not context.get("persona"):
+            context_manager.set_persona(user_id, channel_id, persona)
+            context["persona"] = persona
+
+        # Append user message to conversation history
+        context_manager.append_message(user_id, channel_id, "user", message_text)
+
+        # Infer intent using AI reasoning
+        logger.info("[ai-webhook] Inferring intent with AI reasoning...")
+        intent_result = ai_reasoning.infer_intent(message_text, context, persona)
+
+        intent = intent_result["intent"]
+        confidence = intent_result["confidence"]
+        entities = intent_result["entities"]
+        card_type = intent_result["card_type"]
+
+        logger.info(f"[ai-webhook] Intent detected: {intent} (confidence: {confidence:.2f})")
+        logger.info(f"[ai-webhook] Entities: {entities}")
+        logger.info(f"[ai-webhook] Card type: {card_type}")
+
+        # Validate intent against persona policy
+        is_valid, violation_message = policy_validator.validate_intent(intent, persona)
+
+        if not is_valid:
+            logger.warning(f"[ai-webhook] Intent '{intent}' blocked by policy for {persona}")
+            # Send polite decline message
+            bot.send_message(
+                channel_id=channel_id,
+                bot_id=bot.get_bot_id(persona),
+                text=violation_message,
+                metadata={"context_type": "policy_violation", "intent": intent}
+            )
+            return {"status": "blocked", "reason": "policy_violation", "intent": intent}
+
+        # Update context with intent
+        context_manager.update_context(
+            user_id,
+            channel_id,
+            {
+                "last_intent": intent,
+                "entities": entities,
+                "last_message": message_text
+            }
+        )
+
+        # Route to appropriate handler based on intent
+        logger.info(f"[ai-webhook] Routing to handler for intent: {intent}")
+        result = await route_intent(
+            intent=intent,
+            entities=entities,
+            context=context,
+            persona=persona,
+            channel_id=channel_id,
+            user_id=user_id,
+            message_text=message_text,
+            payload=payload
+        )
 
         if result:
-            print(f"[ai-webhook] SUCCESS: AI bot responded to message in channel {channel_id}")
+            logger.info(f"[ai-webhook] ✅ SUCCESS: Intent '{intent}' handled successfully")
+            # Append bot response to history
+            if result.get("response_text"):
+                context_manager.append_message(
+                    user_id,
+                    channel_id,
+                    "assistant",
+                    result["response_text"]
+                )
             return {
                 "status": "processed",
-                "message_sent": True,
+                "intent": intent,
+                "confidence": confidence,
                 "channel_id": channel_id,
-                "user_id": user.get('id')
+                "result": result
             }
         else:
-            print(f"[ai-webhook] INFO: Message ignored (likely from bot or no action needed)")
+            logger.warning(f"[ai-webhook] Handler returned no result for intent: {intent}")
             return {
-                "status": "ignored",
-                "message_sent": False,
-                "reason": "Bot message or no action required"
+                "status": "no_action",
+                "intent": intent,
+                "reason": "handler_returned_none"
             }
 
     except Exception as e:
-        print(f"[ai-webhook] ERROR: Exception while handling message: {e}")
+        logger.error(f"[ai-webhook] ❌ ERROR: Exception while handling message: {e}")
         import traceback
         traceback.print_exc()
         return {
@@ -166,6 +281,422 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, str]:
             "error": str(e),
             "hint": "Check backend logs for stack trace"
         }
+
+
+async def _detect_persona(
+    channel_id: str,
+    context: Dict[str, Any],
+    bot
+) -> str:
+    """
+    Detect persona from channel metadata or context.
+
+    Priority:
+    1. Context persona (if already set)
+    2. Channel metadata
+    3. Default to 'tenant'
+    """
+    # Check context first
+    if context.get("persona"):
+        return context["persona"]
+
+    # Check channel metadata
+    try:
+        persona = bot.get_channel_persona(channel_id)
+        if persona:
+            return persona
+    except Exception as e:
+        logger.warning(f"[ai-webhook] Error detecting persona from channel: {e}")
+
+    # Default to tenant
+    return "tenant"
+
+
+async def route_intent(
+    intent: str,
+    entities: Dict[str, Any],
+    context: Dict[str, Any],
+    persona: str,
+    channel_id: str,
+    user_id: str,
+    message_text: str,
+    payload: Dict[str, Any]
+) -> Optional[Dict[str, Any]]:
+    """
+    Dynamic intent router - replaces rigid if/else chains.
+
+    Routes to appropriate handler based on intent classification.
+    """
+    bot = get_bot()
+
+    # Map intents to handlers
+    if intent == "incident.report":
+        return await handle_incident_report(
+            bot, channel_id, user_id, persona, message_text, entities, context
+        )
+
+    elif intent in ["incident.followup", "discovery.response"]:
+        return await handle_discovery_followup(
+            bot, channel_id, user_id, persona, message_text, entities, context
+        )
+
+    elif intent == "job.request":
+        return await handle_job_request(
+            bot, channel_id, user_id, persona, message_text, entities, context
+        )
+
+    elif intent == "job.inquiry" or intent == "job.status":
+        return await handle_job_inquiry(
+            bot, channel_id, user_id, persona, message_text, entities, context
+        )
+
+    elif intent == "bids.request":
+        return await handle_bids_request(
+            bot, channel_id, user_id, persona, entities, context
+        )
+
+    elif intent == "approval.request":
+        return await handle_approval_request(
+            bot, channel_id, user_id, persona, entities, context
+        )
+
+    elif intent == "approval.decision":
+        return await handle_approval_decision(
+            bot, channel_id, user_id, persona, message_text, entities, context
+        )
+
+    elif intent == "greeting":
+        return await handle_greeting(
+            bot, channel_id, user_id, persona, message_text
+        )
+
+    elif intent == "help":
+        return await handle_help_request(
+            bot, channel_id, user_id, persona, context
+        )
+
+    elif intent == "general.chat":
+        return await handle_general_assistance(
+            bot, channel_id, user_id, persona, message_text, context
+        )
+
+    else:
+        # Fallback: use the original bot handler
+        logger.warning(f"[ai-webhook] No specific handler for intent '{intent}', using fallback")
+        result = bot.handle_message_event(payload)
+        return {"response_text": "I understand you need help. Let me assist you.", "fallback": True}
+
+
+# ============================================================================
+# Intent Handlers - Dynamic, context-aware response generation
+# ============================================================================
+
+async def handle_incident_report(
+    bot, channel_id: str, user_id: str, persona: str,
+    message_text: str, entities: Dict[str, Any], context: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Handle new incident report with intelligence."""
+    logger.info("[ai-webhook] 🔧 Handling incident report...")
+
+    # Use the bot's existing incident detection logic
+    result = bot.detect_incident_in_message(message_text)
+
+    if result:
+        # Create incident and send card
+        incident_result = bot.send_incident_card(
+            channel_id=channel_id,
+            user_id=user_id,
+            text=message_text
+        )
+
+        if incident_result:
+            # Update context with incident ID
+            incident_id = incident_result.get("incident_id")
+            context_manager = get_context_manager()
+            context_manager.set_active_incident(user_id, channel_id, incident_id)
+
+            return {
+                "response_text": "I've detected an issue and created an incident.",
+                "incident_id": incident_id,
+                "action": "incident_created"
+            }
+
+    return {"response_text": "Let me help you with that issue.", "action": "general_help"}
+
+
+async def handle_discovery_followup(
+    bot, channel_id: str, user_id: str, persona: str,
+    message_text: str, entities: Dict[str, Any], context: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Handle discovery follow-up responses."""
+    logger.info("[ai-webhook] 📋 Handling discovery follow-up...")
+
+    # Get active incident
+    incident_id = context.get("active_incident_id")
+
+    if not incident_id:
+        return {"response_text": "I don't have an active incident to follow up on. What's the issue?"}
+
+    # For now, use bot's existing discovery logic
+    # TODO: Replace with discovery_manager when implemented
+    bot_id = bot.get_bot_id(persona)
+    bot.send_message(
+        channel_id=channel_id,
+        bot_id=bot_id,
+        text=f"Thanks for that information! Let me continue gathering details about incident {incident_id}.",
+        metadata={"context_type": "discovery", "incident_id": incident_id}
+    )
+
+    return {
+        "response_text": "Discovery question sent",
+        "action": "discovery_continue",
+        "incident_id": incident_id
+    }
+
+
+async def handle_job_request(
+    bot, channel_id: str, user_id: str, persona: str,
+    message_text: str, entities: Dict[str, Any], context: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Handle job creation request."""
+    logger.info("[ai-webhook] 🔨 Handling job request...")
+
+    bot_id = bot.get_bot_id(persona)
+    bot.send_message(
+        channel_id=channel_id,
+        bot_id=bot_id,
+        text="I can help you create a work order. Let me gather the necessary information.",
+        metadata={"context_type": "job_request"}
+    )
+
+    return {"response_text": "Job request acknowledged", "action": "job_request"}
+
+
+async def handle_job_inquiry(
+    bot, channel_id: str, user_id: str, persona: str,
+    message_text: str, entities: Dict[str, Any], context: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Handle job inquiry or status check."""
+    logger.info("[ai-webhook] ℹ️  Handling job inquiry...")
+
+    active_job_id = context.get("active_job_id")
+
+    bot_id = bot.get_bot_id(persona)
+
+    if active_job_id:
+        text = f"Your active job is {active_job_id}. Let me get the latest status for you."
+    else:
+        text = "You don't have any active jobs at the moment. Would you like to create one?"
+
+    bot.send_message(
+        channel_id=channel_id,
+        bot_id=bot_id,
+        text=text,
+        metadata={"context_type": "job_inquiry", "job_id": active_job_id}
+    )
+
+    return {"response_text": text, "action": "job_inquiry", "job_id": active_job_id}
+
+
+async def handle_bids_request(
+    bot, channel_id: str, user_id: str, persona: str,
+    entities: Dict[str, Any], context: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Handle contractor bids request."""
+    logger.info("[ai-webhook] 👷 Handling bids request...")
+
+    active_job_id = context.get("active_job_id")
+    active_incident_id = context.get("active_incident_id")
+
+    bot_id = bot.get_bot_id(persona)
+
+    if not active_job_id and not active_incident_id:
+        bot.send_message(
+            channel_id=channel_id,
+            bot_id=bot_id,
+            text="To view contractor bids, we need to create a job first. What issue needs fixing?",
+            metadata={"context_type": "bids_request"}
+        )
+        return {"response_text": "No active job for bids", "action": "need_job_first"}
+
+    # Use existing bid generation logic
+    # This will be enhanced when we refactor stream_bot.py
+    bot.send_message(
+        channel_id=channel_id,
+        bot_id=bot_id,
+        text="Let me fetch contractor bids for you...",
+        metadata={"context_type": "bids", "job_id": active_job_id}
+    )
+
+    return {"response_text": "Bids request processed", "action": "bids_requested"}
+
+
+async def handle_approval_request(
+    bot, channel_id: str, user_id: str, persona: str,
+    entities: Dict[str, Any], context: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Handle approval request."""
+    logger.info("[ai-webhook] ✅ Handling approval request...")
+
+    bot_id = bot.get_bot_id(persona)
+    bot.send_message(
+        channel_id=channel_id,
+        bot_id=bot_id,
+        text="I'll prepare the approval request for you.",
+        metadata={"context_type": "approval"}
+    )
+
+    return {"response_text": "Approval request sent", "action": "approval_requested"}
+
+
+async def handle_approval_decision(
+    bot, channel_id: str, user_id: str, persona: str,
+    message_text: str, entities: Dict[str, Any], context: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Handle approval decision (approve/reject)."""
+    logger.info("[ai-webhook] 🎯 Handling approval decision...")
+
+    # Detect approval/rejection from message
+    message_lower = message_text.lower()
+    is_approval = any(word in message_lower for word in ["approve", "yes", "accept", "ok"])
+
+    bot_id = bot.get_bot_id(persona)
+
+    if is_approval:
+        text = "Great! I've recorded your approval. Processing next steps..."
+    else:
+        text = "Understood. I've recorded your decision."
+
+    bot.send_message(
+        channel_id=channel_id,
+        bot_id=bot_id,
+        text=text,
+        metadata={"context_type": "approval_decision", "approved": is_approval}
+    )
+
+    return {"response_text": text, "action": "approval_decision", "approved": is_approval}
+
+
+async def handle_greeting(
+    bot, channel_id: str, user_id: str, persona: str, message_text: str
+) -> Dict[str, Any]:
+    """Handle friendly greetings."""
+    logger.info("[ai-webhook] 👋 Handling greeting...")
+
+    bot_id = bot.get_bot_id(persona)
+
+    greetings = {
+        "tenant": "Hello! I'm your PropertyAI assistant. I'm here to help with any property issues or questions you have. What can I help you with today?",
+        "landlord": "Hello! I'm your PropertyAI property management assistant. I can help you manage incidents, approve jobs, and oversee contractors. What would you like to do?",
+        "contractor": "Hello! I'm your PropertyAI job assistant. I can help you view available jobs and manage your work. What do you need?"
+    }
+
+    text = greetings.get(persona, "Hello! How can I help you today?")
+
+    bot.send_message(
+        channel_id=channel_id,
+        bot_id=bot_id,
+        text=text,
+        metadata={"context_type": "greeting"}
+    )
+
+    return {"response_text": text, "action": "greeting"}
+
+
+async def handle_help_request(
+    bot, channel_id: str, user_id: str, persona: str, context: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Handle help requests with persona-specific guidance."""
+    logger.info("[ai-webhook] 🆘 Handling help request...")
+
+    policy_validator = get_policy_validator()
+    capabilities = policy_validator.get_persona_capabilities(persona)
+
+    bot_id = bot.get_bot_id(persona)
+
+    help_text = f"""I'm here to help! As a {persona}, here's what I can assist you with:
+
+"""
+
+    if persona == "tenant":
+        help_text += """• Report property issues and maintenance needs
+• Track incident status
+• Get DIY suggestions for minor issues
+• View job progress
+
+Just describe any issue you're experiencing, and I'll guide you through the process!"""
+
+    elif persona == "landlord":
+        help_text += """• Review and approve work orders
+• View contractor bids
+• Manage property incidents
+• Track costs and approvals
+• Oversee maintenance workflows
+
+You can ask me about pending approvals, view bids, or check on any active incidents!"""
+
+    elif persona == "contractor":
+        help_text += """• View assigned jobs
+• Check job details and requirements
+• Update job status
+• Submit work completion
+
+Ask me about your active jobs or upcoming work!"""
+
+    bot.send_message(
+        channel_id=channel_id,
+        bot_id=bot_id,
+        text=help_text,
+        metadata={"context_type": "help", "persona": persona}
+    )
+
+    return {"response_text": help_text, "action": "help_provided"}
+
+
+async def handle_general_assistance(
+    bot, channel_id: str, user_id: str, persona: str,
+    message_text: str, context: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Handle general conversation with creative, policy-bounded responses."""
+    logger.info("[ai-webhook] 💬 Handling general assistance...")
+
+    # Use the bot's AI service for general responses
+    bot_id = bot.get_bot_id(persona)
+
+    # Get AI response
+    try:
+        from app.services.ai_service import get_ai_response
+
+        # Build conversation context
+        conversation_history = context.get("conversation_history", [])
+
+        ai_response = get_ai_response(
+            message=message_text,
+            persona=persona,
+            context=f"Recent conversation: {conversation_history[-3:]}" if conversation_history else None
+        )
+
+        bot.send_message(
+            channel_id=channel_id,
+            bot_id=bot_id,
+            text=ai_response,
+            metadata={"context_type": "general", "persona": persona}
+        )
+
+        return {"response_text": ai_response, "action": "general_chat"}
+
+    except Exception as e:
+        logger.error(f"[ai-webhook] Error getting AI response: {e}")
+        fallback_text = "I'm here to help! Could you tell me more about what you need?"
+
+        bot.send_message(
+            channel_id=channel_id,
+            bot_id=bot_id,
+            text=fallback_text,
+            metadata={"context_type": "general"}
+        )
+
+        return {"response_text": fallback_text, "action": "fallback"}
 
 
 async def handle_reaction(payload: Dict[str, Any]) -> Dict[str, str]:

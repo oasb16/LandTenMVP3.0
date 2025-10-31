@@ -1,0 +1,412 @@
+{
+  "metadata": {
+    "version": "1.0.0",
+    "description": "Table-driven flow definitions for PropertyAI intelligent conversation management",
+    "last_updated": "2025-10-31"
+  },
+  "flows": {
+    "incident_report": {
+      "name": "Incident Report Flow",
+      "description": "Guides users through reporting and resolving property issues",
+      "personas": ["tenant", "landlord"],
+      "entry_intents": ["incident.report"],
+      "states": {
+        "detection": {
+          "description": "Initial incident detection",
+          "actions": ["create_incident_record", "send_incident_card"],
+          "next_states": ["discovery", "dismissed"],
+          "card_type": "incident",
+          "metadata": {
+            "requires_classification": true,
+            "auto_classify_entities": ["category", "severity", "urgency"]
+          }
+        },
+        "discovery": {
+          "description": "Gather detailed information about the incident",
+          "actions": ["start_discovery", "ask_questions", "collect_media"],
+          "next_states": ["work_order", "resolved", "dismissed"],
+          "card_type": "discovery",
+          "metadata": {
+            "min_questions": 3,
+            "max_questions": 10,
+            "adaptive": true,
+            "can_skip": false
+          }
+        },
+        "work_order": {
+          "description": "Create work order from incident",
+          "actions": ["create_job", "notify_landlord"],
+          "next_states": ["approval", "bids"],
+          "card_type": "job",
+          "metadata": {
+            "requires_approval": true,
+            "approval_threshold": 200
+          }
+        },
+        "resolved": {
+          "description": "Incident resolved (DIY or simple fix)",
+          "actions": ["mark_resolved", "request_feedback"],
+          "next_states": [],
+          "card_type": "completion",
+          "metadata": {
+            "terminal": true
+          }
+        },
+        "dismissed": {
+          "description": "User dismissed the incident",
+          "actions": ["mark_dismissed"],
+          "next_states": [],
+          "card_type": "none",
+          "metadata": {
+            "terminal": true
+          }
+        }
+      },
+      "questions": {
+        "discovery_templates": [
+          {
+            "id": "location",
+            "text": "Where exactly is this issue occurring?",
+            "type": "text",
+            "required": true,
+            "entity": "location",
+            "followup_prompt": "Thanks! Can you be more specific? (e.g., 'under the kitchen sink', 'master bedroom ceiling')"
+          },
+          {
+            "id": "severity_check",
+            "text": "On a scale of 1-10, how urgent is this?",
+            "type": "scale",
+            "required": true,
+            "entity": "urgency_score",
+            "conditions": {
+              "if_score_gt_7": "escalate_urgency"
+            }
+          },
+          {
+            "id": "symptoms",
+            "text": "What symptoms are you seeing?",
+            "type": "text",
+            "required": true,
+            "entity": "symptoms",
+            "adaptive": true
+          },
+          {
+            "id": "duration",
+            "text": "How long has this been happening?",
+            "type": "text",
+            "required": false,
+            "entity": "duration"
+          },
+          {
+            "id": "previous_attempts",
+            "text": "Have you tried anything to fix it?",
+            "type": "text",
+            "required": false,
+            "entity": "previous_attempts"
+          },
+          {
+            "id": "safety_check",
+            "text": "Is this creating any safety hazards?",
+            "type": "boolean",
+            "required": true,
+            "entity": "safety_hazard",
+            "conditions": {
+              "if_yes": "escalate_priority"
+            }
+          }
+        ]
+      }
+    },
+    "job_approval": {
+      "name": "Job Approval Flow",
+      "description": "Landlord approval process for work orders",
+      "personas": ["landlord"],
+      "entry_intents": ["approval.request"],
+      "states": {
+        "pending": {
+          "description": "Job awaiting landlord approval",
+          "actions": ["send_approval_request", "show_job_details"],
+          "next_states": ["approved", "rejected", "needs_more_info"],
+          "card_type": "approval",
+          "metadata": {
+            "timeout_hours": 24,
+            "auto_escalate": true
+          }
+        },
+        "needs_more_info": {
+          "description": "Landlord needs more information",
+          "actions": ["request_additional_info"],
+          "next_states": ["pending"],
+          "card_type": "discovery",
+          "metadata": {
+            "max_iterations": 3
+          }
+        },
+        "approved": {
+          "description": "Job approved, proceed to contractor selection",
+          "actions": ["update_job_status", "generate_bids"],
+          "next_states": ["contractor_selection"],
+          "card_type": "bids",
+          "metadata": {
+            "terminal": false
+          }
+        },
+        "rejected": {
+          "description": "Job rejected by landlord",
+          "actions": ["update_job_status", "notify_tenant"],
+          "next_states": [],
+          "card_type": "completion",
+          "metadata": {
+            "terminal": true,
+            "requires_reason": true
+          }
+        }
+      }
+    },
+    "contractor_selection": {
+      "name": "Contractor Selection Flow",
+      "description": "Process for selecting and hiring contractors",
+      "personas": ["landlord"],
+      "entry_intents": ["bids.request", "bids.compare"],
+      "states": {
+        "bid_generation": {
+          "description": "Generate and display contractor bids",
+          "actions": ["generate_bids", "send_bids_card"],
+          "next_states": ["bid_comparison"],
+          "card_type": "bids",
+          "metadata": {
+            "min_bids": 3,
+            "max_bids": 5,
+            "sort_by": "price"
+          }
+        },
+        "bid_comparison": {
+          "description": "Landlord reviews and compares bids",
+          "actions": ["show_comparison", "highlight_best_value"],
+          "next_states": ["contractor_selected", "bid_generation"],
+          "card_type": "bids",
+          "metadata": {
+            "show_ratings": true,
+            "show_reviews": true,
+            "show_distance": true
+          }
+        },
+        "contractor_selected": {
+          "description": "Landlord selects a contractor",
+          "actions": ["assign_contractor", "update_job", "notify_all_parties"],
+          "next_states": ["scheduled"],
+          "card_type": "approval",
+          "metadata": {
+            "terminal": false
+          }
+        },
+        "scheduled": {
+          "description": "Job scheduled with contractor",
+          "actions": ["create_schedule", "send_confirmation"],
+          "next_states": [],
+          "card_type": "completion",
+          "metadata": {
+            "terminal": true
+          }
+        }
+      }
+    },
+    "discovery_adaptive": {
+      "name": "Adaptive Discovery Flow",
+      "description": "AI-driven adaptive question flow that adjusts based on responses",
+      "personas": ["tenant", "landlord"],
+      "entry_intents": ["discovery.response", "discovery.continue"],
+      "ai_driven": true,
+      "states": {
+        "asking": {
+          "description": "AI asking contextual questions",
+          "actions": ["generate_question", "send_question"],
+          "next_states": ["asking", "complete"],
+          "card_type": "discovery",
+          "metadata": {
+            "adaptive": true,
+            "use_ai_reasoning": true
+          }
+        },
+        "complete": {
+          "description": "Discovery complete",
+          "actions": ["summarize_findings", "determine_next_step"],
+          "next_states": [],
+          "card_type": "none",
+          "metadata": {
+            "terminal": true,
+            "auto_route_next_flow": true
+          }
+        }
+      },
+      "ai_guidelines": {
+        "question_generation": {
+          "max_questions": 10,
+          "skip_obvious": true,
+          "prioritize_critical": true,
+          "adapt_to_responses": true,
+          "avoid_redundancy": true
+        },
+        "completion_criteria": {
+          "min_confidence": 0.8,
+          "required_entities": ["category", "location", "severity"],
+          "optional_entities": ["duration", "symptoms", "safety_hazard"]
+        }
+      }
+    },
+    "general_assistance": {
+      "name": "General Assistance Flow",
+      "description": "Handles general questions and conversations",
+      "personas": ["tenant", "landlord", "contractor"],
+      "entry_intents": ["general.chat", "greeting", "help"],
+      "states": {
+        "active": {
+          "description": "General conversation mode",
+          "actions": ["respond_conversationally", "detect_intent_shift"],
+          "next_states": ["active", "redirected"],
+          "card_type": "none",
+          "metadata": {
+            "creative_mode": true,
+            "can_suggest_actions": true
+          }
+        },
+        "redirected": {
+          "description": "Detected new intent, routing to appropriate flow",
+          "actions": ["route_to_flow"],
+          "next_states": [],
+          "card_type": "none",
+          "metadata": {
+            "terminal": true
+          }
+        }
+      }
+    }
+  },
+  "transitions": {
+    "rules": [
+      {
+        "from_flow": "incident_report",
+        "from_state": "discovery",
+        "to_flow": "job_approval",
+        "to_state": "pending",
+        "condition": "discovery_complete AND cost > threshold",
+        "trigger": "auto"
+      },
+      {
+        "from_flow": "job_approval",
+        "from_state": "approved",
+        "to_flow": "contractor_selection",
+        "to_state": "bid_generation",
+        "condition": "approval_received",
+        "trigger": "auto"
+      },
+      {
+        "from_flow": "general_assistance",
+        "from_state": "active",
+        "to_flow": "incident_report",
+        "to_state": "detection",
+        "condition": "intent_detected = incident.report",
+        "trigger": "ai_routing"
+      }
+    ]
+  },
+  "card_templates": {
+    "incident": {
+      "title_template": "🔧 Issue Detected: {category}",
+      "description_template": "We've detected a {severity} severity {category} issue. Let's get this resolved!",
+      "color_map": {
+        "low": "#90EE90",
+        "medium": "#FFD700",
+        "high": "#FF6347",
+        "emergency": "#DC143C"
+      },
+      "default_actions": [
+        {"name": "start_discovery", "label": "Tell Me More"},
+        {"name": "dismiss", "label": "It's Fine"}
+      ]
+    },
+    "discovery": {
+      "title_template": "📋 Discovery: {incident_id}",
+      "description_template": "Gathering information to help resolve this issue...",
+      "color_map": {
+        "default": "#4682B4"
+      },
+      "progress_indicator": true
+    },
+    "job": {
+      "title_template": "🔨 Work Order: {job_id}",
+      "description_template": "{category} repair - Estimated: ${cost}",
+      "color_map": {
+        "created": "#4682B4",
+        "approved": "#32CD32",
+        "scheduled": "#1E90FF"
+      },
+      "default_actions": [
+        {"name": "approve_job", "label": "Approve"},
+        {"name": "view_bids", "label": "See Contractors"}
+      ]
+    },
+    "bids": {
+      "title_template": "👷 Contractor Quotes for {job_id}",
+      "description_template": "Compare top contractors for this job",
+      "color_map": {
+        "default": "#4169E1"
+      },
+      "show_comparison": true,
+      "max_display": 3
+    },
+    "approval": {
+      "title_template": "✅ Approval Required",
+      "description_template": "Review and approve this {category} job",
+      "color_map": {
+        "pending": "#FFD700",
+        "approved": "#32CD32",
+        "rejected": "#DC143C"
+      },
+      "default_actions": [
+        {"name": "approve", "label": "Approve"},
+        {"name": "reject", "label": "Reject"},
+        {"name": "request_more_info", "label": "Need More Info"}
+      ]
+    },
+    "completion": {
+      "title_template": "✅ {status}",
+      "description_template": "{summary}",
+      "color_map": {
+        "default": "#32CD32"
+      },
+      "show_summary": true
+    }
+  },
+  "routing_hints": {
+    "keywords_to_intent": {
+      "leak": "incident.report",
+      "broken": "incident.report",
+      "damage": "incident.report",
+      "not working": "incident.report",
+      "approve": "approval.decision",
+      "reject": "approval.decision",
+      "bid": "bids.request",
+      "contractor": "bids.request",
+      "job": "job.inquiry",
+      "status": "job.status",
+      "help": "help",
+      "hello": "greeting",
+      "hi": "greeting"
+    },
+    "context_based_routing": {
+      "has_active_incident": {
+        "default_flow": "incident_report",
+        "default_state": "discovery"
+      },
+      "has_active_job": {
+        "default_flow": "job_approval",
+        "default_state": "pending"
+      },
+      "no_active_context": {
+        "default_flow": "general_assistance",
+        "default_state": "active"
+      }
+    }
+  }
+}
