@@ -1,5 +1,7 @@
 'use client';
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Send, Loader2, Bot, User } from 'lucide-react';
 import { StreamChat, Channel as StreamChannel } from 'stream-chat';
@@ -65,7 +67,7 @@ export default function PropertyAIChat({ persona, userId }: PropertyAIChatProps)
         const channelId = data.channel_id || `${persona}-general`;
         const ch = chatClient.channel('messaging', channelId, {
           name: `${persona.charAt(0).toUpperCase() + persona.slice(1)} Chat`,
-        });
+        } as any);
 
         await ch.watch();
 

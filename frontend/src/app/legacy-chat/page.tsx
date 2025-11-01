@@ -1,6 +1,6 @@
 "use client";
 
-import Chat from "@/components/Chat.js";
+import Chat from "@/components/Chat";
 
 export default function LegacyChatPage() {
   const user = { id: "demo", role: "tenant" };
@@ -12,4 +12,3 @@ export default function LegacyChatPage() {
     </div>
   );
 }
-

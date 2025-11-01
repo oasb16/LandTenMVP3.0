@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
 import React from 'react';
 import { Attachment as StreamAttachment } from 'stream-chat-react';
 import type { AttachmentProps } from 'stream-chat-react';

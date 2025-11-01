@@ -17,7 +17,7 @@ import logging
 from typing import Dict, List, Optional, Any, Tuple
 from enum import Enum
 
-import openai
+from openai import OpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -81,14 +81,18 @@ class AIReasoning:
         self.model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
         self.temperature = float(os.getenv("OPENAI_TEMPERATURE", "0.3"))
 
-        # Initialize OpenAI client
-        api_key = os.getenv("OPENAI_API_KEY")
-        if api_key:
-            openai.api_key = api_key
+        # Initialize OpenAI client (1.x interface)
+        self.api_key = os.getenv("OPENAI_API_KEY")
+        self.client: Optional[OpenAI] = None
+        if self.api_key:
+            try:
+                self.client = OpenAI(api_key=self.api_key)
+                logger.info(f"AIReasoning initialized with model: {self.model}")
+            except Exception as exc:  # pragma: no cover - network path
+                logger.error(f"Failed to initialise OpenAI client: {exc}")
         else:
-            logger.warning("OPENAI_API_KEY not set - AI reasoning will be limited")
-
-        logger.info(f"AIReasoning initialized with model: {self.model}")
+            logger.warning("OPENAI_API_KEY not set - using heuristic reasoning fallback")
+            logger.info(f"AIReasoning initialized with model: {self.model} (fallback mode)")
 
     def infer_intent(
         self,
@@ -121,32 +125,32 @@ class AIReasoning:
         # Create intent classification prompt
         prompt = self._create_intent_prompt(message, context_summary, persona)
 
+        if not self.client:
+            return self._fallback_intent_detection(message, context, persona)
+
         try:
-            # Call OpenAI for intent classification
-            response = openai.ChatCompletion.create(
+            response = self.client.chat.completions.create(
                 model=self.model,
                 temperature=self.temperature,
                 messages=[
                     {"role": "system", "content": self._get_intent_system_prompt(persona)},
-                    {"role": "user", "content": prompt}
+                    {"role": "user", "content": prompt},
                 ],
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"},
             )
 
-            # Parse response
             result = json.loads(response.choices[0].message.content)
-
-            # Validate and normalize
             normalized_result = self._normalize_intent_result(result)
 
-            logger.info(f"[ai-reasoning] Intent detected: {normalized_result['intent']} "
-                       f"(confidence: {normalized_result['confidence']:.2f})")
-
+            logger.info(
+                "[ai-reasoning] Intent detected: %s (confidence %.2f)",
+                normalized_result["intent"],
+                normalized_result["confidence"],
+            )
             return normalized_result
 
-        except Exception as e:
+        except Exception as e:  # pragma: no cover - network failure
             logger.error(f"Error in intent inference: {e}")
-            # Fallback to rule-based classification
             return self._fallback_intent_detection(message, context, persona)
 
     def generate_response_plan(
@@ -179,21 +183,24 @@ class AIReasoning:
         """
         prompt = self._create_response_plan_prompt(intent, entities, context, persona)
 
+        if not self.client:
+            return self._fallback_response_plan(intent, entities, persona)
+
         try:
-            response = openai.ChatCompletion.create(
+            response = self.client.chat.completions.create(
                 model=self.model,
                 temperature=self.temperature,
                 messages=[
                     {"role": "system", "content": self._get_response_planning_system_prompt(persona)},
-                    {"role": "user", "content": prompt}
+                    {"role": "user", "content": prompt},
                 ],
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"},
             )
 
             result = json.loads(response.choices[0].message.content)
             return self._normalize_response_plan(result)
 
-        except Exception as e:
+        except Exception as e:  # pragma: no cover - network failure
             logger.error(f"Error in response planning: {e}")
             return self._fallback_response_plan(intent, entities, persona)
 
@@ -233,24 +240,27 @@ class AIReasoning:
         Only include entities that are clearly present in the message.
         """
 
+        if not self.client:
+            return self._fallback_entity_extraction(message)
+
         try:
-            response = openai.ChatCompletion.create(
+            response = self.client.chat.completions.create(
                 model=self.model,
-                temperature=0.1,  # Lower temperature for entity extraction
+                temperature=0.1,
                 messages=[
                     {"role": "system", "content": "You are a precise entity extraction system."},
-                    {"role": "user", "content": prompt}
+                    {"role": "user", "content": prompt},
                 ],
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"},
             )
 
             entities = json.loads(response.choices[0].message.content)
             logger.debug(f"[ai-reasoning] Extracted entities: {entities}")
             return entities
 
-        except Exception as e:
+        except Exception as e:  # pragma: no cover - network failure
             logger.error(f"Error in entity extraction: {e}")
-            return {}
+            return self._fallback_entity_extraction(message)
 
     def _build_context_summary(self, context: Dict[str, Any]) -> str:
         """Build a concise summary of the conversation context."""
@@ -267,6 +277,12 @@ class AIReasoning:
 
         if context.get("last_intent"):
             parts.append(f"Last intent: {context['last_intent']}")
+
+        flow_state = context.get("flow_state") or {}
+        if flow_state.get("stage") and flow_state.get("stage") != "idle":
+            parts.append(
+                f"Flow stage: {flow_state.get('stage')} (question_index={flow_state.get('question_index')})"
+            )
 
         # Add last few messages
         history = context.get("conversation_history", [])
@@ -397,6 +413,134 @@ class AIReasoning:
         }}
         """
 
+    def post_process_reasoning(
+        self,
+        message: str,
+        context: Dict[str, Any],
+        persona: str,
+    ) -> Dict[str, Any]:
+        """
+        Produce a structured reasoning bundle and conversational reply.
+        """
+        summary = self.summarize_conversation(context.get("conversation", [])[-5:])
+        prompt = self._create_reasoning_prompt(message, context, persona, summary)
+        suggested_intent = self.infer_followup_intent(message, context)
+
+        if self.client:
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    temperature=self.temperature,
+                    messages=[
+                        {"role": "system", "content": self._get_reasoning_system_prompt(persona)},
+                        {"role": "user", "content": prompt},
+                    ],
+                    response_format={"type": "json_object"},
+                )
+                payload = json.loads(response.choices[0].message.content)
+                normalized = self._normalize_reasoning_output(payload, message, persona)
+                if suggested_intent and suggested_intent != Intent.GENERAL_CHAT.value:
+                    normalized["intent"] = suggested_intent
+                logger.info(
+                    "[ai-reasoning] intent=%s summary=%s",
+                    normalized["intent"],
+                    normalized["summary"],
+                )
+                return normalized
+            except Exception as exc:  # pragma: no cover - network failure
+                logger.error(f"Error in post_process_reasoning: {exc}")
+
+        return self._fallback_reasoning(message, context, persona, suggested_intent)
+
+    def _create_reasoning_prompt(
+        self,
+        message: str,
+        context: Dict[str, Any],
+        persona: str,
+        conversation_summary: str,
+    ) -> str:
+        return f"""
+        Analyse the latest message and respond with JSON:
+        {{
+            "intent": "intent.label",
+            "summary": "Short plain-language summary",
+            "reply": "Natural assistant reply for the user",
+            "entities": {{"category": "...", "severity": "...", "location": "..."}},
+            "actions": ["next_step_1", "next_step_2"]
+        }}
+
+        Persona: {persona}
+        Context summary: {self._build_context_summary(context)}
+        Conversation recap: {conversation_summary}
+        Message: "{message}"
+        """
+
+    def summarize_conversation(self, history: List[Dict[str, Any]]) -> str:
+        if not history:
+            return "No prior messages."
+        lines = []
+        for item in history:
+            role = item.get("role", "user")
+            text = item.get("text") or item.get("content") or ""
+            lines.append(f"{role}: {text}")
+        return " | ".join(lines)
+
+    def infer_followup_intent(self, message: str, context: Dict[str, Any]) -> str:
+        message_lower = message.lower()
+        flow_state = context.get("flow_state", {}) or {}
+        stage = flow_state.get("stage") or "idle"
+        active_intent = context.get("active_intent")
+
+        if "approve" in message_lower and stage in {"job", "approval"}:
+            return Intent.APPROVAL_DECISION.value
+
+        if active_intent == Intent.INCIDENT_REPORT.value:
+            return Intent.DISCOVERY_RESPONSE.value
+
+        if stage in {"discovery", "job-ready"}:
+            if any(token in message_lower for token in ["yes", "please", "do it", "create"]):
+                return Intent.JOB_REQUEST.value
+            return Intent.DISCOVERY_RESPONSE.value
+
+        if stage == "job":
+            return Intent.JOB_STATUS.value
+
+        return Intent.GENERAL_CHAT.value
+
+    @staticmethod
+    def _get_reasoning_system_prompt(persona: str) -> str:
+        tones = {
+            "tenant": "empathetic and reassuring",
+            "landlord": "confident and decisive",
+            "contractor": "practical and collaborative",
+        }
+        tone = tones.get(persona, "professional and helpful")
+        return (
+            "You are PropertyAI, an intelligent property management assistant. "
+            f"Adopt a {tone} tone and NEVER return unstructured text – only a JSON object as requested."
+        )
+
+    def _normalize_reasoning_output(
+        self,
+        payload: Dict[str, Any],
+        message: str,
+        persona: str,
+    ) -> Dict[str, Any]:
+        intent = payload.get("intent") or Intent.GENERAL_CHAT.value
+        entities = payload.get("entities") or {}
+        summary = payload.get("summary") or message
+        reply = payload.get("reply") or "I'm here to help. Could you share a little more detail?"
+        actions = payload.get("actions") or []
+
+        return {
+            "intent": intent,
+            "summary": summary,
+            "reply": reply,
+            "entities": entities,
+            "actions": actions,
+            "persona": persona,
+        }
+
     def _normalize_intent_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """Normalize and validate intent classification result."""
         return {
@@ -419,6 +563,82 @@ class AIReasoning:
             "should_update_context": result.get("should_update_context", True),
             "context_updates": result.get("context_updates", {})
         }
+
+    def _fallback_reasoning(
+        self,
+        message: str,
+        context: Dict[str, Any],
+        persona: str,
+        suggested_intent: str,
+    ) -> Dict[str, Any]:
+        """Deterministic reasoning when LLM is unavailable."""
+        message_lower = message.lower()
+        for loc in ["kitchen", "bathroom", "basement", "ceiling", "living room", "bedroom"]:
+            if loc in message_lower:
+                location = loc
+                break
+        else:
+            location = None
+
+        if suggested_intent == Intent.DISCOVERY_RESPONSE.value:
+            summary = "Continuing discovery for the active incident."
+            reply = "Thanks — I’m tracking that. I’ll keep guiding you through the next questions."
+            entities = self._fallback_entity_extraction(message)
+            actions = ["continue_discovery"]
+            intent = suggested_intent
+        elif suggested_intent == Intent.JOB_REQUEST.value:
+            summary = "Tenant requested a work order."
+            reply = "Understood. I’ll move ahead with preparing a work order so we can dispatch help."
+            entities = self._fallback_entity_extraction(message)
+            actions = ["create_job"]
+            intent = suggested_intent
+        elif suggested_intent == Intent.APPROVAL_DECISION.value:
+            summary = "User wants to make an approval decision."
+            reply = "Let me record that decision and make sure the right person is notified."
+            entities = {}
+            actions = ["approval_decision"]
+            intent = suggested_intent
+        elif any(keyword in message_lower for keyword in ["water", "leak", "flood", "burst pipe", "pipe"]):
+            summary = "Severe water leak detected."
+            reply = "Got it — that sounds serious. I've created an incident to track this leak."
+            entities = {
+                "category": "plumbing",
+                "severity": "high",
+                "location": location,
+            }
+            actions = ["create_incident", "start_discovery"]
+            intent = Intent.INCIDENT_REPORT.value
+        else:
+            summary = "General assistance requested."
+            reply = "I'm on it. Could you share a little more about what's happening?"
+            entities = {}
+            actions = ["clarify"]
+            intent = Intent.GENERAL_CHAT.value
+
+        return {
+            "intent": intent,
+            "summary": summary,
+            "reply": reply,
+            "entities": entities,
+            "actions": actions,
+            "persona": persona,
+        }
+
+    @staticmethod
+    def _fallback_entity_extraction(message: str) -> Dict[str, Any]:
+        message_lower = message.lower()
+        entities: Dict[str, Any] = {}
+
+        if any(keyword in message_lower for keyword in ["water", "leak", "flood", "pipe"]):
+            entities["category"] = "plumbing"
+            entities["severity"] = "high" if "everywhere" in message_lower or "flood" in message_lower else "medium"
+
+        for loc in ["kitchen", "bathroom", "basement", "ceiling", "living room", "bedroom"]:
+            if loc in message_lower:
+                entities["location"] = loc
+                break
+
+        return entities
 
     def _fallback_intent_detection(
         self,

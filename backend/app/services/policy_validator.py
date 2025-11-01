@@ -16,6 +16,7 @@ Features:
 import logging
 from typing import Dict, List, Optional, Any, Tuple
 from enum import Enum
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,12 @@ class Persona(str, Enum):
 class PolicyViolation(Exception):
     """Raised when an action violates a policy."""
     pass
+
+
+@dataclass
+class PolicyValidationResult:
+    allowed: bool
+    message: Optional[str] = None
 
 
 class PolicyValidator:
@@ -58,9 +65,10 @@ class PolicyValidator:
                     "incident.report",
                     "incident.followup",
                     "discovery.response",
-                    "discovery.continue",
-                    "job.inquiry",
-                    "job.status",
+                "discovery.continue",
+                "job.request",
+                "job.inquiry",
+                "job.status",
                     "general.chat",
                     "greeting",
                     "help"
@@ -215,6 +223,8 @@ class PolicyValidator:
             return False, message
 
         return True, None
+
+
 
     def validate_cost_approval(
         self,
@@ -419,3 +429,9 @@ def get_policy_validator() -> PolicyValidator:
         _policy_validator = PolicyValidator()
 
     return _policy_validator
+
+
+def validate_action(persona: str, action: str, context: Optional[Dict[str, Any]] = None) -> PolicyValidationResult:
+    validator = get_policy_validator()
+    allowed, message = validator.validate_action(action, persona)
+    return PolicyValidationResult(allowed=allowed, message=message)

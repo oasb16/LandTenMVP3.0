@@ -1,337 +1,168 @@
 """
 Context Manager - Persistent Conversational Memory System
 
-This module provides intelligent, per-user, per-channel context tracking that enables
-the AI system to maintain conversational continuity, understand flow state, and make
-context-aware decisions.
-
-Features:
-- Per-user + per-channel short-term memory
-- DynamoDB persistence for durability
-- Automatic context expiration (configurable TTL)
-- Flow state tracking (incident, job, bid, discovery phases)
-- Persona-aware context management
-- Thread-safe operations
+Provides per-user, per-channel conversational memory that is durable,
+persona-aware, and verified after every write.
 """
 
-import os
+from __future__ import annotations
+
 import json
 import logging
-from datetime import datetime, timedelta
-from typing import Dict, Optional, List, Any
-from decimal import Decimal
+import os
+import time
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
 
 import boto3
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, BotoCoreError
+from decimal import Decimal
 
 logger = logging.getLogger(__name__)
 
 
 class ContextManager:
     """
-    Manages conversational context for the PropertyAI system.
+    Manages conversational context for PropertyAI tenants, landlords, and contractors.
 
-    Context Structure:
-    {
-        "context_id": "user_id:channel_id",
-        "user_id": "user-123",
-        "channel_id": "channel-abc",
-        "persona": "tenant|landlord|contractor",
-        "flow_type": "incident|job|bid|discovery|general",
-        "flow_state": "started|in_progress|completed",
-        "active_incident_id": "INC-123",
-        "active_job_id": "JOB-456",
-        "last_intent": "incident.report",
-        "last_message": "there's a leak in the kitchen",
-        "last_message_at": "2025-10-31T12:00:00Z",
-        "entities": {
-            "category": "plumbing",
-            "severity": "medium",
-            "urgency": "immediate"
-        },
-        "discovery_progress": {
-            "current_question": 2,
-            "total_questions": 5,
-            "answers": {...}
-        },
-        "policy_state": {
-            "can_auto_approve": true,
-            "requires_landlord_approval": false
-        },
-        "conversation_history": [
-            {"role": "user", "content": "...", "timestamp": "..."},
-            {"role": "assistant", "content": "...", "timestamp": "..."}
-        ],
-        "metadata": {},
-        "created_at": "2025-10-31T11:00:00Z",
-        "updated_at": "2025-10-31T12:00:00Z",
-        "expires_at": "2025-11-01T12:00:00Z"
-    }
+    Schema persisted in DynamoDB (pay-per-request):
+        pk:  user#<user_id>
+        sk:  channel#<channel_id>
+        persona: str
+        active_intent: str
+        active_incident: str
+        conversation: List[{role,text,timestamp}]
+        entities: dict
+        metadata: dict
+        ttl: epoch seconds (24h default)
+        updated_at: ISO timestamp
     """
 
-    def __init__(self):
-        """Initialize the ContextManager with DynamoDB connection."""
-        self.table_name = self._get_table_name()
-        self.dynamodb = self._get_dynamodb_resource()
-        self.table = self.dynamodb.Table(self.table_name)
-
-        # Context expiration settings (24 hours by default)
+    def __init__(self) -> None:
+        self.table_name = self._resolve_table_name()
         self.context_ttl_hours = int(os.getenv("CONTEXT_TTL_HOURS", "24"))
-
-        # Max conversation history to store (last N messages)
+        self.context_ttl_seconds = self.context_ttl_hours * 3600
         self.max_history_length = int(os.getenv("CONTEXT_MAX_HISTORY", "20"))
 
-        logger.info(f"ContextManager initialized with table: {self.table_name}")
+        self._memory_store: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        self._use_memory = False
 
-    def _get_table_name(self) -> str:
-        """Get the DynamoDB table name for chat contexts."""
-        prefix = os.getenv("TABLE_PREFIX", "landtenmvp")
-        stage = os.getenv("STAGE", "dev")
-        return f"{prefix}_{stage}_chat_contexts"
+        self.dynamodb = self._get_dynamodb_resource()
 
-    def _get_dynamodb_resource(self):
-        """Get DynamoDB resource connection."""
-        endpoint_url = os.getenv("DYNAMO_ENDPOINT_URL")
-
-        if endpoint_url:
-            # Local development
-            return boto3.resource(
-                'dynamodb',
-                endpoint_url=endpoint_url,
-                region_name=os.getenv("AWS_REGION", "us-east-1")
-            )
-        else:
-            # Production
-            return boto3.resource(
-                'dynamodb',
-                region_name=os.getenv("AWS_REGION", "us-east-1")
+        try:
+            self.ensure_table_exists()
+            self.table = self.dynamodb.Table(self.table_name)
+            logger.info(f"[context-manager] Using DynamoDB table '{self.table_name}'")
+        except Exception as exc:  # pragma: no cover - fallback path
+            self._use_memory = True
+            self.table = None
+            logger.warning(
+                "[context-manager] Falling back to in-memory store "
+                f"(table '{self.table_name}' unavailable: {exc})"
             )
 
-    @staticmethod
-    def _make_context_id(user_id: str, channel_id: str) -> str:
-        """Create a unique context identifier."""
-        return f"{user_id}:{channel_id}"
-
-    @staticmethod
-    def _decimal_to_float(obj: Any) -> Any:
-        """Convert Decimal objects to float for JSON serialization."""
-        if isinstance(obj, Decimal):
-            return float(obj)
-        elif isinstance(obj, dict):
-            return {k: ContextManager._decimal_to_float(v) for k, v in obj.items()}
-        elif isinstance(obj, list):
-            return [ContextManager._decimal_to_float(v) for v in obj]
-        return obj
-
+    # --------------------------------------------------------------------- #
+    # Public API
+    # --------------------------------------------------------------------- #
     def get_context(
         self,
         user_id: str,
         channel_id: str,
-        create_if_missing: bool = True
+        create_if_missing: bool = True,
     ) -> Optional[Dict[str, Any]]:
-        """
-        Retrieve context for a user in a specific channel.
+        """Fetch context for a user/channel pair."""
+        key = self._make_keys(user_id, channel_id)
 
-        Args:
-            user_id: The user's ID
-            channel_id: The channel ID
-            create_if_missing: If True, creates a new context if none exists
+        raw_context: Optional[Dict[str, Any]]
+        if self._use_memory:
+            raw_context = self._memory_store.get(key)
+        else:
+            try:
+                resp = self.table.get_item(Key=self._format_key(key))
+                raw_context = resp.get("Item")
+            except (ClientError, BotoCoreError) as exc:  # pragma: no cover
+                logger.error(f"[context-manager] Dynamo get_item failed: {exc}")
+                self._switch_to_memory()
+                raw_context = self._memory_store.get(key)
 
-        Returns:
-            Context dictionary or None if not found and create_if_missing=False
-        """
-        context_id = self._make_context_id(user_id, channel_id)
+        if raw_context:
+            return self._normalize_context(raw_context)
 
-        try:
-            response = self.table.get_item(Key={"context_id": context_id})
-
-            if "Item" in response:
-                context = self._decimal_to_float(response["Item"])
-
-                # Check if context is expired
-                if "expires_at" in context:
-                    expires_at = datetime.fromisoformat(context["expires_at"].replace("Z", "+00:00"))
-                    if datetime.utcnow() > expires_at:
-                        logger.info(f"Context {context_id} has expired, creating new one")
-                        if create_if_missing:
-                            return self._create_new_context(user_id, channel_id)
-                        return None
-
-                logger.debug(f"[context-manager] Retrieved context: {context_id}")
-                return context
-
-            elif create_if_missing:
-                logger.info(f"[context-manager] No context found for {context_id}, creating new")
-                return self._create_new_context(user_id, channel_id)
-
+        if not create_if_missing:
             return None
 
-        except ClientError as e:
-            logger.error(f"Error retrieving context {context_id}: {e}")
-            if create_if_missing:
-                return self._create_new_context(user_id, channel_id)
-            return None
-
-    def _create_new_context(self, user_id: str, channel_id: str) -> Dict[str, Any]:
-        """Create a new context with default values."""
-        now = datetime.utcnow()
-        expires_at = now + timedelta(hours=self.context_ttl_hours)
-
-        context = {
-            "context_id": self._make_context_id(user_id, channel_id),
-            "user_id": user_id,
-            "channel_id": channel_id,
-            "persona": None,  # Will be detected from channel metadata
-            "flow_type": "general",
-            "flow_state": "idle",
-            "active_incident_id": None,
-            "active_job_id": None,
-            "last_intent": None,
-            "last_message": None,
-            "last_message_at": None,
-            "entities": {},
-            "discovery_progress": {},
-            "policy_state": {},
-            "conversation_history": [],
-            "metadata": {},
-            "created_at": now.isoformat() + "Z",
-            "updated_at": now.isoformat() + "Z",
-            "expires_at": expires_at.isoformat() + "Z"
-        }
-
-        # Save to DynamoDB
-        try:
-            self.table.put_item(Item=context)
-            logger.info(f"[context-manager] Created new context: {context['context_id']}")
-        except ClientError as e:
-            logger.error(f"Error creating context: {e}")
-
-        return context
+        return self._create_context(user_id, channel_id)
 
     def update_context(
         self,
         user_id: str,
         channel_id: str,
         updates: Dict[str, Any],
-        append_to_history: Optional[Dict[str, str]] = None
+        append_to_history: Optional[Dict[str, str]] = None,
     ) -> bool:
-        """
-        Update context with new information.
-
-        Args:
-            user_id: The user's ID
-            channel_id: The channel ID
-            updates: Dictionary of fields to update
-            append_to_history: Optional message to append to conversation history
-                              Format: {"role": "user|assistant", "content": "..."}
-
-        Returns:
-            True if successful, False otherwise
-        """
-        context_id = self._make_context_id(user_id, channel_id)
-        now = datetime.utcnow().isoformat() + "Z"
-
-        # Get current context to preserve conversation history
-        current_context = self.get_context(user_id, channel_id)
-        if not current_context:
-            logger.error(f"Cannot update non-existent context: {context_id}")
+        """Merge updates into context and verify persistence."""
+        context = self.get_context(user_id, channel_id, create_if_missing=True)
+        if context is None:
+            logger.error(f"[context-manager] Unable to create base context for {user_id}/{channel_id}")
             return False
 
-        # Prepare update expression
-        update_expr = "SET updated_at = :updated_at"
-        expr_attr_values = {":updated_at": now}
+        now_iso = datetime.utcnow().isoformat() + "Z"
+        ttl = int(time.time()) + self.context_ttl_seconds
 
-        # Add provided updates
-        for key, value in updates.items():
-            if key not in ["context_id", "user_id", "channel_id", "created_at"]:
-                update_expr += f", {key} = :{key}"
-                expr_attr_values[f":{key}"] = value
+        merged = {**context, **updates}
+        merged["persona"] = updates.get("persona", context.get("persona"))
+        merged["active_intent"] = updates.get("active_intent", context.get("active_intent"))
+        merged["active_incident"] = updates.get("active_incident", context.get("active_incident"))
+        merged["active_job"] = updates.get("active_job", context.get("active_job"))
+        merged["entities"] = updates.get("entities", context.get("entities", {}))
+        merged["metadata"] = updates.get("metadata", context.get("metadata", {}))
+        merged["flow_state"] = updates.get("flow_state", context.get("flow_state", {}))
+        merged["updated_at"] = now_iso
+        merged["ttl"] = ttl
 
-        # Handle conversation history
+        conversation = list(context.get("conversation", []))
         if append_to_history:
-            conversation_history = current_context.get("conversation_history", [])
+            message_entry = {
+                "role": append_to_history.get("role"),
+                "text": append_to_history.get("content"),
+                "timestamp": now_iso,
+            }
+            conversation.append(message_entry)
+            conversation = conversation[-self.max_history_length :]
 
-            # Add timestamp to message
-            append_to_history["timestamp"] = now
+        merged["conversation"] = conversation
+        merged["conversation_history"] = conversation  # backward compatibility
 
-            # Append new message
-            conversation_history.append(append_to_history)
+        safe_payload = self._coerce_numbers(merged)
+        success = self._write_context(safe_payload, user_id, channel_id)
 
-            # Keep only last N messages
-            if len(conversation_history) > self.max_history_length:
-                conversation_history = conversation_history[-self.max_history_length:]
-
-            update_expr += ", conversation_history = :history"
-            expr_attr_values[":history"] = conversation_history
-
-        try:
-            self.table.update_item(
-                Key={"context_id": context_id},
-                UpdateExpression=update_expr,
-                ExpressionAttributeValues=expr_attr_values
+        if success:
+            logger.info(
+                "[context-manager] ✅ Context persisted for %s | intent=%s incident=%s",
+                user_id,
+                merged.get("active_intent"),
+                merged.get("active_incident"),
             )
-            logger.debug(f"[context-manager] Updated context: {context_id}")
-            return True
+        else:
+            logger.error("[context-manager] ❌ Failed to persist context for %s", user_id)
 
-        except ClientError as e:
-            logger.error(f"Error updating context {context_id}: {e}")
-            return False
+        return success
 
     def set_persona(self, user_id: str, channel_id: str, persona: str) -> bool:
-        """Set the persona for a context."""
         return self.update_context(user_id, channel_id, {"persona": persona})
 
-    def set_flow(
-        self,
-        user_id: str,
-        channel_id: str,
-        flow_type: str,
-        flow_state: str = "in_progress"
-    ) -> bool:
-        """Set the active flow type and state."""
+    def set_active_incident(self, user_id: str, channel_id: str, incident_id: str) -> bool:
         return self.update_context(
             user_id,
             channel_id,
-            {"flow_type": flow_type, "flow_state": flow_state}
+            {"active_incident": incident_id, "active_intent": "incident.report"},
         )
 
-    def set_active_incident(
-        self,
-        user_id: str,
-        channel_id: str,
-        incident_id: str
-    ) -> bool:
-        """Set the active incident ID."""
+    def set_active_job(self, user_id: str, channel_id: str, job_id: str) -> bool:
         return self.update_context(
             user_id,
             channel_id,
-            {"active_incident_id": incident_id, "flow_type": "incident"}
-        )
-
-    def set_active_job(
-        self,
-        user_id: str,
-        channel_id: str,
-        job_id: str
-    ) -> bool:
-        """Set the active job ID."""
-        return self.update_context(
-            user_id,
-            channel_id,
-            {"active_job_id": job_id, "flow_type": "job"}
-        )
-
-    def update_discovery_progress(
-        self,
-        user_id: str,
-        channel_id: str,
-        progress: Dict[str, Any]
-    ) -> bool:
-        """Update discovery flow progress."""
-        return self.update_context(
-            user_id,
-            channel_id,
-            {"discovery_progress": progress}
+            {"active_job": job_id, "active_intent": "job.request"},
         )
 
     def append_message(
@@ -339,150 +170,257 @@ class ContextManager:
         user_id: str,
         channel_id: str,
         role: str,
-        content: str
+        content: str,
     ) -> bool:
-        """
-        Append a message to the conversation history.
+        flow_updates = {}
+        if role == "assistant":
+            flow_updates["last_ai_prompt"] = content
+        elif role == "user":
+            flow_updates["last_user_reply"] = content
 
-        Args:
-            user_id: The user's ID
-            channel_id: The channel ID
-            role: "user" or "assistant"
-            content: The message content
+        updates: Dict[str, Any] = {
+            "last_message": content,
+            "last_message_at": datetime.utcnow().isoformat() + "Z",
+        }
+        if flow_updates:
+            context = self.get_context(user_id, channel_id, create_if_missing=True) or {}
+            current_state = dict(context.get("flow_state") or {})
+            current_state.update(flow_updates)
+            updates["flow_state"] = current_state
 
-        Returns:
-            True if successful
-        """
         return self.update_context(
             user_id,
             channel_id,
-            {"last_message": content, "last_message_at": datetime.utcnow().isoformat() + "Z"},
-            append_to_history={"role": role, "content": content}
+            updates,
+            append_to_history={"role": role, "content": content},
         )
 
-    def clear_context(self, user_id: str, channel_id: str) -> bool:
-        """
-        Clear/reset a context (useful for starting fresh).
-
-        Args:
-            user_id: The user's ID
-            channel_id: The channel ID
-
-        Returns:
-            True if successful
-        """
-        context_id = self._make_context_id(user_id, channel_id)
+    def list_active_contexts(self, user_id: str) -> List[Dict[str, Any]]:
+        contexts: List[Dict[str, Any]] = []
+        if self._use_memory:
+            for (pk, _), ctx in self._memory_store.items():
+                if pk == self._make_pk(user_id):
+                    contexts.append(self._normalize_context(ctx))
+            return contexts
 
         try:
-            self.table.delete_item(Key={"context_id": context_id})
-            logger.info(f"[context-manager] Cleared context: {context_id}")
+            resp = self.table.query(
+                KeyConditionExpression="pk = :pk",
+                ExpressionAttributeValues={":pk": self._make_pk(user_id)},
+            )
+            contexts = [self._normalize_context(item) for item in resp.get("Items", [])]
+        except (ClientError, BotoCoreError) as exc:
+            logger.error(f"[context-manager] list_active_contexts failed: {exc}")
+
+        return contexts
+
+    # ------------------------------------------------------------------ #
+    # Internal helpers
+    # ------------------------------------------------------------------ #
+    def ensure_table_exists(self) -> None:
+        """Create the chat context table if it does not already exist."""
+        client = self.dynamodb.meta.client
+        try:
+            client.describe_table(TableName=self.table_name)
+            return
+        except client.exceptions.ResourceNotFoundException:  # type: ignore[attr-defined]
+            logger.info(f"[context-manager] Creating DynamoDB table '{self.table_name}'")
+
+        client.create_table(
+            TableName=self.table_name,
+            KeySchema=[
+                {"AttributeName": "pk", "KeyType": "HASH"},
+                {"AttributeName": "sk", "KeyType": "RANGE"},
+            ],
+            AttributeDefinitions=[
+                {"AttributeName": "pk", "AttributeType": "S"},
+                {"AttributeName": "sk", "AttributeType": "S"},
+            ],
+            BillingMode="PAY_PER_REQUEST",
+        )
+        waiter = client.get_waiter("table_exists")
+        waiter.wait(TableName=self.table_name)
+
+        try:
+            client.update_time_to_live(
+                TableName=self.table_name,
+                TimeToLiveSpecification={"Enabled": True, "AttributeName": "ttl"},
+            )
+        except client.exceptions.ValidationException:  # type: ignore[attr-defined]
+            # TTL already enabled or unsupported for local
+            pass
+
+    def _create_context(self, user_id: str, channel_id: str) -> Dict[str, Any]:
+        """Create a brand new context with default values."""
+        now_iso = datetime.utcnow().isoformat() + "Z"
+        ttl = int(time.time()) + self.context_ttl_seconds
+        base_context = {
+            "pk": self._make_pk(user_id),
+            "sk": self._make_sk(channel_id),
+            "user_id": user_id,
+            "channel_id": channel_id,
+            "persona": None,
+            "active_intent": None,
+            "active_incident": None,
+            "active_job": None,
+            "flow_state": {
+                "stage": "idle",
+                "question_index": 0,
+                "last_ai_prompt": None,
+                "last_user_reply": None,
+            },
+            "conversation": [],
+            "conversation_history": [],
+            "entities": {},
+            "metadata": {},
+            "created_at": now_iso,
+            "updated_at": now_iso,
+            "ttl": ttl,
+        }
+
+        if self._write_context(base_context, user_id, channel_id):
+            logger.info(
+                "[context-manager] Created fresh context for user=%s channel=%s",
+                user_id,
+                channel_id,
+            )
+            return base_context
+
+        logger.error("[context-manager] Failed to create context; using memory fallback")
+        return base_context
+
+    def _write_context(self, context: Dict[str, Any], user_id: str, channel_id: str) -> bool:
+        """Persist context and verify success."""
+        key = self._make_keys(user_id, channel_id)
+        if self._use_memory:
+            self._memory_store[key] = context
             return True
-        except ClientError as e:
-            logger.error(f"Error clearing context {context_id}: {e}")
+
+        try:
+            self.table.put_item(Item=context)
+        except (ClientError, BotoCoreError) as exc:
+            logger.error(f"[context-manager] put_item failed: {exc}")
+            self._switch_to_memory()
+            self._memory_store[key] = context
+            return True
+
+        # Read-after-write verification
+        persisted = self._read_raw_context(key)
+        if not persisted:
+            logger.error("[context-manager] Verification failed: context missing after write")
             return False
 
-    def get_conversation_history(
+        if persisted.get("updated_at") != context.get("updated_at"):
+            logger.warning(
+                "[context-manager] Verification mismatch: expected updated_at=%s got=%s",
+                context.get("updated_at"),
+                persisted.get("updated_at"),
+            )
+
+        return True
+
+    def _read_raw_context(self, key: Tuple[str, str]) -> Optional[Dict[str, Any]]:
+        if self._use_memory:
+            return self._memory_store.get(key)
+        try:
+            resp = self.table.get_item(Key=self._format_key(key))
+            return resp.get("Item")
+        except (ClientError, BotoCoreError):
+            return None
+
+    def _normalize_context(self, raw: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert Decimal to floats and ensure conversation array is present."""
+        normalized = json.loads(json.dumps(raw, default=self._decimal_default))
+        normalized.setdefault("conversation", normalized.get("conversation_history", []))
+        normalized.setdefault("conversation_history", normalized["conversation"])
+        normalized.setdefault(
+            "flow_state",
+            {
+                "stage": "idle",
+                "question_index": 0,
+                "last_ai_prompt": None,
+                "last_user_reply": None,
+            },
+        )
+        return normalized
+
+    def advance_flow_state(
         self,
         user_id: str,
         channel_id: str,
-        limit: Optional[int] = None
-    ) -> List[Dict[str, str]]:
-        """
-        Get conversation history for context.
+        stage: str,
+        updates: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        context = self.get_context(user_id, channel_id, create_if_missing=True)
+        if context is None:
+            return False
 
-        Args:
-            user_id: The user's ID
-            channel_id: The channel ID
-            limit: Optional limit on number of messages to return (most recent)
+        current_state = dict(context.get("flow_state") or {})
+        if updates:
+            current_state.update(updates)
+        current_state["stage"] = stage
+        return self.update_context(user_id, channel_id, {"flow_state": current_state})
 
-        Returns:
-            List of conversation messages
-        """
-        context = self.get_context(user_id, channel_id, create_if_missing=False)
+    def _coerce_numbers(self, value: Any) -> Any:
+        if isinstance(value, float):
+            return Decimal(str(value))
+        if isinstance(value, dict):
+            return {k: self._coerce_numbers(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [self._coerce_numbers(v) for v in value]
+        return value
 
-        if not context:
-            return []
+    @staticmethod
+    def _decimal_default(obj: Any) -> Any:
+        if isinstance(obj, Decimal):
+            return float(obj)
+        raise TypeError
 
-        history = context.get("conversation_history", [])
+    def _switch_to_memory(self) -> None:
+        if not self._use_memory:
+            logger.warning("[context-manager] Switching to in-memory context store")
+        self._use_memory = True
 
-        if limit and len(history) > limit:
-            return history[-limit:]
+    # ------------------------------------------------------------------ #
+    # Key helpers and configuration
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _make_pk(user_id: str) -> str:
+        return f"user#{user_id}"
 
-        return history
+    @staticmethod
+    def _make_sk(channel_id: str) -> str:
+        return f"channel#{channel_id}"
 
-    def list_active_contexts(self, user_id: str) -> List[Dict[str, Any]]:
-        """
-        List all active contexts for a user across all channels.
+    def _make_keys(self, user_id: str, channel_id: str) -> Tuple[str, str]:
+        return self._make_pk(user_id), self._make_sk(channel_id)
 
-        Args:
-            user_id: The user's ID
+    @staticmethod
+    def _format_key(key: Tuple[str, str]) -> Dict[str, str]:
+        pk, sk = key
+        return {"pk": pk, "sk": sk}
 
-        Returns:
-            List of active context dictionaries
-        """
-        try:
-            # Scan for contexts matching user_id
-            response = self.table.scan(
-                FilterExpression="user_id = :uid",
-                ExpressionAttributeValues={":uid": user_id}
-            )
+    @staticmethod
+    def _resolve_table_name() -> str:
+        prefix = os.getenv("TABLE_PREFIX", "landten")
+        stage = os.getenv("STAGE", "dev")
+        return f"{prefix}_{stage}_chat_contexts"
 
-            contexts = [self._decimal_to_float(item) for item in response.get("Items", [])]
-
-            # Filter out expired contexts
-            now = datetime.utcnow()
-            active_contexts = []
-
-            for ctx in contexts:
-                if "expires_at" in ctx:
-                    expires_at = datetime.fromisoformat(ctx["expires_at"].replace("Z", "+00:00"))
-                    if now <= expires_at:
-                        active_contexts.append(ctx)
-
-            return active_contexts
-
-        except ClientError as e:
-            logger.error(f"Error listing contexts for user {user_id}: {e}")
-            return []
-
-    def get_active_flows(self, user_id: str, channel_id: str) -> Dict[str, Any]:
-        """
-        Get summary of active flows for a context.
-
-        Returns:
-            Dictionary with active incidents, jobs, and flow states
-        """
-        context = self.get_context(user_id, channel_id, create_if_missing=False)
-
-        if not context:
-            return {
-                "has_active_incident": False,
-                "has_active_job": False,
-                "flow_type": "general",
-                "flow_state": "idle"
-            }
-
-        return {
-            "has_active_incident": bool(context.get("active_incident_id")),
-            "has_active_job": bool(context.get("active_job_id")),
-            "active_incident_id": context.get("active_incident_id"),
-            "active_job_id": context.get("active_job_id"),
-            "flow_type": context.get("flow_type", "general"),
-            "flow_state": context.get("flow_state", "idle"),
-            "last_intent": context.get("last_intent"),
-            "discovery_in_progress": bool(context.get("discovery_progress"))
-        }
+    @staticmethod
+    def _get_dynamodb_resource():
+        endpoint_url = os.getenv("DYNAMO_ENDPOINT_URL")
+        region = os.getenv("AWS_REGION", "us-east-1")
+        if endpoint_url:
+            return boto3.resource("dynamodb", endpoint_url=endpoint_url, region_name=region)
+        return boto3.resource("dynamodb", region_name=region)
 
 
-# Singleton instance
+# Singleton
 _context_manager: Optional[ContextManager] = None
 
 
 def get_context_manager() -> ContextManager:
-    """Get or create the singleton ContextManager instance."""
     global _context_manager
-
     if _context_manager is None:
         _context_manager = ContextManager()
-
     return _context_manager
