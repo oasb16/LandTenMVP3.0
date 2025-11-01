@@ -29,6 +29,7 @@ from app.services.dynamo_service import (
     UserDB,
     PropertyDB
 )
+from app.services.context_manager import get_context_manager
 import json
 import re
 
@@ -49,6 +50,7 @@ class PropertyAIBot:
             raise RuntimeError("stream-chat SDK not installed")
 
         self.client = StreamChat(api_key=self.api_key, api_secret=self.api_secret)
+        self.context_manager = get_context_manager()
 
         # Bot configurations for each persona
         self.bots = {
@@ -125,78 +127,75 @@ class PropertyAIBot:
         channel_id: str,
         bot_id: str,
         text: str,
-        attachments: Optional[List[Dict]] = None,
-        custom_data: Optional[Dict] = None,
-        internal_type: str = "ai-message"
+        attachments: Optional[List[Dict[str, Any]]] = None,
+        custom_data: Optional[Dict[str, Any]] = None,
+        internal_type: str = "ai-message",
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict]:
-        """Send a message from AI bot to channel (Stream-safe)"""
+        """Send a message from an AI bot to a channel with natural formatting."""
         try:
             channel = self.client.channel("messaging", channel_id)
 
-            # Trojan horse technique: send 'ai-message' metadata inside text
-            text_payload = f"[AI_TYPE:{internal_type}]\n{text}"
-
-            message_data = {
-                "text": text_payload,
-                "type": "regular",  # Only valid values: 'regular', 'system'
-                "ai_type": internal_type,  # preserved in metadata
+            payload: Dict[str, Any] = {
+                "text": text,
+                "type": "regular",
+                "ai_type": internal_type,
             }
 
             if attachments:
-                message_data["attachments"] = attachments
+                payload["attachments"] = attachments
             if custom_data:
-                message_data.update(custom_data)
+                payload.update(custom_data)
+            if metadata:
+                payload["metadata"] = metadata
 
-            print(f"[stream-bot] Sending AI message (Trojan) as regular: {internal_type} -> {text}")
-            # Send message to Stream safely
-            response = channel.send_message(
-                {
-                    "text": f"[AI_CARD] {text}",
-                    "attachments": attachments if attachments else [],
-                    "type": "regular",  # Only valid values: 'regular', 'system'
-                    "ai_type": internal_type,
-                },
-                user_id=bot_id,
-            )
-            print(f"[stream-bot] Message sent to {channel_id} from {bot_id}")
+            print(f"[stream-bot] send_message -> {channel_id} [{bot_id}] :: {text}")
+            response = channel.send_message(payload, user_id=bot_id)
             return response
-        except Exception as e:
+        except Exception as e:  # pragma: no cover - network path
             print(f"[stream-bot] Error sending message: {e}")
             return None
+
+    def send_ai_message(
+        self,
+        channel_id: str,
+        persona: str,
+        text: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict]:
+        """Convenience wrapper for conversational replies."""
+        bot_id = self.get_bot_id(persona)
+        return self.send_message(
+            channel_id=channel_id,
+            bot_id=bot_id,
+            text=text,
+            internal_type="ai-message",
+            metadata=metadata,
+        )
 
     def send_action_buttons(
         self,
         channel_id: str,
         bot_id: str,
         text: str,
-        actions: List[Dict[str, Any]]
+        actions: List[Dict[str, Any]],
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict]:
-        """Send a message with action buttons"""
-        attachments = [{
+        """Send a structured message with action buttons."""
+        attachment = {
             "type": "custom_card",
-            "fallback": text,  # prevents stripping by Stream API
+            "fallback": text,
             "text": text,
-            "buttons": [
-                {
-                    "label": "Start Discovery",
-                    "style": "primary",
-                    "value": f"action:start_discovery:{incident_id}",
-                },
-                {
-                    "label": "Dismiss",
-                    "style": "default",
-                    "value": "action:dismiss",
-                },
-            ],
-        }]
-
+            "buttons": actions,
+        }
 
         return self.send_message(
             channel_id=channel_id,
             bot_id=bot_id,
             text=text,
-            attachments=attachments,
-            internal_type="ai-message"
+            attachments=[attachment],
+            metadata=metadata,
+            internal_type="ai-message",
         )
 
     def process_tenant_message(
@@ -344,11 +343,11 @@ Current conversation context: {context if context else 'New conversation'}
                 incident_data = self.detect_incident_in_message(message_text)
                 if incident_data:
                     # Send incident detection card
+                    incident_payload = {**incident_data, "user_id": user_id, "tenant_name": user_name}
                     self.send_incident_card(
                         channel_id=channel_id,
                         persona=persona,
-                        incident_data=incident_data,
-                        user_name=user_name
+                        incident_data=incident_payload,
                     )
                     # Also send a conversational response
                     response_text = self.process_tenant_message(
@@ -356,11 +355,10 @@ Current conversation context: {context if context else 'New conversation'}
                         user_id=user_id,
                         channel_id=channel_id
                     )
-                    return self.send_message(
+                    return self.send_ai_message(
                         channel_id=channel_id,
-                        bot_id=bot_id,
+                        persona=persona,
                         text=response_text,
-                        internal_type="ai-message"
                     )
 
             # Process message based on persona
@@ -772,55 +770,63 @@ Current conversation context: {context if context else 'New conversation'}
         channel_id: str,
         persona: str,
         incident_data: Dict[str, Any],
-        user_name: Optional[str] = None
-    ) -> Optional[Dict]:
-        """Send an incident detection card - WITH DYNAMODB PERSISTENCE"""
-        incident_id = f"INC-{int(datetime.now().timestamp())}"
+    ) -> Dict[str, Any]:
+        """Create an incident record and send a structured card."""
+        incident_id = incident_data.get("incident_id") or f"INC-{int(datetime.now().timestamp())}"
         bot_id = self.get_bot_id(persona)
+        user_id = incident_data.get("user_id")
 
-        print(f"[PropertyAIBot] Creating incident: {incident_id}")
+        print(f"[stream-bot] Creating incident card {incident_id} for channel {channel_id}")
 
-        # Persist incident to DynamoDB
+        # Persist incident to DynamoDB (best effort)
         try:
-            if "user_id" not in incident_data:
-                inferred = incident_data.get("tenant_id") or incident_data.get("landlord_id") or "unknown"
-                incident_data["user_id"] = inferred
-            print(f"[IncidentDB] Creating incident: {incident_data}")
-            incident_record = IncidentDB.create_incident({
-                "incident_id": incident_id,
-                "user_id": user_name or "unknown",
-                "tenant_id": user_name or "unknown",
-                "property_id": "unknown",  # TODO: Get from user context/session
-                "title": incident_data.get("title", "Maintenance Issue"),
-                "description": incident_data.get("description", ""),
-                "category": incident_data.get("category", "general"),
-                "severity": incident_data.get("severity", "medium"),
-                "urgency": incident_data.get("urgency", "routine"),
-                "status": "detected",
-                "channel_id": channel_id,
-                "media_urls": []
-            })
-            print(f"[PropertyAIBot] Incident persisted to DynamoDB: {incident_id}")
-        except Exception as e:
-            print(f"[PropertyAIBot] ERROR persisting incident to DynamoDB: {e}")
-            # Continue anyway - don't block UI
+            IncidentDB.create_incident(
+                {
+                    "incident_id": incident_id,
+                    "user_id": user_id or "unknown",
+                    "tenant_id": incident_data.get("tenant_id", user_id or "unknown"),
+                    "property_id": incident_data.get("property_id", "unknown"),
+                    "title": incident_data.get("title", "Maintenance Issue"),
+                    "description": incident_data.get("description", ""),
+                    "category": incident_data.get("category", "plumbing"),
+                    "severity": incident_data.get("severity", "medium"),
+                    "urgency": incident_data.get("urgency", "routine"),
+                    "status": "detected",
+                    "channel_id": channel_id,
+                    "metadata": incident_data.get("metadata", {}),
+                }
+            )
+        except Exception as exc:  # pragma: no cover - external service
+            print(f"[stream-bot] WARN: Incident persistence failed: {exc}")
 
         card = CardBuilder.incident_card(
             incident_id=incident_id,
             title=incident_data.get("title", "Maintenance Issue"),
             description=incident_data.get("description", ""),
-            severity=incident_data.get("severity", "medium"),
-            tenant_name=user_name,
-            status="detected"
+            severity=incident_data.get("severity", "high"),
+            tenant_name=incident_data.get("tenant_name"),
+            status="detected",
         )
 
-        return send_card_message(
+        response = send_card_message(
             self.client,
             channel_id,
             bot_id,
             card,
-            "🔍 I detected a potential maintenance issue. Would you like me to help with this?"
+            message_text="🔍 I detected a potential maintenance issue. Let's get this logged.",
+            metadata={"context_type": "incident", "incident_id": incident_id},
         )
+
+        if user_id:
+            self.context_manager.set_active_incident(user_id, channel_id, incident_id)
+            self.context_manager.advance_flow_state(
+                user_id,
+                channel_id,
+                "incident",
+                {"question_index": 0},
+            )
+
+        return {"incident_id": incident_id, "card_response": response}
 
 
 # Singleton instance

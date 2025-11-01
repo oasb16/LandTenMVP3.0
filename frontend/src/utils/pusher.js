@@ -1,6 +1,11 @@
 import Pusher from 'pusher-js';
 
-export const pusher = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY, {
-  cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER,
-  authEndpoint: '/api/pusher/auth', // If using private/presence channels
-});
+const key = process.env.NEXT_PUBLIC_PUSHER_KEY || '';
+const cluster = process.env.NEXT_PUBLIC_PUSHER_CLUSTER || '';
+
+export const pusher = key && cluster
+  ? new Pusher(key, {
+      cluster,
+      authEndpoint: '/api/pusher/auth',
+    })
+  : null;

@@ -37,8 +37,8 @@ export const CustomChannelHeader: React.FC<CustomChannelHeaderProps> = ({
 
         {/* Agent Toggle */}
         <AgentToggleButton
-          initialEnabled={agentEnabled}
-          onToggle={onAgentToggle}
+          initialState={agentEnabled}
+          onChange={onAgentToggle}
         />
       </div>
 

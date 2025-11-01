@@ -7,15 +7,26 @@ import os
 import hashlib
 import hmac
 import logging
+from datetime import datetime
 from typing import Dict, Any, Optional
 from fastapi import APIRouter, Request, HTTPException, Header
 from app.services.stream_bot import get_bot
 from app.services.context_manager import get_context_manager
-from app.services.ai_reasoning import get_ai_reasoning
+from app.services.ai_reasoning import get_ai_reasoning, Intent
 from app.services.policy_validator import get_policy_validator
+from app.services.card_builder import CardBuilder, send_card_message
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+DISCOVERY_QUESTIONS = [
+    "Is the water still flowing right now?",
+    "Where exactly is the leak located?",
+    "When did you first notice the issue?",
+    "Are there any electrical outlets or appliances nearby?",
+]
+
+policy_validator = get_policy_validator()
 
 
 def verify_webhook_signature(payload: bytes, signature: str) -> bool:
@@ -129,158 +140,211 @@ async def handle_stream_webhook(
         return {"status": "acknowledged", "processed": False, "event_type": event_type}
 
 
-async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, str]:
-    """
-    Intelligent message handler with context-aware intent routing.
-
-    This replaces the rigid button-driven flow with adaptive AI reasoning:
-    1. Retrieve or create conversational context
-    2. Detect user intent using AI reasoning
-    3. Validate actions against persona policies
-    4. Route to appropriate handler dynamically
-    5. Update context with new information
-    """
+async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Context-aware handler for Stream message.new events."""
     try:
-        # Extract message data
         message = payload.get("message", {})
+        metadata = message.get("metadata", {}) or {}
         user = payload.get("user", {})
         channel_id = payload.get("channel_id", "unknown")
-        message_text = message.get("text", "")
         user_id = user.get("id", "unknown")
-        is_bot = user.get("role") == "admin" or user.get("name", "").startswith("ai-")
+        message_text = message.get("text", "")
 
-        logger.info(f"[ai-webhook] ========== Incoming Message ==========")
-        logger.info(f"[ai-webhook] Channel: {channel_id}")
-        logger.info(f"[ai-webhook] User: {user_id} ({user.get('name', 'unknown')})")
-        logger.info(f"[ai-webhook] Message: {message_text[:100]}")
-        logger.info(f"[ai-webhook] Is bot: {is_bot}")
+        logger.info("[ai-webhook] ========== Incoming Message ==========")
+        logger.info("[ai-webhook] Channel: %s", channel_id)
+        logger.info("[ai-webhook] User: %s (%s)", user_id, user.get("name", "unknown"))
+        logger.info("[ai-webhook] Text: %s", message_text[:120])
 
-        # Ignore messages from bots
-        if is_bot:
+        # Ignore bot/system authored messages
+        if user.get("is_bot") or str(user_id).startswith("ai-"):
             logger.info("[ai-webhook] Ignoring bot message")
             return {"status": "ignored", "reason": "bot_message"}
 
-        # Check if message has metadata indicating agent is disabled
-        metadata = message.get("metadata", {})
         agent_enabled = metadata.get("agentEnabled", True)
-
-        if not agent_enabled:
-            logger.info("[ai-webhook] Agent disabled by user - ignoring message")
+        if agent_enabled is False:
+            logger.info("[ai-webhook] Agent disabled for this message")
             return {"status": "ignored", "reason": "agent_disabled"}
 
-        # Get services
+        bot = get_bot()
         context_manager = get_context_manager()
         ai_reasoning = get_ai_reasoning()
-        policy_validator = get_policy_validator()
-        bot = get_bot()
 
-        # Get or create context
         context = context_manager.get_context(user_id, channel_id, create_if_missing=True)
-
-        if not context:
-            logger.error("[ai-webhook] Failed to get/create context")
+        if context is None:
+            logger.error("[ai-webhook] Failed to create context for %s", user_id)
             return {"status": "error", "error": "context_creation_failed"}
 
-        logger.info(f"[ai-webhook] Context retrieved: flow_type={context.get('flow_type')}, "
-                   f"last_intent={context.get('last_intent')}")
+        previous_intent = context.get("active_intent")
 
-        # Detect persona from channel or context
-        persona = await _detect_persona(channel_id, context, bot)
-        logger.info(f"[ai-webhook] Detected persona: {persona}")
+        persona_hint = metadata.get("persona")
+        persona = persona_hint or context.get("persona") or await _detect_persona(channel_id, context, bot)
 
-        # Update context with persona if not set
-        if not context.get("persona"):
+        if persona and context.get("persona") != persona:
             context_manager.set_persona(user_id, channel_id, persona)
-            context["persona"] = persona
 
-        # Append user message to conversation history
         context_manager.append_message(user_id, channel_id, "user", message_text)
+        context = context_manager.get_context(user_id, channel_id, create_if_missing=True) or context
 
-        # Infer intent using AI reasoning
-        logger.info("[ai-webhook] Inferring intent with AI reasoning...")
-        intent_result = ai_reasoning.infer_intent(message_text, context, persona)
+        reasoning = ai_reasoning.post_process_reasoning(message_text, context, persona)
+        intent = reasoning["intent"]
+        entities = reasoning.get("entities", {})
 
-        intent = intent_result["intent"]
-        confidence = intent_result["confidence"]
-        entities = intent_result["entities"]
-        card_type = intent_result["card_type"]
-
-        logger.info(f"[ai-webhook] Intent detected: {intent} (confidence: {confidence:.2f})")
-        logger.info(f"[ai-webhook] Entities: {entities}")
-        logger.info(f"[ai-webhook] Card type: {card_type}")
-
-        # Validate intent against persona policy
-        is_valid, violation_message = policy_validator.validate_intent(intent, persona)
-
-        if not is_valid:
-            logger.warning(f"[ai-webhook] Intent '{intent}' blocked by policy for {persona}")
-            # Send polite decline message
-            bot.send_message(
-                channel_id=channel_id,
-                bot_id=bot.get_bot_id(persona),
-                text=violation_message,
-                metadata={"context_type": "policy_violation", "intent": intent}
-            )
+        allowed_intent, violation_message = policy_validator.validate_intent(intent, persona)
+        if not allowed_intent:
+            violation_text = violation_message or "I’m not able to complete that step for you, but I’ve noted the request."
+            bot.send_ai_message(channel_id, persona, violation_text, metadata={"context_type": "policy_violation"})
+            context_manager.append_message(user_id, channel_id, "assistant", violation_text)
             return {"status": "blocked", "reason": "policy_violation", "intent": intent}
 
-        # Update context with intent
+        transition = process_transition(user_id, channel_id, persona, intent, message_text, context)
+        next_stage = transition["next_stage"]
+
+        if not transition["allowed"]:
+            violation_text = transition.get("violation_message") or "That action needs landlord approval – I've queued it for them."
+            bot.send_ai_message(channel_id, persona, violation_text, metadata={"context_type": "policy_violation"})
+            context_manager.append_message(user_id, channel_id, "assistant", violation_text)
+            return {"status": "blocked", "reason": "policy_violation", "intent": intent}
+
         context_manager.update_context(
             user_id,
             channel_id,
             {
-                "last_intent": intent,
+                "persona": persona,
+                "active_intent": next_stage,
                 "entities": entities,
-                "last_message": message_text
-            }
+                "last_message": message_text,
+            },
+        )
+        context_manager.advance_flow_state(
+            user_id,
+            channel_id,
+            next_stage,
+            {"last_user_reply": message_text},
         )
 
-        # Route to appropriate handler based on intent
-        logger.info(f"[ai-webhook] Routing to handler for intent: {intent}")
-        result = await route_intent(
-            intent=intent,
-            entities=entities,
-            context=context,
-            persona=persona,
-            channel_id=channel_id,
-            user_id=user_id,
-            message_text=message_text,
-            payload=payload
-        )
+        context = context_manager.get_context(user_id, channel_id, create_if_missing=True) or context
+        incident_id = context.get("active_incident")
+        flow_state = context.get("flow_state") or {}
+        answers = dict(flow_state.get("answers") or {})
 
-        if result:
-            logger.info(f"[ai-webhook] ✅ SUCCESS: Intent '{intent}' handled successfully")
-            # Append bot response to history
-            if result.get("response_text"):
-                context_manager.append_message(
-                    user_id,
-                    channel_id,
-                    "assistant",
-                    result["response_text"]
-                )
-            return {
-                "status": "processed",
-                "intent": intent,
-                "confidence": confidence,
-                "channel_id": channel_id,
-                "result": result
-            }
-        else:
-            logger.warning(f"[ai-webhook] Handler returned no result for intent: {intent}")
-            return {
-                "status": "no_action",
-                "intent": intent,
-                "reason": "handler_returned_none"
-            }
+        reply_text = reasoning.get("reply", "I'm here to help.")
+        if next_stage == "discovery.response":
+            reply_text = "Thanks for the update — I'm logging that while we keep gathering details."
+        elif next_stage == "job.request":
+            reply_text = "Perfect. I'll move ahead with a work order so we can get help scheduled."
+        elif next_stage == "approval.decision":
+            reply_text = "I'll start the approval process and keep you posted."
 
-    except Exception as e:
-        logger.error(f"[ai-webhook] ❌ ERROR: Exception while handling message: {e}")
-        import traceback
-        traceback.print_exc()
-        return {
-            "status": "error",
-            "error": str(e),
-            "hint": "Check backend logs for stack trace"
+        reply_metadata = {
+            "context_type": next_stage,
+            "persona": persona,
         }
+        if incident_id:
+            reply_metadata["incident_id"] = incident_id
+
+        bot.send_ai_message(channel_id, persona, reply_text, metadata=reply_metadata)
+        context_manager.append_message(user_id, channel_id, "assistant", reply_text)
+
+        card_sent = False
+
+        if intent == Intent.INCIDENT_REPORT.value:
+            incident_payload = {
+                "user_id": user_id,
+                "tenant_name": user.get("name") or user_id,
+                "description": message_text,
+                "category": entities.get("category", "plumbing"),
+                "severity": entities.get("severity", "high"),
+                "title": entities.get("summary") or "Maintenance Issue",
+            }
+            incident_response = bot.send_incident_card(channel_id, persona, incident_payload)
+            incident_id = incident_response.get("incident_id")
+            card_sent = True
+            context_manager.advance_flow_state(user_id, channel_id, "incident", {"question_index": 0, "answers": {}})
+            _send_discovery_progress(
+                bot,
+                channel_id,
+                persona,
+                incident_id,
+                0,
+                len(DISCOVERY_QUESTIONS),
+                _get_discovery_question(0),
+                {},
+            )
+            first_question = _get_discovery_question(0)
+            if first_question:
+                _ask_discovery_question(bot, context_manager, channel_id, persona, user_id, first_question, incident_id, 0)
+
+        elif next_stage == "discovery.response":
+            incident_id = incident_id or context.get("active_incident")
+            question_index = int(flow_state.get("question_index") or 0)
+            question_key = f"q{question_index}"
+            answers[question_key] = message_text
+            total_questions = len(DISCOVERY_QUESTIONS)
+
+            _send_discovery_progress(
+                bot,
+                channel_id,
+                persona,
+                incident_id,
+                min(question_index + 1, total_questions),
+                total_questions,
+                _get_discovery_question(question_index + 1),
+                answers,
+            )
+            context_manager.advance_flow_state(
+                user_id,
+                channel_id,
+                "discovery",
+                {"question_index": question_index + 1, "answers": answers},
+            )
+            card_sent = True
+
+            if question_index + 1 < total_questions:
+                next_question = _get_discovery_question(question_index + 1)
+                _ask_discovery_question(bot, context_manager, channel_id, persona, user_id, next_question, incident_id, question_index + 1)
+            else:
+                followup_prompt = "This looks like a high-severity leak. Should I create a work order now?"
+                bot.send_ai_message(
+                    channel_id,
+                    persona,
+                    followup_prompt,
+                    metadata={"context_type": "discovery", "incident_id": incident_id},
+                )
+                context_manager.append_message(user_id, channel_id, "assistant", followup_prompt)
+                context_manager.advance_flow_state(user_id, channel_id, "job-ready", {"question_index": question_index + 1, "answers": answers})
+
+        elif next_stage == "job.request":
+            incident_id = incident_id or context.get("active_incident")
+            job_id = _create_job_card(bot, context_manager, channel_id, persona, user_id, incident_id, entities)
+            card_sent = True
+            if job_id:
+                context_manager.set_active_job(user_id, channel_id, job_id)
+                context_manager.advance_flow_state(user_id, channel_id, "job", {"job_id": job_id, "answers": answers})
+
+        elif next_stage == "approval.decision":
+            acknowledgement = "I’ll route this approval to the landlord and keep you posted."
+            bot.send_ai_message(channel_id, persona, acknowledgement, metadata={"context_type": "approval.decision"})
+            context_manager.append_message(user_id, channel_id, "assistant", acknowledgement)
+
+        updated_context = context_manager.get_context(user_id, channel_id, create_if_missing=True) or {}
+        logger.info("[ai-webhook] Flow advanced: %s → %s", previous_intent or "none", next_stage)
+        logger.info("[ai-webhook] Flow state: %s", updated_context.get("flow_state"))
+
+        return {
+            "status": "processed",
+            "intent": next_stage,
+            "channel_id": channel_id,
+            "card_sent": card_sent,
+            "incident_id": updated_context.get("active_incident"),
+            "flow_state": updated_context.get("flow_state"),
+        }
+
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.error(f"[ai-webhook] ❌ ERROR while handling message: {exc}")
+        import traceback
+
+        traceback.print_exc()
+        return {"status": "error", "error": str(exc)}
 
 
 async def _detect_persona(
@@ -310,6 +374,114 @@ async def _detect_persona(
 
     # Default to tenant
     return "tenant"
+
+
+def _get_discovery_question(index: int) -> Optional[str]:
+    if 0 <= index < len(DISCOVERY_QUESTIONS):
+        return DISCOVERY_QUESTIONS[index]
+    return None
+
+
+def _send_discovery_progress(
+    bot,
+    channel_id: str,
+    persona: str,
+    incident_id: Optional[str],
+    questions_asked: int,
+    total_questions: int,
+    current_question: Optional[str],
+    answers: Dict[str, Any],
+) -> None:
+    if not incident_id:
+        return
+
+    bot_id = bot.get_bot_id(persona)
+    card = CardBuilder.discovery_card(
+        incident_id=incident_id,
+        questions_asked=questions_asked,
+        questions_total=total_questions,
+        current_question=current_question,
+        answers=answers,
+        images_uploaded=0,
+    )
+
+    send_card_message(
+        bot.client,
+        channel_id,
+        bot_id,
+        card,
+        message_text="🧠 Discovery progress updated.",
+        metadata={"context_type": "discovery", "incident_id": incident_id, "step": questions_asked},
+    )
+
+
+def _ask_discovery_question(
+    bot,
+    context_manager,
+    channel_id: str,
+    persona: str,
+    user_id: str,
+    question_text: str,
+    incident_id: Optional[str],
+    question_index: int,
+) -> None:
+    metadata = {"context_type": "discovery", "incident_id": incident_id, "step": question_index}
+    bot.send_ai_message(channel_id, persona, question_text, metadata=metadata)
+    context_manager.append_message(user_id, channel_id, "assistant", question_text)
+    context_manager.advance_flow_state(
+        user_id,
+        channel_id,
+        "discovery",
+        {"question_index": question_index, "last_ai_prompt": question_text},
+    )
+
+
+def _create_job_card(
+    bot,
+    context_manager,
+    channel_id: str,
+    persona: str,
+    user_id: str,
+    incident_id: Optional[str],
+    entities: Dict[str, Any],
+) -> Optional[str]:
+    job_id = f"JOB-{int(datetime.now().timestamp())}"
+    severity = (entities or {}).get("severity", "high")
+    cost_map = {
+        "low": "$150 - $250",
+        "medium": "$250 - $400",
+        "high": "$400 - $600",
+        "emergency": "$600+",
+    }
+    estimated_cost = cost_map.get(severity, "$400 - $600")
+
+    card = CardBuilder.work_order_card(
+        incident_id=incident_id or "INC-UNKNOWN",
+        job_id=job_id,
+        title="Emergency Plumbing Response",
+        category=entities.get("category", "plumbing"),
+        estimated_cost=estimated_cost,
+        urgency="immediate" if severity in {"high", "emergency"} else "urgent",
+        status="created",
+    )
+
+    metadata = {"context_type": "job", "incident_id": incident_id, "job_id": job_id}
+    send_card_message(
+        bot.client,
+        channel_id,
+        bot.get_bot_id(persona),
+        card,
+        message_text="🔧 Work order ready. Here’s what I’m planning.",
+        metadata=metadata,
+    )
+
+    confirmation = (
+        f"Job {job_id} is ready. I’ll surface trusted contractors so your landlord can approve the visit quickly."
+    )
+    bot.send_ai_message(channel_id, persona, confirmation, metadata=metadata)
+    context_manager.append_message(user_id, channel_id, "assistant", confirmation)
+
+    return job_id
 
 
 async def route_intent(

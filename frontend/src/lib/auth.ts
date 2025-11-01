@@ -1,11 +1,11 @@
-import NextAuth, { NextAuthOptions } from "next-auth";
+import NextAuth, { type NextAuthConfig } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
 
 const backendBase = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || "";
 
 const authSecret = process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET || "dev-secret";
 
-const authConfig: NextAuthOptions = {
+const authConfig: NextAuthConfig = {
   secret: authSecret,
   providers: [
     GoogleProvider({

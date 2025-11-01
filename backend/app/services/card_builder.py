@@ -565,7 +565,8 @@ def send_card_message(
     channel_id: str,
     bot_id: str,
     card_data: Dict[str, Any],
-    message_text: Optional[str] = None
+    message_text: Optional[str] = None,
+    metadata: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict]:
     """
     Send a message with an interactive card attachment
@@ -580,11 +581,13 @@ def send_card_message(
     try:
         channel = client.channel("messaging", channel_id)
 
-        message = {
+        message: Dict[str, Any] = {
             "text": message_text or card_data.get("text", ""),
             "attachments": [card_data],
             "type": "regular"
         }
+        if metadata:
+            message["metadata"] = metadata
 
         print(f"[card-builder] ========== SENDING CARD ==========")
         print(f"[card-builder] Channel: {channel_id}, Bot: {bot_id}")

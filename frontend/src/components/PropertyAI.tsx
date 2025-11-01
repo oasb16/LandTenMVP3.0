@@ -1,5 +1,9 @@
 'use client';
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable react/no-unescaped-entities */
+
 import React, { useState, useEffect } from 'react';
 import { Send, Home, MessageSquare, Settings, Bot, Camera, X, AlertCircle, Plus, ChevronRight, Building2, Bell, Briefcase, Wrench, Calendar, DollarSign, MapPin, FileText, Loader2, LogOut, User as UserIcon, Mail, Shield } from 'lucide-react';
 import { useSession, signIn, signOut } from 'next-auth/react';
@@ -621,7 +625,7 @@ function LandlordDashboard({ session }: { session: any }) {
           <div className="relative flex-1 overflow-hidden">
             <div className="absolute inset-0 flex flex-col">
               <div className="flex-1 overflow-y-auto">
-                <StreamChatPane persona="landlord" />
+                <StreamChatPane />
               </div>
             </div>
           </div>
@@ -885,7 +889,7 @@ function TenantDashboard({ session }: { session: any }) {
           <div className="relative flex-1 overflow-hidden">
             <div className="absolute inset-0 flex flex-col">
               <div className="flex-1 overflow-y-auto">
-                <StreamChatPane persona="tenant" />
+                <StreamChatPane />
               </div>
             </div>
           </div>

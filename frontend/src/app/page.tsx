@@ -1,9 +1,15 @@
 import Link from "next/link";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { cookies } from "next/headers";
+
+export const dynamic = "force-dynamic";
 
 export default async function LandingPage() {
-  const session = await getServerSession(authOptions);
+  const cookieStore = await cookies();
+  const hasSession = Boolean(
+    cookieStore.get("next-auth.session-token") ||
+      cookieStore.get("__Secure-next-auth.session-token") ||
+      cookieStore.get("next-auth.session-token.0")
+  );
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center px-6">
       <div className="max-w-3xl text-center space-y-6">
@@ -14,10 +20,16 @@ export default async function LandingPage() {
         </p>
         <div className="flex flex-col sm:flex-row gap-4 justify-center">
           <Link
-            href={session ? "/dashboard" : "/dashboard"}
+            href="/property-ai"
+            className="inline-flex items-center justify-center rounded-md bg-gradient-to-r from-blue-600 to-purple-600 px-6 py-3 font-semibold text-white hover:from-blue-700 hover:to-purple-700 transition shadow-lg"
+          >
+            Try PropertyAI (New UI)
+          </Link>
+          <Link
+            href={hasSession ? "/dashboard" : "/dashboard"}
             className="inline-flex items-center justify-center rounded-md bg-emerald-500 px-6 py-3 font-semibold text-slate-900 hover:bg-emerald-400 transition"
           >
-            {session ? "Continue to dashboard" : "Sign in with Google"}
+            {hasSession ? "Continue to dashboard" : "Classic Dashboard"}
           </Link>
           <a
             href="https://github.com/oasb16/LandTenMVP2.0"

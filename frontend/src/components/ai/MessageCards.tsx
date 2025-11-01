@@ -1,7 +1,10 @@
 "use client";
 
+/* eslint-disable @next/next/no-img-element */
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-unused-vars */
+
 import React, { useState } from 'react';
-import { StreamMessage } from 'stream-chat';
 
 interface CardAction {
   name: string;
@@ -18,8 +21,8 @@ interface CardField {
 }
 
 interface MessageCardsProps {
-  message: StreamMessage;
-  onActionClick: (actionValue: string) => void;
+  message: any;
+  onActionClick?: (actionValue: string) => Promise<void> | void;
 }
 
 export function MessageCards({ message, onActionClick }: MessageCardsProps) {
@@ -31,16 +34,11 @@ export function MessageCards({ message, onActionClick }: MessageCardsProps) {
   }
 
   const handleActionClick = async (actionValue: string) => {
-    console.log('[MessageCards] Button clicked:', actionValue);
     setLoadingAction(actionValue);
     try {
-      if (onActionClick) onActionClick(actionValue);
-      console.log('[MessageCards] Button action completed:', actionValue);
-    } catch (error) {
-      console.error('[MessageCards] Button action failed:', actionValue, error);
+      await onActionClick?.(actionValue);
     } finally {
-      // Clear loading state after a short delay
-      setTimeout(() => setLoadingAction(null), 500);
+      setLoadingAction(null);
     }
   };
 
@@ -48,20 +46,20 @@ export function MessageCards({ message, onActionClick }: MessageCardsProps) {
     <div className="message-cards-container">
       {attachments.map((attachment: any, index: number) => {
         const cardType = attachment.type;
-        console.log('[MessageCards] Rendering card:', { type: cardType, hasButtons: !!(attachment.buttons || attachment.actions) });
+        // console.log('[MessageCards] Rendering card:', { type: cardType, hasButtons: !!(attachment.buttons || attachment.actions) });
 
         switch (cardType) {
           case 'incident':
-            console.log('[MessageCards] Incident card data:', attachment);
+            // console.log('[MessageCards] Incident card data:', attachment);
             return <IncidentCard key={index} data={attachment} onActionClick={handleActionClick} loadingAction={loadingAction} />;
           case 'custom_card' : 
-            console.log('[MessageCards] Custom Actions card data:', attachment);
+            // console.log('[MessageCards] Custom Actions card data:', attachment);
             return <IncidentCard key={index} data={attachment} onActionClick={handleActionClick} loadingAction={loadingAction} />;            
           case 'custom_actions':
-            console.log('[MessageCards] Custom Actions card data:', attachment);
+            // console.log('[MessageCards] Custom Actions card data:', attachment);
             return <IncidentCard key={index} data={attachment} onActionClick={handleActionClick} loadingAction={loadingAction} />;
           case 'discovery':
-            console.log('[MessageCards] Discovery card data:', attachment);
+            // console.log('[MessageCards] Discovery card data:', attachment);
             return <DiscoveryCard key={index} data={attachment} onActionClick={handleActionClick} loadingAction={loadingAction} />;
           case 'job':
             return <JobCard key={index} data={attachment} onActionClick={handleActionClick} loadingAction={loadingAction} />;
@@ -91,14 +89,14 @@ export function MessageCards({ message, onActionClick }: MessageCardsProps) {
 
 interface CardProps {
   data: any;
-  onActionClick: (value: string) => void;
+  onActionClick?: (value: string) => void;
   loadingAction: string | null;
 }
 
-function BaseCard({ data, children, onActionClick, loadingAction }: CardProps & { children: React.ReactNode }) {
+function BaseCard({ data, children, onActionClick, loadingAction }: CardProps & { children?: React.ReactNode }) {
   // Support both "buttons" and "actions" field names for backward compatibility
   const buttons = data.buttons || data.actions || [];
-  console.log('[BaseCard] Rendering card with data:', data);
+  // console.log('[BaseCard] Rendering card with data:', data);
   return (
     <div className="card" style={{ borderLeftColor: data.color || '#6b7280' }}>
       {children}
@@ -108,19 +106,20 @@ function BaseCard({ data, children, onActionClick, loadingAction }: CardProps & 
           {buttons.map((btn: any, idx: number) => (
             <button
               key={idx}
-              onClick={() => onActionClick(data.type)}
-              disabled={loadingAction !== null}
+              onClick={() => onActionClick?.(btn.value ?? data.type)}
+              disabled={Boolean(loadingAction) && loadingAction !== btn.value}
               className={`card-button card-button-${btn.style || 'default'}`}
               style={{
                 position: 'relative',
-                opacity: loadingAction !== null ? 0.7 : 1,
-                cursor: loadingAction !== null ? 'wait' : 'pointer'
+                opacity: loadingAction ? 0.7 : 1,
+                cursor: loadingAction ? 'wait' : 'pointer'
               }}
             >
-              {loadingAction === btn.value && <span className="button-spinner" />}
-              <span style={{ visibility: loadingAction === btn.value ? 'hidden' : 'visible' }}>
-                {btn.label || btn.text}
-              </span>
+              {loadingAction === btn.value ? (
+                <span className="button-spinner" />
+              ) : (
+                <span>{btn.label || btn.text}</span>
+              )}
             </button>
           ))}
         </div>

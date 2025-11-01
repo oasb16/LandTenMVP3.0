@@ -3,6 +3,8 @@
  * Handles all backend communication with proper error handling
  */
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
 const getBackendUrl = () => {
   return process.env.NEXT_PUBLIC_BACKEND_URL || '';
 };

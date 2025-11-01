@@ -26,7 +26,8 @@ export async function POST(request: Request) {
   let data: unknown;
   try {
     data = text ? JSON.parse(text) : {};
-  } catch (err) {
+  } catch (error) {
+    console.warn("[agent route] Failed to parse backend response", error);
     data = { error: text || "Failed to parse response" };
   }
 
