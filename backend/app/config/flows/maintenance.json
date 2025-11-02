@@ -1,0 +1,186 @@
+{
+  "flow_id": "maintenance",
+  "name": "Maintenance & Repair Flow",
+  "description": "Handles incident reporting, discovery, job creation, and completion for property maintenance",
+  "personas": ["tenant", "landlord", "contractor"],
+  "nodes": {
+    "idle": {
+      "type": "start",
+      "description": "Initial state - waiting for incident report",
+      "next_nodes": ["incident.report"]
+    },
+    "incident.report": {
+      "type": "decision",
+      "description": "Tenant reports a property issue",
+      "conditions": {
+        "has_photos": "discovery.visual_assessment",
+        "emergency": "discovery.emergency_response",
+        "default": "discovery.response"
+      },
+      "card_template": "incident",
+      "required_entities": ["category", "severity"],
+      "persona_actions": {
+        "tenant": ["provide_details", "upload_photo"],
+        "landlord": ["view_incident", "escalate"],
+        "contractor": []
+      },
+      "next_nodes": ["discovery.response", "discovery.visual_assessment", "discovery.emergency_response"]
+    },
+    "discovery.response": {
+      "type": "information_gathering",
+      "description": "AI asks clarifying questions to understand the issue",
+      "card_template": "discovery",
+      "max_questions": 5,
+      "required_entities": ["location", "severity", "category", "symptoms"],
+      "persona_tone": {
+        "tenant": "empathetic",
+        "landlord": "analytical",
+        "contractor": "technical"
+      },
+      "next_nodes": ["discovery.complete", "job.request", "diy.suggestion"]
+    },
+    "discovery.visual_assessment": {
+      "type": "information_gathering",
+      "description": "Analyze uploaded photos and gather additional context",
+      "card_template": "discovery",
+      "requires_photo": true,
+      "next_nodes": ["discovery.complete"]
+    },
+    "discovery.emergency_response": {
+      "type": "action",
+      "description": "Emergency fast-track to immediate job creation",
+      "card_template": "job",
+      "auto_create_job": true,
+      "next_nodes": ["job.emergency_dispatch"]
+    },
+    "discovery.complete": {
+      "type": "decision",
+      "description": "Discovery phase complete - determine next action",
+      "conditions": {
+        "can_diy": "diy.suggestion",
+        "needs_approval": "job.request",
+        "emergency": "job.emergency_dispatch",
+        "default": "job.request"
+      },
+      "next_nodes": ["job.request", "diy.suggestion", "job.emergency_dispatch"]
+    },
+    "diy.suggestion": {
+      "type": "information",
+      "description": "Provide DIY guidance for simple issues",
+      "card_template": "custom_actions",
+      "persona_actions": {
+        "tenant": ["try_diy", "request_professional"],
+        "landlord": ["approve_diy", "send_contractor"],
+        "contractor": []
+      },
+      "next_nodes": ["job.request", "completion.confirmation", "incident.followup"]
+    },
+    "job.request": {
+      "type": "action",
+      "description": "Create work order and match contractors",
+      "card_template": "job",
+      "required_entities": ["category", "location", "severity"],
+      "persona_actions": {
+        "tenant": ["view_job"],
+        "landlord": ["approve_job", "request_bids"],
+        "contractor": ["submit_bid"]
+      },
+      "next_nodes": ["bids.request", "approval.decision"]
+    },
+    "job.emergency_dispatch": {
+      "type": "action",
+      "description": "Emergency job with auto-approval",
+      "card_template": "job",
+      "auto_approve": true,
+      "next_nodes": ["contractor.assigned"]
+    },
+    "bids.request": {
+      "type": "information",
+      "description": "Show contractor bids for comparison",
+      "card_template": "bids",
+      "persona_actions": {
+        "tenant": ["view_bids"],
+        "landlord": ["compare_bids", "select_contractor"],
+        "contractor": ["update_bid"]
+      },
+      "next_nodes": ["approval.decision"]
+    },
+    "approval.decision": {
+      "type": "decision",
+      "description": "Landlord approves or rejects the job",
+      "card_template": "approval",
+      "required_persona": "landlord",
+      "conditions": {
+        "approved": "contractor.assigned",
+        "rejected": "job.rejected",
+        "default": "approval.pending"
+      },
+      "persona_actions": {
+        "tenant": [],
+        "landlord": ["approve", "reject", "request_more_info"],
+        "contractor": []
+      },
+      "next_nodes": ["contractor.assigned", "job.rejected", "approval.pending"]
+    },
+    "approval.pending": {
+      "type": "waiting",
+      "description": "Waiting for landlord approval",
+      "card_template": "approval",
+      "timeout_hours": 24,
+      "timeout_action": "send_reminder",
+      "next_nodes": ["approval.decision"]
+    },
+    "contractor.assigned": {
+      "type": "action",
+      "description": "Contractor has been assigned to the job",
+      "card_template": "job",
+      "persona_actions": {
+        "tenant": ["contact_contractor", "view_timeline"],
+        "landlord": ["view_progress"],
+        "contractor": ["start_job", "update_status"]
+      },
+      "next_nodes": ["job.in_progress"]
+    },
+    "job.in_progress": {
+      "type": "tracking",
+      "description": "Job is actively being worked on",
+      "card_template": "job",
+      "persona_actions": {
+        "tenant": ["report_issue", "confirm_completion"],
+        "landlord": ["check_status"],
+        "contractor": ["update_progress", "request_materials", "mark_complete"]
+      },
+      "next_nodes": ["completion.confirmation", "incident.followup"]
+    },
+    "job.rejected": {
+      "type": "terminal",
+      "description": "Job was rejected by landlord",
+      "card_template": "general",
+      "follow_up_actions": ["archive", "notify_tenant"],
+      "next_nodes": ["idle"]
+    },
+    "completion.confirmation": {
+      "type": "information",
+      "description": "Job completed - gathering feedback",
+      "card_template": "completion",
+      "persona_actions": {
+        "tenant": ["confirm_fixed", "report_issue"],
+        "landlord": ["mark_paid", "archive"],
+        "contractor": ["submit_invoice"]
+      },
+      "next_nodes": ["idle", "incident.followup"]
+    },
+    "incident.followup": {
+      "type": "information_gathering",
+      "description": "Follow up on existing incident",
+      "card_template": "discovery",
+      "next_nodes": ["discovery.response", "completion.confirmation"]
+    }
+  },
+  "metadata": {
+    "version": "2.0",
+    "created_at": "2025-11-02",
+    "supports_proactive_prompting": true,
+    "supports_flow_recovery": true
+  }
+}
