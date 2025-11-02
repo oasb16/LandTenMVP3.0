@@ -277,10 +277,12 @@ export function StreamChatProvider({ children }: { children: ReactNode }) {
           ) ?? queriedChannels[0] ?? null;
 
         if (defaultChannel) {
+          console.log("[StreamChat] Setting default channel:", defaultChannel.cid);
           setActiveChannel(defaultChannel);
           const initialMessages = defaultChannel.state.messages
             .slice(-MAX_RENDERED_MESSAGES)
             .map((msg) => normaliseMessageDates(msg));
+          console.log("[StreamChat] Loaded", initialMessages.length, "initial messages");
           setMessages(initialMessages);
           const defaultChannelData = (defaultChannel.data ?? {}) as Record<string, unknown>;
           const initialFlow =
@@ -291,6 +293,7 @@ export function StreamChatProvider({ children }: { children: ReactNode }) {
               persona: defaultChannelData.persona,
             });
           if (initialFlow) {
+            console.log("[StreamChat] Initial flow state:", initialFlow);
             setFlowState(initialFlow);
           }
         }
@@ -313,11 +316,27 @@ export function StreamChatProvider({ children }: { children: ReactNode }) {
   }, [session, status, disconnectClient]);
 
   const updateMessagesFromChannel = useCallback(
-    (channel: Channel) => {
+    (channel: Channel, forceUpdate = false) => {
       const latestMessages = channel.state.messages
         .slice(-MAX_RENDERED_MESSAGES)
         .map((msg) => normaliseMessageDates(msg));
-      setMessages(latestMessages);
+
+      // Always update to ensure reactivity - use functional update for consistency
+      setMessages((prev) => {
+        // Force update if requested or if the array has changed
+        if (forceUpdate || prev.length !== latestMessages.length) {
+          return latestMessages;
+        }
+        // Check if the last message has changed
+        const prevLast = prev[prev.length - 1];
+        const newLast = latestMessages[latestMessages.length - 1];
+        if (prevLast?.id !== newLast?.id) {
+          return latestMessages;
+        }
+        // Return prev to avoid unnecessary re-renders
+        return prev;
+      });
+
       const newest = latestMessages.at(-1);
       const flowFromMessage = deriveFlowStateFromMessage(newest);
       const channelData = (channel.data ?? {}) as Record<string, unknown>;
@@ -412,28 +431,34 @@ export function StreamChatProvider({ children }: { children: ReactNode }) {
       };
 
       subscribe("message.new", (event: Event) => {
+        console.log("[StreamChat] message.new event received:", event.message?.id);
         if (event.message) {
           handleReasoningCue(event.message);
         }
-        updateMessagesFromChannel(channel);
+        updateMessagesFromChannel(channel, true);
       });
 
-      subscribe("message.updated", () => {
-        updateMessagesFromChannel(channel);
+      subscribe("message.updated", (event: Event) => {
+        console.log("[StreamChat] message.updated event received");
+        updateMessagesFromChannel(channel, true);
       });
 
-      subscribe("message.deleted", () => {
-        updateMessagesFromChannel(channel);
+      subscribe("message.deleted", (event: Event) => {
+        console.log("[StreamChat] message.deleted event received");
+        updateMessagesFromChannel(channel, true);
       });
 
-      subscribe("channel.updated", () => {
-        updateMessagesFromChannel(channel);
+      subscribe("channel.updated", (event: Event) => {
+        console.log("[StreamChat] channel.updated event received");
+        updateMessagesFromChannel(channel, true);
       });
 
       subscribe("custom.flow_update", (event: Event) => {
+        console.log("[StreamChat] custom.flow_update event received");
         const payload = (event as unknown as { payload?: Record<string, unknown> }).payload ?? {};
         const flow = deriveFlowState(payload ?? {});
         if (flow) {
+          console.log("[StreamChat] Flow state update:", flow);
           setFlowState((prev) => {
             const prevStage = normaliseStage(prev?.stage);
             const nextStage = normaliseStage(flow.stage);
@@ -453,7 +478,8 @@ export function StreamChatProvider({ children }: { children: ReactNode }) {
       });
 
       subscribe("custom.reasoning_state", (event: Event) => {
-        const payload = event.payload as Record<string, unknown> | undefined;
+        console.log("[StreamChat] custom.reasoning_state event received");
+        const payload = (event as unknown as { payload?: Record<string, unknown> }).payload;
         const active = Boolean(payload?.active);
         const stage = typeof payload?.stage === "string" ? payload.stage : null;
         setReasoningState((prev) => {
@@ -496,10 +522,13 @@ export function StreamChatProvider({ children }: { children: ReactNode }) {
   }, [disconnectClient]);
 
   const selectChannel = useCallback((channel: Channel) => {
+    console.log("[StreamChat] Selecting channel:", channel.cid);
     setActiveChannel((prev) => {
       if (prev?.cid === channel.cid) {
+        console.log("[StreamChat] Channel already active");
         return prev;
       }
+      console.log("[StreamChat] Switching to new channel");
       setReasoningState(initialReasoningState);
       return channel;
     });
@@ -509,12 +538,19 @@ export function StreamChatProvider({ children }: { children: ReactNode }) {
     async (text: string) => {
       if (!activeChannel || !text.trim()) return;
       try {
-        const message = await activeChannel.sendMessage({
+        console.log("[StreamChat] Sending message:", text.substring(0, 50));
+        const result = await activeChannel.sendMessage({
           text,
           type: "regular",
         });
-        if (message) {
-          updateMessagesFromChannel(activeChannel);
+        console.log("[StreamChat] Message sent successfully, result:", result?.message?.id);
+
+        // Force update messages after sending
+        if (result) {
+          // Small delay to ensure the message is in the channel state
+          setTimeout(() => {
+            updateMessagesFromChannel(activeChannel, true);
+          }, 100);
         }
       } catch (err) {
         console.error("[StreamChat] Failed to send message", err);

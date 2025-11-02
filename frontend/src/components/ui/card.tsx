@@ -57,3 +57,16 @@ export const CardDescription = React.forwardRef<HTMLParagraphElement, React.HTML
     );
   },
 );
+
+export const CardContent = React.forwardRef<HTMLDivElement, CardProps>(function CardContent(
+  { className, ...props },
+  ref,
+) {
+  return (
+    <div
+      ref={ref}
+      className={cn("p-4 pt-0", className)}
+      {...props}
+    />
+  );
+});
