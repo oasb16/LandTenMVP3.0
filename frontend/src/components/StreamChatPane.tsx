@@ -23,6 +23,17 @@ export default function StreamChatPane({ className }: Props) {
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
   const messageEndRef = useRef<HTMLDivElement | null>(null);
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // Log messages changes for debugging
+  useEffect(() => {
+    console.log("[StreamChatPane] Messages updated. Count:", messages.length);
+  }, [messages]);
+
+  // Log active channel changes
+  useEffect(() => {
+    console.log("[StreamChatPane] Active channel changed:", activeChannel?.cid);
+  }, [activeChannel?.cid]);
 
   useEffect(() => {
     messageEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -32,10 +43,12 @@ export default function StreamChatPane({ className }: Props) {
     event.preventDefault();
     const value = input.trim();
     if (!value || isSending || !activeChannel) return;
+    console.log("[StreamChatPane] Submitting message:", value.substring(0, 30));
     try {
       setIsSending(true);
       await sendMessage(value);
       setInput("");
+      console.log("[StreamChatPane] Message sent successfully");
     } catch (err) {
       console.error("[StreamChatPane] Failed to send message", err);
     } finally {
@@ -78,23 +91,24 @@ export default function StreamChatPane({ className }: Props) {
             </p>
           </div>
         ) : (
-          <div className="flex flex-col gap-3">
-            {messages.map((message) => {
-              const createdAt = String(
-                message.created_at ??
-                  message.updated_at ??
-                  message.id ??
-                  `${message.cid}-fallback`,
-              );
-              return (
-                <CustomMessageUI
-                  key={message.id || `${message.cid}-${createdAt}`}
-                  message={message}
-                  currentUserId={user?.id}
-                  onActionClick={handleAction}
-                />
-              );
-            })}
+          <div className="flex flex-col gap-3" ref={messagesContainerRef}>
+            {messages.length === 0 ? (
+              <div className="flex h-full items-center justify-center text-sm text-slate-400">
+                No messages yet. Start the conversation!
+              </div>
+            ) : (
+              messages.map((message, index) => {
+                const messageId = message.id || `msg-${index}-${message.cid}`;
+                return (
+                  <CustomMessageUI
+                    key={messageId}
+                    message={message}
+                    currentUserId={user?.id}
+                    onActionClick={handleAction}
+                  />
+                );
+              })
+            )}
             <div ref={messageEndRef} />
           </div>
         )}

@@ -9,6 +9,7 @@ import StreamChatPane from "@/components/StreamChatPane";
 import { ConversationList } from "@/components/dashboard/ConversationList";
 import { AgentStatusBar } from "@/components/dashboard/AgentStatusBar";
 import { AIContextPanel } from "@/components/dashboard/AIContextPanel";
+import { DebugPanel } from "@/components/dashboard/DebugPanel";
 import { useStreamChat } from "@/hooks/chat/StreamChatContext";
 
 const MOBILE_TABS = ["conversations", "chat", "insights"] as const;
@@ -174,6 +175,7 @@ export default function PersonaDashboardPage() {
 
           <aside className={insightsPanelClasses}>
             <AIContextPanel />
+            <DebugPanel />
           </aside>
         </main>
 
