@@ -1,0 +1,76 @@
+{
+  "flow_id": "communication",
+  "name": "General Communication Flow",
+  "description": "Handles greetings, help requests, feedback, and general conversation",
+  "personas": ["tenant", "landlord", "contractor"],
+  "nodes": {
+    "idle": {
+      "type": "start",
+      "description": "Waiting for user interaction",
+      "next_nodes": ["greeting", "help", "feedback", "smalltalk"]
+    },
+    "greeting": {
+      "type": "information",
+      "description": "User greets the system",
+      "card_template": "none",
+      "persona_tone": {
+        "tenant": "friendly_and_welcoming",
+        "landlord": "professional_and_efficient",
+        "contractor": "collaborative_and_ready"
+      },
+      "next_nodes": ["help", "idle"]
+    },
+    "help": {
+      "type": "information",
+      "description": "User requests help or guidance",
+      "card_template": "custom_actions",
+      "persona_actions": {
+        "tenant": ["report_incident", "check_status", "contact_support"],
+        "landlord": ["view_properties", "check_jobs", "manage_approvals"],
+        "contractor": ["view_jobs", "submit_bid", "update_progress"]
+      },
+      "next_nodes": ["idle"]
+    },
+    "feedback": {
+      "type": "information_gathering",
+      "description": "User provides feedback or suggestions",
+      "card_template": "general",
+      "next_nodes": ["idle"]
+    },
+    "smalltalk": {
+      "type": "information",
+      "description": "Casual conversation",
+      "card_template": "none",
+      "persona_tone": {
+        "tenant": "friendly",
+        "landlord": "brief_but_warm",
+        "contractor": "professional"
+      },
+      "next_nodes": ["idle", "help"]
+    },
+    "handover": {
+      "type": "action",
+      "description": "Transfer conversation to human support",
+      "card_template": "custom_actions",
+      "requires_human": true,
+      "next_nodes": ["idle"]
+    },
+    "emotion.support": {
+      "type": "information",
+      "description": "User is expressing frustration or emotion",
+      "card_template": "general",
+      "persona_tone": {
+        "tenant": "empathetic_and_reassuring",
+        "landlord": "understanding_and_solution_focused",
+        "contractor": "supportive_and_professional"
+      },
+      "next_nodes": ["help", "handover", "idle"]
+    }
+  },
+  "metadata": {
+    "version": "2.0",
+    "created_at": "2025-11-02",
+    "supports_proactive_prompting": true,
+    "supports_flow_recovery": true
+  }
+}
