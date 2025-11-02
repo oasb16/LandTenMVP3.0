@@ -25,6 +25,24 @@ export default function StreamChatPane({ className }: Props) {
   const messageEndRef = useRef<HTMLDivElement | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
 
+  // ====== COMPREHENSIVE DEBUG LOGGING ======
+  useEffect(() => {
+    console.log("[StreamChatPane] 🟢 COMPONENT MOUNTED");
+    console.log("[StreamChatPane] Context values:", {
+      hasActiveChannel: !!activeChannel,
+      activeChannelCid: activeChannel?.cid,
+      hasSendMessage: typeof sendMessage === "function",
+      hasUser: !!user,
+      userId: user?.id,
+      messagesCount: messages.length,
+      loading,
+      error,
+    });
+    return () => {
+      console.log("[StreamChatPane] 🔴 COMPONENT UNMOUNTED");
+    };
+  }, []); // Only run on mount/unmount
+
   // Log messages changes for debugging
   useEffect(() => {
     console.log("[StreamChatPane] Messages updated. Count:", messages.length);
@@ -35,34 +53,75 @@ export default function StreamChatPane({ className }: Props) {
     console.log("[StreamChatPane] Active channel changed:", activeChannel?.cid);
   }, [activeChannel?.cid]);
 
+  // Log context changes
+  useEffect(() => {
+    console.log("[StreamChatPane] Context update:", {
+      activeChannel: activeChannel?.cid,
+      sendMessageType: typeof sendMessage,
+      userDefined: !!user,
+    });
+  }, [activeChannel, sendMessage, user]);
+
   useEffect(() => {
     messageEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length, activeChannel?.cid]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    console.log("[StreamChatPane] 🎯 handleSubmit FIRED!");
     event.preventDefault();
     const value = input.trim();
-    if (!value || isSending || !activeChannel) return;
-    console.log("[StreamChatPane] Submitting message:", value.substring(0, 30));
+
+    console.log("[StreamChatPane] Submit validation:", {
+      value: value.substring(0, 50),
+      valueLength: value.length,
+      isSending,
+      hasActiveChannel: !!activeChannel,
+      activeChannelCid: activeChannel?.cid,
+      hasSendMessage: typeof sendMessage === "function",
+    });
+
+    if (!value) {
+      console.warn("[StreamChatPane] ❌ Submit blocked: empty value");
+      return;
+    }
+    if (isSending) {
+      console.warn("[StreamChatPane] ❌ Submit blocked: already sending");
+      return;
+    }
+    if (!activeChannel) {
+      console.warn("[StreamChatPane] ❌ Submit blocked: no active channel");
+      return;
+    }
+    if (typeof sendMessage !== "function") {
+      console.error("[StreamChatPane] ❌ Submit blocked: sendMessage is not a function!");
+      return;
+    }
+
+    console.log("[StreamChatPane] ✅ Validation passed, sending message:", value.substring(0, 30));
     try {
       setIsSending(true);
       await sendMessage(value);
       setInput("");
-      console.log("[StreamChatPane] Message sent successfully");
+      console.log("[StreamChatPane] ✅ Message sent successfully");
     } catch (err) {
-      console.error("[StreamChatPane] Failed to send message", err);
+      console.error("[StreamChatPane] ❌ Failed to send message:", err);
     } finally {
       setIsSending(false);
     }
   };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    console.log("[StreamChatPane] 🔑 KeyDown event:", event.key);
     // Send message on Enter (without Shift)
     if (event.key === "Enter" && !event.shiftKey) {
+      console.log("[StreamChatPane] ⏎ Enter key detected, requesting submit");
       event.preventDefault();
       const form = event.currentTarget.form;
       if (form) {
+        console.log("[StreamChatPane] Form found, calling requestSubmit()");
         form.requestSubmit();
+      } else {
+        console.error("[StreamChatPane] ❌ No form found for input element!");
       }
     }
   };
@@ -125,19 +184,28 @@ export default function StreamChatPane({ className }: Props) {
         )}
       </div>
 
-      <form onSubmit={handleSubmit} className="border-t border-slate-800/70 bg-slate-950/80 px-4 py-3">
+      <form
+        onSubmit={handleSubmit}
+        className="border-t border-slate-800/70 bg-slate-950/80 px-4 py-3"
+        onClick={() => console.log("[StreamChatPane] 🖱️  Form area clicked")}
+      >
         <fieldset className="flex items-center gap-3 rounded-full border border-slate-800/80 bg-slate-900/70 px-4 py-2 shadow-lg shadow-slate-950/40">
           <input
             className="flex-1 bg-transparent text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none"
             placeholder={activeChannel ? "Type a message… (Press Enter to send)" : "Select a channel to begin"}
             value={input}
-            onChange={(event) => setInput(event.target.value)}
+            onChange={(event) => {
+              console.log("[StreamChatPane] Input changed:", event.target.value.substring(0, 20));
+              setInput(event.target.value);
+            }}
             onKeyDown={handleKeyDown}
+            onFocus={() => console.log("[StreamChatPane] Input focused")}
             disabled={!activeChannel || isSending}
           />
           <button
             type="submit"
             disabled={!activeChannel || isSending || !input.trim()}
+            onClick={() => console.log("[StreamChatPane] 🖱️  Submit button clicked")}
             className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-500 text-emerald-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
           >
             {isSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
