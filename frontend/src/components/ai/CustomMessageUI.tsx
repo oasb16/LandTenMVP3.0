@@ -229,6 +229,7 @@ export const CustomMessageUI = memo(function CustomMessageUI({
             stage={stage}
             incidentId={metadata.incident_id}
             persona={metadata.persona}
+            onActionClick={onActionClick}
           />
 
           {/* Show Details toggle */}
