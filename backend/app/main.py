@@ -57,26 +57,60 @@ async def register_stream_webhook():
         logging.info(f"[Stream Webhook] Registering webhook: {webhook_url}")
 
         try:
-            # Get current app settings
+            # Get current app settings (Stream Chat v2 API)
+            logging.info("[stream-webhook] Fetching current app settings...")
             app_settings = client.get_app_settings()
-            current_webhook = app_settings.get("app", {}).get("webhook_url")
+            existing_hooks = app_settings.get("app", {}).get("event_hooks", [])
 
-            if current_webhook == webhook_url:
-                logging.info(f"[Stream Webhook] ✅ Webhook already registered: {webhook_url}")
+            logging.info(f"[stream-webhook] Found {len(existing_hooks)} existing webhook(s)")
+
+            # Check if our webhook URL already exists
+            hook_exists = False
+            hook_index = -1
+            for i, hook in enumerate(existing_hooks):
+                if hook.get("url") == webhook_url:
+                    hook_exists = True
+                    hook_index = i
+                    logging.info(f"[stream-webhook] Found existing hook at index {i}: {hook.get('name', 'unnamed')}")
+                    break
+
+            # Prepare the webhook configuration (Stream Chat v2 format)
+            new_hook = {
+                "name": "LandTen AI Webhook",
+                "url": webhook_url,
+                "events": ["message.new", "reaction.new", "typing.start"],
+                "description": "Auto-registered webhook for PropertyAI conversational backend",
+                "enabled": True,
+            }
+
+            if hook_exists:
+                # Update existing hook
+                logging.info(f"[stream-webhook] Updating existing webhook at index {hook_index}")
+                existing_hooks[hook_index] = new_hook
             else:
-                # Update app settings with webhook
-                client.update_app_settings(
-                    webhook_url=webhook_url,
-                    # Enable events we want to receive
-                    # Note: Stream may require this to be set via Dashboard for some plans
-                )
-                logging.info(f"[Stream Webhook] ✅ Webhook registered successfully: {webhook_url}")
-                logging.info("[Stream Webhook] Events enabled: message.new, reaction.new, custom.*")
+                # Add new hook
+                logging.info(f"[stream-webhook] Adding new webhook")
+                existing_hooks.append(new_hook)
+
+            # Update app settings with new/updated hooks (v2 API)
+            logging.info(f"[stream-webhook] Calling update_app_settings with {len(existing_hooks)} hook(s)...")
+            client.update_app_settings({
+                "event_hooks": existing_hooks
+            })
+
+            logging.info(f"[stream-webhook] ✅ v2 webhook registered successfully")
+            logging.info(f"[stream-webhook] URL: {webhook_url}")
+            logging.info(f"[stream-webhook] Events: message.new, reaction.new, typing.start")
+            logging.info(f"[stream-webhook] Verify at: https://getstream.io/dashboard → Chat → Event Hooks")
+
         except Exception as e:
-            logging.warning(f"[Stream Webhook] ⚠️  Could not auto-register webhook: {e}")
-            logging.warning("[Stream Webhook] Please register webhook manually in Stream Dashboard:")
-            logging.warning(f"[Stream Webhook]   URL: {webhook_url}")
-            logging.warning("[Stream Webhook]   Events: message.new, reaction.new, typing.start")
+            logging.warning(f"[stream-webhook] ⚠️  Could not auto-register webhook: {e}")
+            logging.warning("[stream-webhook] This is usually due to API permissions or plan limits")
+            logging.warning("[stream-webhook] Please register webhook manually in Stream Dashboard:")
+            logging.warning(f"[stream-webhook]   1. Go to https://getstream.io/dashboard")
+            logging.warning(f"[stream-webhook]   2. Navigate to Chat → Event Hooks")
+            logging.warning(f"[stream-webhook]   3. Add webhook URL: {webhook_url}")
+            logging.warning(f"[stream-webhook]   4. Enable events: message.new, reaction.new, typing.start")
 
     except ImportError:
         logging.warning("[Stream Webhook] stream-chat SDK not installed - skipping webhook registration")
