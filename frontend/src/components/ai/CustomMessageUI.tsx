@@ -4,8 +4,9 @@ import Image from "next/image";
 import { motion } from "framer-motion";
 import React, { memo, useCallback, useEffect, useMemo, useState } from "react";
 import type { Attachment, MessageResponse } from "stream-chat";
-import { Sparkles } from "lucide-react";
+import { Sparkles, ChevronDown } from "lucide-react";
 import { MessageCards } from "./MessageCards";
+import { AIResponseParser } from "./AIResponseParser";
 
 type StreamMessage = MessageResponse;
 
@@ -44,6 +45,67 @@ const deriveStage = (contextType?: string): string | undefined => {
 };
 
 const STAGE_PULSE_DURATION = 2200;
+
+/**
+ * Safely detect and parse JSON from message text.
+ * Returns parsed data if valid and matches expected structure, null otherwise.
+ *
+ * Handles multiple JSON structures:
+ * 1. { analysis: { summary, next_actions } }
+ * 2. { summary, next_actions } (top-level)
+ * 3. { reasoning, answer, next_actions }
+ */
+function tryParseStructuredReasoning(text: string): { analysis?: { summary?: string; next_actions?: Array<{ action: string; details?: string }> } } | null {
+  const trimmed = text.trim();
+
+  // Quick check: does it look like JSON?
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed);
+
+    if (!parsed || typeof parsed !== "object") {
+      return null;
+    }
+
+    // Case 1: Already has analysis field
+    if (parsed.analysis) {
+      return parsed;
+    }
+
+    // Case 2: Top-level summary/next_actions - normalize to expected structure
+    if (parsed.summary || parsed.next_actions) {
+      return {
+        analysis: {
+          summary: parsed.summary || parsed.answer || parsed.reply || parsed.reasoning,
+          next_actions: parsed.next_actions,
+        },
+      };
+    }
+
+    // Case 3: Has related_to_property_management field (AI reasoning output)
+    if (parsed.related_to_property_management !== undefined || parsed.analysis_summary) {
+      // Convert AI reasoning structure to display format
+      const summary = parsed.analysis_summary || parsed.reasoning || "Analysis completed.";
+      const actions = parsed.next_actions || (parsed.recommended_actions ?
+        parsed.recommended_actions.map((action: string) => ({ action })) :
+        []);
+
+      return {
+        analysis: {
+          summary,
+          next_actions: actions,
+        },
+      };
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 export const CustomMessageUI = memo(function CustomMessageUI({
   message,
@@ -88,6 +150,12 @@ export const CustomMessageUI = memo(function CustomMessageUI({
   const stage = deriveStage(metadata.context_type || metadata.flow_state?.stage || msg?.type);
   const isPolicyViolation = stage === "policy_violation";
   const [policyHighlight, setPolicyHighlight] = useState(false);
+  const [showRawJSON, setShowRawJSON] = useState(false);
+
+  // Try to parse structured reasoning from message text
+  const parsedReasoning = useMemo(() => {
+    return tryParseStructuredReasoning(messageText);
+  }, [messageText]);
 
   useEffect(() => {
     if (isPolicyViolation) {
@@ -153,7 +221,40 @@ export const CustomMessageUI = memo(function CustomMessageUI({
         </div>
       )}
 
-      {messageText && (
+      {messageText && parsedReasoning ? (
+        // Structured reasoning detected - render as natural language UI
+        <div className="flex w-full max-w-[90%] flex-col gap-2">
+          <AIResponseParser
+            data={parsedReasoning}
+            stage={stage}
+            incidentId={metadata.incident_id}
+            persona={metadata.persona}
+          />
+
+          {/* Show Details toggle */}
+          <button
+            onClick={() => setShowRawJSON(!showRawJSON)}
+            className="flex items-center gap-1 self-start text-xs text-slate-400 hover:text-emerald-300 transition-colors"
+          >
+            <ChevronDown
+              className={`h-3 w-3 transition-transform ${showRawJSON ? "rotate-180" : ""}`}
+            />
+            {showRawJSON ? "Hide" : "Show"} Details
+          </button>
+
+          {showRawJSON && (
+            <motion.pre
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              className="overflow-x-auto rounded-lg bg-slate-950/80 border border-slate-700 p-3 text-xs text-slate-300 font-mono"
+            >
+              {JSON.stringify(parsedReasoning, null, 2)}
+            </motion.pre>
+          )}
+        </div>
+      ) : messageText ? (
+        // Regular text message
         <motion.div
           layout
           className={`${bubbleClasses} ${bubbleAlignment}`}
@@ -161,7 +262,7 @@ export const CustomMessageUI = memo(function CustomMessageUI({
         >
           {messageText}
         </motion.div>
-      )}
+      ) : null}
 
       {contextType && (
         <span className="inline-flex w-fit items-center gap-1 rounded-full bg-slate-900/80 px-2 py-0.5 text-xs text-slate-300">
