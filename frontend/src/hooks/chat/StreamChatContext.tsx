@@ -721,22 +721,35 @@ export function StreamChatProvider({ children }: { children: ReactNode }) {
       if (!activeChannel) {
         throw new Error("No active channel selected");
       }
-      const body = {
-        channel_id: activeChannel.id || activeChannel.cid,
-        action: actionValue,
-      };
-      const res = await fetch("/api/chat/action", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        const payload = await res.json().catch(() => ({}));
-        throw new Error(payload.error || "Failed to trigger action");
+
+      console.log("[StreamChat] 🎯 Triggering action:", actionValue);
+
+      try {
+        // Send action as a Stream message with format: "action:action_name:incident_id"
+        // This will trigger the webhook which handles action: prefix messages
+        const actionMessage = actionValue.startsWith("action:") ? actionValue : `action:${actionValue}`;
+
+        console.log("[StreamChat] Sending action message:", actionMessage);
+
+        const result = await activeChannel.sendMessage({
+          text: actionMessage,
+          type: "regular",
+        });
+
+        console.log("[StreamChat] ✅ Action sent successfully:", result?.message?.id);
+
+        // Update messages immediately
+        if (result) {
+          setTimeout(() => {
+            updateMessagesFromChannel(activeChannel, true);
+          }, 100);
+        }
+      } catch (err) {
+        console.error("[StreamChat] ❌ Failed to trigger action:", err);
+        throw err;
       }
-      return res.json().catch(() => ({}));
     },
-    [activeChannel],
+    [activeChannel, updateMessagesFromChannel],
   );
 
   const value = useMemo<StreamChatContextValue>(

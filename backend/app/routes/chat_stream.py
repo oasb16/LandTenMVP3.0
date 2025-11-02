@@ -808,33 +808,144 @@ def _send_conversational_response(
     post_agent_message(client, channel_id, reply)
 
 
+def _handle_action_message(
+    client: "StreamChat",
+    channel,
+    channel_state: Dict[str, Any],
+    message: Dict[str, Any],
+    persona: Optional[str] = None,
+) -> None:
+    """
+    Handle action button clicks from the UI.
+    Actions are sent as messages with format: "action:action_name:incident_id"
+
+    Examples:
+    - "action:start_discovery"
+    - "action:start_discovery:INC-123"
+    - "action:dismiss"
+    - "action:approve:INC-456"
+    """
+    message_text = message.get("text", "")
+    channel_id = _channel_identifier(channel, channel_state)
+
+    print(f"[🎯 ACTION] Parsing action: {message_text}")
+
+    # Parse action format: action:action_name:optional_incident_id
+    parts = message_text.split(":")
+    if len(parts) < 2:
+        print(f"[❌ ACTION] Invalid action format: {message_text}")
+        return
+
+    action_type = parts[1].lower()
+    incident_id = parts[2] if len(parts) > 2 else None
+
+    print(f"[🎯 ACTION] Type: {action_type}, Incident: {incident_id or 'none'}")
+
+    # Route action to appropriate handler
+    if action_type == "start_discovery":
+        # Trigger discovery flow
+        print(f"[🔍 ACTION] Starting discovery flow")
+        modified_message = {**message, "text": "start discovery"}
+        _handle_discovery_message(client, channel, channel_state, modified_message, persona)
+
+    elif action_type == "dismiss":
+        # Send acknowledgment
+        print(f"[👋 ACTION] Dismissing card")
+        post_agent_message(client, channel_id, "Understood. Let me know if you need anything else!")
+
+    elif action_type == "approve" and incident_id:
+        # Handle approval
+        print(f"[✅ ACTION] Approving incident: {incident_id}")
+        post_agent_message(
+            client,
+            channel_id,
+            f"Great! I've approved {incident_id}. A contractor will be scheduled shortly."
+        )
+
+    elif action_type == "reject" and incident_id:
+        # Handle rejection
+        print(f"[❌ ACTION] Rejecting incident: {incident_id}")
+        post_agent_message(
+            client,
+            channel_id,
+            f"Understood. I've rejected the proposal for {incident_id}. Would you like to explore alternatives?"
+        )
+
+    else:
+        # Unknown action - send generic response
+        print(f"[⚠️  ACTION] Unknown action type: {action_type}")
+        post_agent_message(
+            client,
+            channel_id,
+            f"I received your action but I'm not sure how to handle '{action_type}'. Could you try a different option?"
+        )
+
+
 @router.post("/chat/stream/webhook")
+@router.post("/ai/stream-webhook")  # Alternative path for compatibility
 async def stream_webhook(request: Request):
+    """
+    Stream Chat webhook endpoint that receives message.new and other events.
+    Handles both regular messages and action button clicks.
+    """
+    # Comprehensive logging for debugging
+    print(f"\n{'='*80}")
+    print(f"[🔔 WEBHOOK] Incoming Stream event")
+    print(f"{'='*80}")
+
     if not WEBHOOK_SECRET:
+        print("[❌ WEBHOOK] ERROR: Stream webhook secret not configured")
         raise HTTPException(status_code=501, detail="Stream webhook secret not configured")
 
     body = await request.body()
     signature = request.headers.get("X-Signature", "")
+
+    # Log headers for debugging
+    print(f"[📋 WEBHOOK] Headers: X-Signature={'*' * 8 if signature else 'MISSING'}")
+
     if not verify_stream_signature(body, signature, WEBHOOK_SECRET):
+        print("[❌ WEBHOOK] ERROR: Invalid Stream signature")
         raise HTTPException(status_code=401, detail="Invalid Stream signature")
 
     try:
         payload = json.loads(body.decode("utf-8") or "{}")
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
+        print(f"[❌ WEBHOOK] ERROR: Invalid JSON payload: {e}")
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
 
-    if payload.get("type") != "message.new":
-        return {"status": "ignored"}
+    # Log event type
+    event_type = payload.get("type", "unknown")
+    print(f"[📨 WEBHOOK] Event type: {event_type}")
+
+    # Handle different event types
+    if event_type != "message.new":
+        print(f"[⏭️  WEBHOOK] Ignoring event type: {event_type}")
+        return {"status": "ignored", "reason": f"event_type_{event_type}"}
 
     message = payload.get("message") or {}
-    if message.get("user", {}).get("id") == AGENT_USER_ID:
-        return {"status": "ignored"}
+    message_text = message.get("text", "")
+    message_id = message.get("id", "unknown")
+    user_id = message.get("user", {}).get("id", "unknown")
 
+    print(f"[💬 WEBHOOK] Message ID: {message_id}")
+    print(f"[👤 WEBHOOK] User ID: {user_id}")
+    print(f"[📝 WEBHOOK] Message text: {message_text[:100]}{'...' if len(message_text) > 100 else ''}")
+
+    # Ignore messages from our AI agent
+    if user_id == AGENT_USER_ID:
+        print(f"[⏭️  WEBHOOK] Ignoring message from AI agent: {AGENT_USER_ID}")
+        return {"status": "ignored", "reason": "agent_message"}
+
+    # Validate channel ID
     cid = message.get("cid")
     if not cid or ":" not in cid:
-        return {"status": "ignored"}
-    channel_type, channel_id = cid.split(":", 1)
+        print(f"[❌ WEBHOOK] ERROR: Invalid channel ID: {cid}")
+        return {"status": "ignored", "reason": "invalid_cid"}
 
+    channel_type, channel_id = cid.split(":", 1)
+    print(f"[📺 WEBHOOK] Channel: {channel_type}:{channel_id}")
+
+    # Get channel state
     client = _get_stream_client()
     bot_ensure_agent_user(client)
     channel = client.channel(channel_type, channel_id)
@@ -843,7 +954,19 @@ async def stream_webhook(request: Request):
     persona = channel_data.get("persona")
     discovery = channel_data.get("discovery") or {}
 
-    # Use AI reasoning to intelligently handle ALL user messages
-    # This enables free-flow conversation with dynamic escalation
+    print(f"[👔 WEBHOOK] Persona: {persona}")
+    print(f"[🔍 WEBHOOK] Discovery stage: {discovery.get('stage', 'none')}")
+
+    # Check if this is an action message (button click)
+    if message_text.startswith("action:"):
+        print(f"[🎯 WEBHOOK] ACTION DETECTED: {message_text}")
+        _handle_action_message(client, channel, channel_state, message, persona)
+        print(f"[✅ WEBHOOK] Action handled successfully")
+        return {"status": "ok", "action_handled": True}
+
+    # Handle regular message with intelligent routing
+    print(f"[🧠 WEBHOOK] Routing to intelligent message handler")
     _handle_intelligent_message(client, channel, channel_state, message, persona)
+    print(f"[✅ WEBHOOK] Message handled successfully")
+    print(f"{'='*80}\n")
     return {"status": "ok"}

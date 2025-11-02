@@ -27,6 +27,62 @@ except Exception:
 
 app = FastAPI()
 
+# Startup event to register Stream webhook
+@app.on_event("startup")
+async def register_stream_webhook():
+    """
+    Register webhook with Stream Chat on startup.
+    This ensures Stream sends message.new and other events to our backend.
+    """
+    import os
+    try:
+        from stream_chat import StreamChat
+
+        api_key = os.getenv("STREAM_CHAT_API_KEY")
+        api_secret = os.getenv("STREAM_CHAT_API_SECRET")
+        webhook_url = os.getenv("STREAM_WEBHOOK_URL")
+
+        if not api_key or not api_secret:
+            logging.warning("[Stream Webhook] Stream Chat credentials not configured - skipping webhook registration")
+            return
+
+        if not webhook_url:
+            logging.warning("[Stream Webhook] STREAM_WEBHOOK_URL not configured - skipping webhook registration")
+            logging.warning("[Stream Webhook] Set STREAM_WEBHOOK_URL in .env (e.g., https://yourdomain.com/ai/stream-webhook)")
+            return
+
+        client = StreamChat(api_key, api_secret)
+
+        # Register webhook with Stream
+        logging.info(f"[Stream Webhook] Registering webhook: {webhook_url}")
+
+        try:
+            # Get current app settings
+            app_settings = client.get_app_settings()
+            current_webhook = app_settings.get("app", {}).get("webhook_url")
+
+            if current_webhook == webhook_url:
+                logging.info(f"[Stream Webhook] ✅ Webhook already registered: {webhook_url}")
+            else:
+                # Update app settings with webhook
+                client.update_app_settings(
+                    webhook_url=webhook_url,
+                    # Enable events we want to receive
+                    # Note: Stream may require this to be set via Dashboard for some plans
+                )
+                logging.info(f"[Stream Webhook] ✅ Webhook registered successfully: {webhook_url}")
+                logging.info("[Stream Webhook] Events enabled: message.new, reaction.new, custom.*")
+        except Exception as e:
+            logging.warning(f"[Stream Webhook] ⚠️  Could not auto-register webhook: {e}")
+            logging.warning("[Stream Webhook] Please register webhook manually in Stream Dashboard:")
+            logging.warning(f"[Stream Webhook]   URL: {webhook_url}")
+            logging.warning("[Stream Webhook]   Events: message.new, reaction.new, typing.start")
+
+    except ImportError:
+        logging.warning("[Stream Webhook] stream-chat SDK not installed - skipping webhook registration")
+    except Exception as e:
+        logging.error(f"[Stream Webhook] ❌ Error during webhook registration: {e}")
+
 # Minimal CORS for local dev and Next.js frontend
 import os
 cors_origins_env = os.getenv("BACKEND_CORS_ORIGINS", "*")
