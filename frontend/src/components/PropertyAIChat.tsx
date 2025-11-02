@@ -3,8 +3,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Loader2, Bot, User } from 'lucide-react';
-import { StreamChat, Channel as StreamChannel } from 'stream-chat';
+import { Send, Loader2, Bot, User, MessageSquare } from 'lucide-react';
+import { useStreamChat } from '@/hooks/chat/StreamChatContext';
 
 interface Message {
   id: string;
@@ -23,13 +23,19 @@ interface PropertyAIChatProps {
 }
 
 export default function PropertyAIChat({ persona, userId }: PropertyAIChatProps) {
-  const [client, setClient] = useState<StreamChat | null>(null);
-  const [channel, setChannel] = useState<StreamChannel | null>(null);
+  // Use shared StreamChat context instead of creating own client
+  const {
+    client,
+    activeChannel,
+    messages: contextMessages,
+    loading,
+    error,
+    sendMessage: contextSendMessage
+  } = useStreamChat();
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
-  const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom
@@ -41,95 +47,29 @@ export default function PropertyAIChat({ persona, userId }: PropertyAIChatProps)
     scrollToBottom();
   }, [messages]);
 
-  // Initialize Stream Chat
+  // Sync messages from context
   useEffect(() => {
-    let chatClient: StreamChat | null = null;
-
-    const init = async () => {
-      try {
-        setLoading(true);
-        const res = await fetch('/api/chat/token');
-        if (!res.ok) {
-          throw new Error('Failed to get chat token');
-        }
-
-        const data = await res.json();
-        chatClient = StreamChat.getInstance(data.api_key);
-
-        await chatClient.connectUser(
-          {
-            id: data.user_id,
-            name: data.display_user_id || data.user_id,
-          },
-          data.token
-        );
-
-        const channelId = data.channel_id || `${persona}-general`;
-        const ch = chatClient.channel('messaging', channelId, {
-          name: `${persona.charAt(0).toUpperCase() + persona.slice(1)} Chat`,
-        } as any);
-
-        await ch.watch();
-
-        setClient(chatClient);
-        setChannel(ch);
-
-        // Load initial messages
-        const state = ch.state;
-        const initialMessages = state.messages.map((msg: any) => ({
-          id: msg.id,
-          text: msg.text || '',
-          user: {
-            id: msg.user?.id || 'unknown',
-            name: msg.user?.name || 'Unknown',
-          },
-          created_at: new Date(msg.created_at),
-          isAI: msg.user?.id?.includes('agent') || msg.user?.id?.includes('bot'),
-        }));
-        setMessages(initialMessages);
-
-        // Listen for new messages
-        ch.on('message.new', (event: any) => {
-          if (event.message) {
-            const newMsg: Message = {
-              id: event.message.id,
-              text: event.message.text || '',
-              user: {
-                id: event.message.user?.id || 'unknown',
-                name: event.message.user?.name || 'Unknown',
-              },
-              created_at: new Date(event.message.created_at),
-              isAI: event.message.user?.id?.includes('agent') || event.message.user?.id?.includes('bot'),
-            };
-            setMessages(prev => [...prev, newMsg]);
-          }
-        });
-
-        setLoading(false);
-      } catch (err) {
-        console.error('Chat init error:', err);
-        setError(err instanceof Error ? err.message : 'Failed to initialize chat');
-        setLoading(false);
-      }
-    };
-
-    init();
-
-    return () => {
-      if (chatClient) {
-        chatClient.disconnectUser();
-      }
-    };
-  }, [persona]);
+    if (contextMessages && contextMessages.length > 0) {
+      const formattedMessages = contextMessages.map((msg: any) => ({
+        id: msg.id || `${msg.cid}-${Date.now()}`,
+        text: msg.text || '',
+        user: {
+          id: msg.user?.id || 'unknown',
+          name: msg.user?.name || 'Unknown',
+        },
+        created_at: msg.created_at ? new Date(msg.created_at) : new Date(),
+        isAI: msg.user?.id?.includes('agent') || msg.user?.id?.includes('bot') || msg.user?.id?.startsWith('ai-'),
+      }));
+      setMessages(formattedMessages);
+    }
+  }, [contextMessages]);
 
   const handleSend = async () => {
-    if (!inputValue.trim() || !channel || sending) return;
+    if (!inputValue.trim() || !client || !activeChannel || sending) return;
 
     setSending(true);
     try {
-      await channel.sendMessage({
-        text: inputValue.trim(),
-      });
+      await contextSendMessage(inputValue.trim());
       setInputValue('');
     } catch (err) {
       console.error('Send message error:', err);
@@ -159,6 +99,14 @@ export default function PropertyAIChat({ persona, userId }: PropertyAIChatProps)
       <div className="flex flex-col items-center justify-center h-full p-6 text-center">
         <div className="text-red-500 mb-2">Chat unavailable</div>
         <div className="text-sm text-gray-600">{error}</div>
+      </div>
+    );
+  }
+
+  if (!client || !activeChannel) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-sm text-gray-400">Connecting to chat...</div>
       </div>
     );
   }
@@ -227,11 +175,11 @@ export default function PropertyAIChat({ persona, userId }: PropertyAIChatProps)
             onKeyPress={handleKeyPress}
             placeholder="Type a message..."
             className="flex-1 bg-white border border-gray-300 rounded-full px-4 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-            disabled={sending}
+            disabled={sending || !activeChannel}
           />
           <button
             onClick={handleSend}
-            disabled={!inputValue.trim() || sending}
+            disabled={!inputValue.trim() || sending || !activeChannel}
             className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {sending ? (
@@ -245,6 +193,3 @@ export default function PropertyAIChat({ persona, userId }: PropertyAIChatProps)
     </div>
   );
 }
-
-// Missing import
-import { MessageSquare } from 'lucide-react';
