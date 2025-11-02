@@ -56,6 +56,17 @@ export default function StreamChatPane({ className }: Props) {
     }
   };
 
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    // Send message on Enter (without Shift)
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      const form = event.currentTarget.form;
+      if (form) {
+        form.requestSubmit();
+      }
+    }
+  };
+
   const handleAction = useCallback(
     async (actionValue: string) => {
       try {
@@ -118,9 +129,10 @@ export default function StreamChatPane({ className }: Props) {
         <fieldset className="flex items-center gap-3 rounded-full border border-slate-800/80 bg-slate-900/70 px-4 py-2 shadow-lg shadow-slate-950/40">
           <input
             className="flex-1 bg-transparent text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none"
-            placeholder={activeChannel ? "Type a message…" : "Select a channel to begin"}
+            placeholder={activeChannel ? "Type a message… (Press Enter to send)" : "Select a channel to begin"}
             value={input}
             onChange={(event) => setInput(event.target.value)}
+            onKeyDown={handleKeyDown}
             disabled={!activeChannel || isSending}
           />
           <button
