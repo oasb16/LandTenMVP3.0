@@ -1,18 +1,38 @@
-import React from "react";
+import React, { useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Loader2 } from "lucide-react";
 
 type Props = {
   icon: LucideIcon;
   title: string;
   desc?: string;
   index?: number;
+  onClick?: (title: string, desc?: string) => void | Promise<void>;
 };
 
-export function ActionCard({ icon: Icon, title, desc, index }: Props) {
+export function ActionCard({ icon: Icon, title, desc, index, onClick }: Props) {
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  const handleClick = async () => {
+    if (!onClick || isProcessing) return;
+
+    setIsProcessing(true);
+    try {
+      await onClick(title, desc);
+    } catch (err) {
+      console.error("[ActionCard] Click handler failed:", err);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   return (
     <Card
-      className="group transform border-slate-800 bg-slate-900/80 text-slate-50 shadow-lg ring-1 ring-transparent transition hover:-translate-y-1 hover:shadow-emerald-500/20 hover:ring-emerald-400/50"
+      onClick={handleClick}
+      className={`group transform border-slate-800 bg-slate-900/80 text-slate-50 shadow-lg ring-1 ring-transparent transition hover:-translate-y-1 hover:shadow-emerald-500/20 hover:ring-emerald-400/50 ${
+        onClick ? "cursor-pointer" : ""
+      } ${isProcessing ? "opacity-60" : ""}`}
       style={
         typeof index === "number"
           ? { transitionDelay: `${Math.min(index, 6) * 50}ms` }
@@ -21,7 +41,11 @@ export function ActionCard({ icon: Icon, title, desc, index }: Props) {
     >
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-sm font-semibold tracking-tight">
-          <Icon className="h-4 w-4 text-emerald-400 transition group-hover:scale-110" />
+          {isProcessing ? (
+            <Loader2 className="h-4 w-4 text-emerald-400 animate-spin" />
+          ) : (
+            <Icon className="h-4 w-4 text-emerald-400 transition group-hover:scale-110" />
+          )}
           <span>{title}</span>
         </CardTitle>
         {desc && (

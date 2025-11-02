@@ -47,15 +47,28 @@ type Props = {
   stage?: string | null;
   incidentId?: string | null;
   persona?: string;
+  onActionClick?: (actionText: string) => void | Promise<void>;
 };
 
 const normaliseStage = (stage?: string | null) => stage?.toLowerCase() ?? null;
 
-const AIResponseParserComponent = ({ data, stage, incidentId, persona }: Props) => {
+const AIResponseParserComponent = ({ data, stage, incidentId, persona, onActionClick }: Props) => {
   const analysis: AnalysisPayload | null = data?.analysis ?? null;
 
   const actions = useMemo(() => analysis?.next_actions ?? [], [analysis?.next_actions]);
   const normalizedStage = normaliseStage(stage);
+
+  // Handler for action button clicks
+  const handleActionClick = async (title: string, desc?: string) => {
+    if (!onActionClick) return;
+
+    // Construct a contextual message from the action
+    const actionMessage = desc
+      ? `${title}: ${desc}`
+      : title;
+
+    await onActionClick(actionMessage);
+  };
 
   const stageContext = useMemo(() => {
     if (!analysis) return null;
@@ -119,7 +132,13 @@ const AIResponseParserComponent = ({ data, stage, incidentId, persona }: Props) 
                   visible: { opacity: 1, y: 0 },
                 }}
               >
-                <ActionCard icon={Icon} title={item.action} desc={item.details} index={index} />
+                <ActionCard
+                  icon={Icon}
+                  title={item.action}
+                  desc={item.details}
+                  index={index}
+                  onClick={onActionClick ? handleActionClick : undefined}
+                />
               </motion.div>
             );
           })}

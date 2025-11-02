@@ -672,6 +672,142 @@ def post_agent_reply(req: AgentMessageRequest, token: str = Depends(verify_fireb
         "incident_detection": "processed"
     }
 
+def _handle_intelligent_message(
+    client: "StreamChat",
+    channel,
+    channel_state: Dict[str, Any],
+    message: Dict[str, Any],
+    persona: Optional[str] = None,
+) -> None:
+    """
+    Intelligent message handler that uses AI reasoning to:
+    1. Understand context from recent conversation (last 3-5 messages)
+    2. Decide whether to continue conversation or escalate to structured flow
+    3. Generate contextually appropriate responses
+    4. Dynamically switch modes (general → incident → discovery → job)
+    """
+    from app.services.ai_reasoning import AIReasoning
+
+    channel_id = _channel_identifier(channel, channel_state)
+    channel_data = channel_state.get("channel", {}).get("data", {}) or {}
+    discovery = channel_data.get("discovery") or {}
+
+    # Build context from last 5 messages for continuity
+    messages = channel_state.get("messages", [])
+    recent_messages = messages[-5:] if len(messages) > 5 else messages
+    context_lines = []
+    for msg in recent_messages:
+        user_id = msg.get("user", {}).get("id", "unknown")
+        text = msg.get("text", "")
+        context_lines.append(f"{user_id}: {text}")
+    context = "\n".join(context_lines)
+
+    # Extract current message
+    message_text = message.get("text", "").strip()
+    if not message_text:
+        return
+
+    # Check if we're in an active discovery flow
+    if discovery and discovery.get("stage") in {"questions", "diy"}:
+        # Continue existing discovery flow
+        _handle_discovery_message(client, channel, channel_state, message, persona)
+        return
+
+    # Use AI reasoning to infer intent and decide next action
+    reasoning_engine = AIReasoning()
+    reasoning_context = {
+        "recent_conversation": context,
+        "persona": persona or "tenant",
+        "channel_id": channel_id,
+        "discovery_state": discovery.get("stage") if discovery else None,
+    }
+
+    intent_result = reasoning_engine.infer_intent(
+        message=message_text,
+        context=reasoning_context,
+        persona=persona or "tenant"
+    )
+
+    intent = intent_result.get("intent", "general.chat")
+    entities = intent_result.get("entities", {})
+    confidence = intent_result.get("confidence", 0.0)
+
+    print(f"[intelligent-handler] Intent: {intent}, Confidence: {confidence:.2f}")
+
+    # Decide how to respond based on intent
+    if intent == "incident.report" and confidence > 0.6:
+        # Escalate to discovery flow
+        print("[intelligent-handler] Escalating to discovery flow")
+        # Simulate "start discovery" to trigger structured flow
+        modified_message = {**message, "text": "start discovery"}
+        _handle_discovery_message(client, channel, channel_state, modified_message, persona)
+
+    elif intent in {"discovery.response", "discovery.continue"}:
+        # Continue discovery if active
+        if discovery:
+            _handle_discovery_message(client, channel, channel_state, message, persona)
+        else:
+            # Free-form empathy response
+            _send_conversational_response(client, channel_id, message_text, context, persona, intent_result)
+
+    else:
+        # General conversation, help, greeting, or unclear
+        # Provide intelligent free-form response
+        _send_conversational_response(client, channel_id, message_text, context, persona, intent_result)
+
+
+def _send_conversational_response(
+    client: "StreamChat",
+    channel_id: str,
+    message_text: str,
+    context: str,
+    persona: Optional[str],
+    intent_result: Dict[str, Any],
+) -> None:
+    """
+    Send a natural conversational response based on AI reasoning.
+    This restores free-flow chat capability.
+    """
+    intent = intent_result.get("intent", "general.chat")
+    entities = intent_result.get("entities", {})
+    next_actions = intent_result.get("next_actions", [])
+    reasoning = intent_result.get("reasoning", "")
+
+    # Build prompt for conversational response
+    if intent == "greeting":
+        prompt = (
+            f"A {persona or 'user'} said: {message_text}. "
+            "Respond warmly and professionally. Offer to help with property management or maintenance needs. "
+            "Keep it brief and friendly."
+        )
+    elif intent == "help":
+        prompt = (
+            f"A {persona or 'user'} asked: {message_text}. "
+            "Explain that you can help with: reporting maintenance issues, tracking repairs, "
+            "answering property questions, and coordinating with landlords/contractors. "
+            "Ask what they need help with."
+        )
+    elif intent == "unclear":
+        prompt = (
+            f"A {persona or 'user'} said: {message_text}. "
+            "Politely clarify what they need. Are they reporting a maintenance issue, "
+            "asking a question, or just chatting? Be helpful and empathetic."
+        )
+    else:
+        # General chat or follow-up
+        prompt = (
+            f"Continue this conversation naturally:\n{context}\n"
+            f"User just said: {message_text}\n"
+            f"Intent: {intent}\n"
+            f"Context: {reasoning if reasoning else 'General conversation'}\n"
+            "Respond empathetically. If this seems related to property issues, "
+            "gently offer to help formally document it. Otherwise, engage naturally."
+        )
+
+    reply = agent_reply(prompt, context, persona)
+    post_agent_message(client, channel_id, reply)
+
+
 @router.post("/chat/stream/webhook")
 async def stream_webhook(request: Request):
     if not WEBHOOK_SECRET:
@@ -707,15 +843,7 @@ async def stream_webhook(request: Request):
     persona = channel_data.get("persona")
     discovery = channel_data.get("discovery") or {}
 
-    lower_text = (message.get("text") or "").lower()
-    should_handle = False
-    if "agent" in lower_text or "start discovery" in lower_text:
-        should_handle = True
-    if discovery.get("stage") in {"questions", "diy"}:
-        should_handle = True
-
-    if not should_handle:
-        return {"status": "ignored"}
-
-    _handle_discovery_message(client, channel, channel_state, message, persona)
+    # Use AI reasoning to intelligently handle ALL user messages
+    # This enables free-flow conversation with dynamic escalation
+    _handle_intelligent_message(client, channel, channel_state, message, persona)
     return {"status": "ok"}
