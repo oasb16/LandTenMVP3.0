@@ -58,10 +58,24 @@ type TokenResponse = {
   email?: string;
 };
 
+type CachedToken = {
+  tokenData: TokenResponse;
+  expiresAt: number;
+};
+
 const MAX_RENDERED_MESSAGES = 50;
 const REASONING_TIMEOUT_MS = 3000;
+const TOKEN_CACHE_TTL = 4 * 60 * 1000; // 4 minutes (tokens expire at 5 min)
+const RECONNECT_BASE_DELAY = 2000; // 2 seconds
+const RECONNECT_MAX_DELAY = 30000; // 30 seconds
 
 const initialReasoningState: ReasoningState = { active: false, stage: null };
+
+// Module-level singleton client instance
+let singletonClient: StreamChat | null = null;
+let singletonUserId: string | null = null;
+let reconnectAttempts = 0;
+let lastReconnectTime = 0;
 
 const normaliseStage = (value?: string | null) => value?.toLowerCase() ?? null;
 
@@ -146,6 +160,60 @@ const normaliseMessageDates = (raw: unknown): MessageResponse => {
   return message as unknown as MessageResponse;
 };
 
+// Token caching utilities
+const getTokenCacheKey = (userId: string, persona: string): string => {
+  return `stream_token_${userId}_${persona}`;
+};
+
+const getCachedToken = (userId: string, persona: string): TokenResponse | null => {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const cacheKey = getTokenCacheKey(userId, persona);
+    const cached = sessionStorage.getItem(cacheKey);
+    if (!cached) return null;
+
+    const parsed: CachedToken = JSON.parse(cached);
+    if (Date.now() > parsed.expiresAt) {
+      sessionStorage.removeItem(cacheKey);
+      return null;
+    }
+
+    console.log("[StreamChat] Using cached token");
+    return parsed.tokenData;
+  } catch (err) {
+    console.warn("[StreamChat] Token cache read failed:", err);
+    return null;
+  }
+};
+
+const setCachedToken = (userId: string, persona: string, tokenData: TokenResponse): void => {
+  if (typeof window === "undefined") return;
+
+  try {
+    const cacheKey = getTokenCacheKey(userId, persona);
+    const cached: CachedToken = {
+      tokenData,
+      expiresAt: Date.now() + TOKEN_CACHE_TTL,
+    };
+    sessionStorage.setItem(cacheKey, JSON.stringify(cached));
+    console.log("[StreamChat] Token cached for", TOKEN_CACHE_TTL / 1000, "seconds");
+  } catch (err) {
+    console.warn("[StreamChat] Token cache write failed:", err);
+  }
+};
+
+const clearTokenCache = (userId: string, persona: string): void => {
+  if (typeof window === "undefined") return;
+
+  try {
+    const cacheKey = getTokenCacheKey(userId, persona);
+    sessionStorage.removeItem(cacheKey);
+  } catch (err) {
+    console.warn("[StreamChat] Token cache clear failed:", err);
+  }
+};
+
 export function StreamChatProvider({ children }: { children: ReactNode }) {
   const { data: session, status } = useSession();
   const [client, setClient] = useState<StreamChat | null>(null);
@@ -160,6 +228,8 @@ export function StreamChatProvider({ children }: { children: ReactNode }) {
 
   const reasoningTimeout = useRef<NodeJS.Timeout | null>(null);
   const channelSubscriptions = useRef<Array<() => void>>([]);
+  const isInitializing = useRef(false);
+  const initializationAttempts = useRef(0);
 
   const resetState = useCallback(() => {
     channelSubscriptions.current.forEach((unsubscribe) => {
@@ -178,48 +248,129 @@ export function StreamChatProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const disconnectClient = useCallback(async () => {
+    console.log("[StreamChat] Disconnect requested");
     if (reasoningTimeout.current) {
       clearTimeout(reasoningTimeout.current);
       reasoningTimeout.current = null;
     }
     resetState();
-    if (client) {
+
+    // Only disconnect if we own this client instance
+    if (singletonClient && client === singletonClient) {
       try {
-        await client.disconnectUser();
+        await singletonClient.disconnectUser();
+        console.log("[StreamChat] Client disconnected");
       } catch (disconnectError) {
         console.warn("[StreamChat] Failed to disconnect user", disconnectError);
       }
+      singletonClient = null;
+      singletonUserId = null;
     }
+
     setClient(null);
     setUser(null);
   }, [client, resetState]);
 
+  // Calculate exponential backoff delay
+  const getReconnectDelay = (): number => {
+    const delay = Math.min(
+      RECONNECT_BASE_DELAY * Math.pow(2, reconnectAttempts),
+      RECONNECT_MAX_DELAY
+    );
+    return delay;
+  };
+
   useEffect(() => {
     if (status === "loading") return;
+
     if (!session?.user) {
       disconnectClient();
       return;
     }
 
+    const userEmail = session.user.email || "";
+    const userPersona = session.user.persona || "tenant";
+
+    // Guard: Prevent concurrent initializations
+    if (isInitializing.current) {
+      console.log("[StreamChat] Initialization already in progress, skipping");
+      return;
+    }
+
+    // Guard: Check if already connected to same user
+    if (singletonClient && singletonUserId === userEmail && singletonClient.userID) {
+      console.log("[StreamChat] Already connected to Stream as", userEmail);
+      if (!client) {
+        setClient(singletonClient);
+        setUser({
+          id: singletonClient.userID,
+          name: session.user.email ?? singletonClient.userID,
+          email: userEmail,
+          persona: userPersona,
+        });
+      }
+      return;
+    }
+
+    // Throttle reconnection attempts
+    const now = Date.now();
+    const timeSinceLastReconnect = now - lastReconnectTime;
+    const minDelay = getReconnectDelay();
+
+    if (timeSinceLastReconnect < minDelay) {
+      const waitTime = minDelay - timeSinceLastReconnect;
+      console.log(`[StreamChat] Throttling reconnect, waiting ${waitTime}ms`);
+      const timeout = setTimeout(() => {
+        // Trigger re-initialization after throttle period
+        setLoading(false);
+      }, waitTime);
+      return () => clearTimeout(timeout);
+    }
+
     let isMounted = true;
+    isInitializing.current = true;
+
     const initialise = async () => {
       setLoading(true);
       setError(null);
+
       try {
-        const tokenRes = await fetch("/api/chat/token");
-        if (!tokenRes.ok) {
-          const problem = await tokenRes.json().catch(() => ({}));
-          throw new Error(problem.error || "Unable to fetch Stream token");
+        lastReconnectTime = Date.now();
+
+        // Try to get cached token first
+        let tokenData = getCachedToken(userEmail, userPersona);
+
+        if (!tokenData) {
+          console.log("[StreamChat] Fetching new token from /api/chat/token");
+          const tokenRes = await fetch("/api/chat/token");
+          if (!tokenRes.ok) {
+            const problem = await tokenRes.json().catch(() => ({}));
+            throw new Error(problem.error || "Unable to fetch Stream token");
+          }
+          tokenData = (await tokenRes.json()) as TokenResponse;
+
+          // Cache the token
+          setCachedToken(userEmail, userPersona, tokenData);
         }
-        const tokenData = (await tokenRes.json()) as TokenResponse;
+
         const { api_key, token, user_id, display_user_id, persona, channel_id } = tokenData;
 
         if (!api_key || !token || !user_id) {
           throw new Error("Stream credentials incomplete");
         }
 
-        const streamClient = StreamChat.getInstance(api_key, { timeout: 6000 });
+        // Use singleton client or create new one
+        let streamClient = singletonClient;
+
+        if (!streamClient) {
+          console.log("[StreamChat] Creating new singleton client");
+          streamClient = StreamChat.getInstance(api_key, { timeout: 6000 });
+          singletonClient = streamClient;
+        }
+
+        // Guard: Only connect if not already connected to this user
         if (!streamClient.userID) {
+          console.log("[StreamChat] Connecting user:", user_id);
           await streamClient.connectUser(
             {
               id: user_id,
@@ -227,7 +378,10 @@ export function StreamChatProvider({ children }: { children: ReactNode }) {
             },
             token,
           );
+          singletonUserId = userEmail;
+          console.log("[StreamChat] ✅ WS connected");
         } else if (streamClient.userID !== user_id) {
+          console.log("[StreamChat] User changed, reconnecting:", user_id);
           await streamClient.disconnectUser();
           await streamClient.connectUser(
             {
@@ -236,10 +390,14 @@ export function StreamChatProvider({ children }: { children: ReactNode }) {
             },
             token,
           );
+          singletonUserId = userEmail;
+          console.log("[StreamChat] ✅ WS reconnected");
+        } else {
+          console.log("[StreamChat] Already connected as", user_id);
         }
 
         if (!isMounted) {
-          await streamClient.disconnectUser();
+          console.log("[StreamChat] Component unmounted during init, aborting");
           return;
         }
 
@@ -262,7 +420,7 @@ export function StreamChatProvider({ children }: { children: ReactNode }) {
         });
 
         if (!isMounted) {
-          await streamClient.disconnectUser();
+          console.log("[StreamChat] Component unmounted after query, aborting");
           return;
         }
 
@@ -298,13 +456,23 @@ export function StreamChatProvider({ children }: { children: ReactNode }) {
           }
         }
 
+        // Reset reconnection counter on successful connection
+        reconnectAttempts = 0;
         setLoading(false);
+
       } catch (err) {
         console.error("[StreamChat] Failed to initialise connection", err);
+        reconnectAttempts++;
+
         if (isMounted) {
           setError(err instanceof Error ? err.message : "Failed to connect to Stream");
           setLoading(false);
+
+          // Clear cached token on error
+          clearTokenCache(userEmail, userPersona);
         }
+      } finally {
+        isInitializing.current = false;
       }
     };
 
@@ -313,7 +481,7 @@ export function StreamChatProvider({ children }: { children: ReactNode }) {
     return () => {
       isMounted = false;
     };
-  }, [session, status, disconnectClient]);
+  }, [session?.user?.email, session?.user?.persona, status]); // Only depend on stable values
 
   const updateMessagesFromChannel = useCallback(
     (channel: Channel, forceUpdate = false) => {
@@ -321,19 +489,15 @@ export function StreamChatProvider({ children }: { children: ReactNode }) {
         .slice(-MAX_RENDERED_MESSAGES)
         .map((msg) => normaliseMessageDates(msg));
 
-      // Always update to ensure reactivity - use functional update for consistency
       setMessages((prev) => {
-        // Force update if requested or if the array has changed
         if (forceUpdate || prev.length !== latestMessages.length) {
           return latestMessages;
         }
-        // Check if the last message has changed
         const prevLast = prev[prev.length - 1];
         const newLast = latestMessages[latestMessages.length - 1];
         if (prevLast?.id !== newLast?.id) {
           return latestMessages;
         }
-        // Return prev to avoid unnecessary re-renders
         return prev;
       });
 
@@ -515,12 +679,6 @@ export function StreamChatProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  useEffect(() => {
-    return () => {
-      disconnectClient();
-    };
-  }, [disconnectClient]);
-
   const selectChannel = useCallback((channel: Channel) => {
     console.log("[StreamChat] Selecting channel:", channel.cid);
     setActiveChannel((prev) => {
@@ -545,9 +703,7 @@ export function StreamChatProvider({ children }: { children: ReactNode }) {
         });
         console.log("[StreamChat] Message sent successfully, result:", result?.message?.id);
 
-        // Force update messages after sending
         if (result) {
-          // Small delay to ensure the message is in the channel state
           setTimeout(() => {
             updateMessagesFromChannel(activeChannel, true);
           }, 100);

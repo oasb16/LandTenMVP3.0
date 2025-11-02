@@ -1,7 +1,10 @@
 import os, json
 import re
+import time
 from uuid import uuid4
 from typing import List, Dict, Any, Optional, Tuple
+from collections import OrderedDict
+from threading import Lock
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -33,6 +36,80 @@ except ImportError:  # pragma: no cover
 
 
 router = APIRouter()
+
+# Token caching with LRU eviction
+class TokenCache:
+    """Simple LRU cache for Stream tokens with TTL."""
+
+    def __init__(self, max_size: int = 1000, ttl_seconds: int = 300):
+        self.max_size = max_size
+        self.ttl_seconds = ttl_seconds
+        self.cache: OrderedDict[str, Tuple[str, float]] = OrderedDict()
+        self.lock = Lock()
+
+    def get(self, user_id: str, persona: str) -> Optional[str]:
+        """Get cached token if valid."""
+        key = f"{user_id}:{persona}"
+        with self.lock:
+            if key in self.cache:
+                token, expires_at = self.cache[key]
+                if time.time() < expires_at:
+                    # Move to end (mark as recently used)
+                    self.cache.move_to_end(key)
+                    print(f"[token-cache] HIT for {user_id}")
+                    return token
+                else:
+                    # Expired, remove
+                    del self.cache[key]
+                    print(f"[token-cache] EXPIRED for {user_id}")
+        return None
+
+    def set(self, user_id: str, persona: str, token: str) -> None:
+        """Cache a token with TTL."""
+        key = f"{user_id}:{persona}"
+        with self.lock:
+            # Remove if exists (to update position)
+            if key in self.cache:
+                del self.cache[key]
+            # Add with expiry
+            self.cache[key] = (token, time.time() + self.ttl_seconds)
+            # Evict oldest if over max size
+            if len(self.cache) > self.max_size:
+                oldest = next(iter(self.cache))
+                del self.cache[oldest]
+                print(f"[token-cache] EVICTED {oldest}")
+            print(f"[token-cache] CACHED for {user_id} (TTL: {self.ttl_seconds}s)")
+
+
+# Rate limiting for token requests
+class RateLimiter:
+    """Simple per-user rate limiter with sliding window."""
+
+    def __init__(self, min_interval_seconds: float = 5.0):
+        self.min_interval = min_interval_seconds
+        self.last_requests: Dict[str, float] = {}
+        self.lock = Lock()
+
+    def check_and_update(self, user_id: str) -> bool:
+        """Check if request is allowed, update timestamp if so."""
+        with self.lock:
+            now = time.time()
+            last_request = self.last_requests.get(user_id, 0)
+            elapsed = now - last_request
+
+            if elapsed < self.min_interval:
+                remaining = self.min_interval - elapsed
+                print(f"[rate-limit] BLOCKED {user_id} - {remaining:.1f}s remaining")
+                return False
+
+            self.last_requests[user_id] = now
+            print(f"[rate-limit] ALLOWED {user_id}")
+            return True
+
+
+# Global instances
+_token_cache = TokenCache(max_size=1000, ttl_seconds=300)  # 5 minutes
+_rate_limiter = RateLimiter(min_interval_seconds=5.0)  # 5 seconds
 
 
 def _slugify(value: str, allow_at: bool = False) -> str:
@@ -237,6 +314,13 @@ def get_stream_token(user_id: str, persona: str, token: str = Depends(verify_fir
     }
     allowed_roles.add(AGENT_ROLE)
 
+    # Rate limiting
+    if not _rate_limiter.check_and_update(user_id):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many token requests. Please wait a few seconds before retrying."
+        )
+
     try:
         client = _get_stream_client()
         bot_ensure_agent_user(client)
@@ -245,6 +329,19 @@ def get_stream_token(user_id: str, persona: str, token: str = Depends(verify_fir
         if not sanitized_user_id:
             sanitized_user_id = f"user-{uuid4().hex[:8]}"
             print(f"[stream] sanitized user_id empty; generated {sanitized_user_id}")
+
+        # Check token cache first
+        cached_token = _token_cache.get(sanitized_user_id, persona)
+        if cached_token:
+            print(f"[stream] Returning cached token for {sanitized_user_id}")
+            return {
+                "api_key": api_key,
+                "token": cached_token,
+                "channel_id": DEFAULT_CHANNEL_ID,
+                "user_id": sanitized_user_id,
+                "display_user_id": user_id,
+                "persona": persona,
+            }
 
         # Ensure user exists
         role = persona if persona in allowed_roles else "user"
@@ -289,7 +386,12 @@ def get_stream_token(user_id: str, persona: str, token: str = Depends(verify_fir
             except (KeyError, StreamAPIException) as exc:
                 print(f"[stream] agent add_members skipped: {exc}")
 
+        # Generate new token
+        print(f"[stream] Generating new token for {sanitized_user_id}")
         token_value = client.create_token(sanitized_user_id)
+
+        # Cache the token
+        _token_cache.set(sanitized_user_id, persona, token_value)
 
         return {
             "api_key": api_key,
