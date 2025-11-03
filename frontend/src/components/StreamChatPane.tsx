@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect } from "react";
-import { Loader2, WifiOff } from "lucide-react";
+import { useEffect, useState, useCallback } from "react";
+import { Loader2, WifiOff, Bot, BotOff } from "lucide-react";
 import { useStreamChat } from "@/hooks/chat/StreamChatContext";
-import { Chat, Channel, ChannelHeader, MessageList, MessageInput, Window, Thread } from "stream-chat-react";
+import { Chat, Channel, ChannelHeader, MessageList, MessageInput, Window, Thread, useChannelActionContext } from "stream-chat-react";
 import { HybridMessage } from "./ai/HybridMessage";
 import "stream-chat-react/dist/css/v2/index.css";
 
@@ -20,6 +20,24 @@ export default function StreamChatPane({ className }: Props) {
     user,
   } = useStreamChat();
 
+  // Agent toggle state with localStorage persistence
+  const [agentEnabled, setAgentEnabled] = useState(true);
+
+  // Load agent enabled state from localStorage on mount
+  useEffect(() => {
+    const saved = localStorage.getItem('agentEnabled');
+    if (saved !== null) {
+      setAgentEnabled(saved === 'true');
+      console.log("[StreamChatPane] Loaded agent state from localStorage:", saved === 'true');
+    }
+  }, []);
+
+  // Save agent enabled state to localStorage when it changes
+  useEffect(() => {
+    localStorage.setItem('agentEnabled', agentEnabled.toString());
+    console.log("[StreamChatPane] Agent mode", agentEnabled ? "ENABLED" : "DISABLED");
+  }, [agentEnabled]);
+
   // ====== COMPREHENSIVE DEBUG LOGGING ======
   useEffect(() => {
     console.log("[StreamChatPane] 🟢 COMPONENT MOUNTED");
@@ -31,6 +49,7 @@ export default function StreamChatPane({ className }: Props) {
       userId: user?.id,
       loading,
       error,
+      agentEnabled,
     });
     return () => {
       console.log("[StreamChatPane] 🔴 COMPONENT UNMOUNTED");
@@ -49,8 +68,9 @@ export default function StreamChatPane({ className }: Props) {
       hasClient: !!client,
       activeChannel: activeChannel?.cid,
       userDefined: !!user,
+      agentEnabled,
     });
-  }, [client, activeChannel, user]);
+  }, [client, activeChannel, user, agentEnabled]);
 
   // Log channel state for debugging (must be before early returns)
   useEffect(() => {
@@ -126,11 +146,136 @@ export default function StreamChatPane({ className }: Props) {
           <Window>
             <ChannelHeader />
             <MessageList MessageUIComponent={HybridMessage} />
-            <MessageInput focus />
+
+            {/* Agent Toggle and Message Input Container */}
+            <div className="flex flex-col border-t border-slate-800/70 bg-slate-950/80">
+              {/* Agent Toggle Bar */}
+              <div className="flex items-center justify-between px-4 py-2 border-b border-slate-800/50">
+                <div className="flex items-center gap-2">
+                  {agentEnabled ? (
+                    <Bot className="h-4 w-4 text-emerald-400" />
+                  ) : (
+                    <BotOff className="h-4 w-4 text-slate-500" />
+                  )}
+                  <span className="text-xs font-medium text-slate-300">
+                    PropertyAI Agent
+                  </span>
+                </div>
+
+                <button
+                  onClick={() => setAgentEnabled(!agentEnabled)}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                    agentEnabled
+                      ? 'bg-emerald-500 hover:bg-emerald-600'
+                      : 'bg-slate-700 hover:bg-slate-600'
+                  }`}
+                  aria-label="Toggle PropertyAI Agent"
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      agentEnabled ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {/* Message Input with Custom Submit Handler */}
+              <MessageInputWithWebhook agentEnabled={agentEnabled} />
+            </div>
           </Window>
           <Thread />
         </Channel>
       </Chat>
     </div>
   );
+}
+
+/**
+ * Custom MessageInput wrapper that intercepts message submissions
+ * and forwards to AI webhook when agent is enabled.
+ */
+function MessageInputWithWebhook({ agentEnabled }: { agentEnabled: boolean }) {
+  const { sendMessage } = useChannelActionContext();
+  const { user, activeChannel } = useStreamChat();
+
+  const handleSubmit = useCallback(
+    async (message: { text?: string; [key: string]: unknown }) => {
+      const messageText = message.text?.trim();
+
+      if (!messageText || !activeChannel) {
+        console.warn("[MessageInputWithWebhook] No message text or channel");
+        return;
+      }
+
+      console.log("[MessageInputWithWebhook] Sending message:", messageText.substring(0, 50));
+      console.log("[MessageInputWithWebhook] Agent enabled:", agentEnabled);
+
+      try {
+        // 1. Send message normally via Stream with metadata
+        const messagePayload = {
+          text: messageText,
+          metadata: {
+            agentEnabled,
+            persona: user?.role || 'tenant',
+          },
+        };
+
+        console.log("[MessageInputWithWebhook] Posting to Stream with metadata:", messagePayload.metadata);
+        await sendMessage(messagePayload);
+        console.log("[MessageInputWithWebhook] ✅ Message posted to Stream");
+
+        // 2. If agent is enabled, forward to AI webhook
+        if (agentEnabled) {
+          console.log("[MessageInputWithWebhook] 🤖 Agent enabled - triggering webhook");
+
+          const webhookPayload = {
+            type: 'message.new',
+            message: {
+              text: messageText,
+              user: {
+                id: user?.id,
+                name: user?.name,
+                is_bot: false,
+              },
+              metadata: {
+                agentEnabled: true,
+                persona: user?.role || 'tenant',
+              },
+            },
+            user: {
+              id: user?.id,
+              name: user?.name,
+              is_bot: false,
+            },
+            channel_id: activeChannel.id || 'landten-default',
+            channel_type: 'messaging',
+          };
+
+          console.log("[MessageInputWithWebhook] Calling /ai/stream-webhook with payload:", webhookPayload);
+
+          const response = await fetch('/api/chat/action', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'trigger_webhook',
+              payload: webhookPayload,
+            }),
+          });
+
+          if (response.ok) {
+            console.log("[MessageInputWithWebhook] ✅ Agent webhook triggered successfully");
+          } else {
+            console.error("[MessageInputWithWebhook] ❌ Agent webhook failed:", response.status, response.statusText);
+          }
+        } else {
+          console.log("[MessageInputWithWebhook] Agent disabled - skipping webhook");
+        }
+      } catch (err) {
+        console.error("[MessageInputWithWebhook] ❌ Failed to send message:", err);
+      }
+    },
+    [sendMessage, activeChannel, user, agentEnabled],
+  );
+
+  return <MessageInput focus overrideSubmitHandler={handleSubmit} />;
 }
