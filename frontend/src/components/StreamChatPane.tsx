@@ -52,6 +52,21 @@ export default function StreamChatPane({ className }: Props) {
     });
   }, [client, activeChannel, user]);
 
+  // Log channel state for debugging (must be before early returns)
+  useEffect(() => {
+    if (activeChannel) {
+      console.log("[StreamChatPane] Active channel state:", {
+        cid: activeChannel.cid,
+        messageCount: activeChannel.state.messages?.length || 0,
+        messages: activeChannel.state.messages?.slice(0, 3).map(m => ({
+          id: m.id,
+          text: m.text?.substring(0, 50),
+          userId: m.user?.id,
+        })),
+      });
+    }
+  }, [activeChannel, activeChannel?.state?.messages?.length]);
+
   const showEmptyState = !loading && !activeChannel;
 
   // Loading state
@@ -107,11 +122,11 @@ export default function StreamChatPane({ className }: Props) {
       className={`str-chat str-chat__theme-dark flex h-full min-h-[360px] flex-col overflow-hidden rounded-2xl bg-slate-950/70 backdrop-blur ${className ?? ""}`.trim()}
     >
       <Chat client={client} theme="str-chat__theme-dark">
-        <Channel channel={activeChannel} Message={HybridMessage}>
+        <Channel channel={activeChannel}>
           <Window>
             <ChannelHeader />
-            <MessageList />
-            <MessageInput />
+            <MessageList Message={HybridMessage} />
+            <MessageInput focus />
           </Window>
           <Thread />
         </Channel>
