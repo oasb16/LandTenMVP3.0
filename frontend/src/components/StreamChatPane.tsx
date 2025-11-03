@@ -125,7 +125,7 @@ export default function StreamChatPane({ className }: Props) {
         <Channel channel={activeChannel}>
           <Window>
             <ChannelHeader />
-            <MessageList Message={HybridMessage} />
+            <MessageList MessageUIComponent={HybridMessage} />
             <MessageInput focus />
           </Window>
           <Thread />
