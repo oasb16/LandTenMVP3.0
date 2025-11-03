@@ -199,39 +199,35 @@ function MessageInputWithWebhook({ agentEnabled }: { agentEnabled: boolean }) {
   const { user, activeChannel } = useStreamChat();
 
   const handleSubmit = useCallback(
-    async (message: { text?: string; [key: string]: unknown }) => {
-      const messageText = message.text?.trim();
-
-      if (!messageText || !activeChannel) {
-        console.warn("[MessageInputWithWebhook] No message text or channel");
+    async (text: string) => {
+      if (!text?.trim() || !activeChannel) {
+        console.warn('[MessageInputWithWebhook] Missing text or channel');
         return;
       }
 
-      console.log("[MessageInputWithWebhook] Sending message:", messageText.substring(0, 50));
-      console.log("[MessageInputWithWebhook] Agent enabled:", agentEnabled);
+      console.log('[MessageInputWithWebhook] Sending:', text.substring(0, 50));
+      console.log('[MessageInputWithWebhook] Agent:', agentEnabled ? 'ON' : 'OFF');
 
       try {
-        // 1. Send message normally via Stream with metadata
-        const messagePayload = {
-          text: messageText,
+        // 1. Send message normally to Stream with metadata
+        await sendMessage({
+          text,
           metadata: {
             agentEnabled,
             persona: user?.role || 'tenant',
           },
-        };
+        });
 
-        console.log("[MessageInputWithWebhook] Posting to Stream with metadata:", messagePayload.metadata);
-        await sendMessage(messagePayload);
-        console.log("[MessageInputWithWebhook] ✅ Message posted to Stream");
+        console.log('[MessageInputWithWebhook] ✅ Sent to Stream');
 
-        // 2. If agent is enabled, forward to AI webhook
+        // 2. Forward to AI webhook only if agent enabled
         if (agentEnabled) {
-          console.log("[MessageInputWithWebhook] 🤖 Agent enabled - triggering webhook");
+          console.log('[MessageInputWithWebhook] 🤖 Triggering AI webhook');
 
-          const webhookPayload = {
+          const payload = {
             type: 'message.new',
             message: {
-              text: messageText,
+              text,
               user: {
                 id: user?.id,
                 name: user?.name,
@@ -251,27 +247,22 @@ function MessageInputWithWebhook({ agentEnabled }: { agentEnabled: boolean }) {
             channel_type: 'messaging',
           };
 
-          console.log("[MessageInputWithWebhook] Calling /ai/stream-webhook with payload:", webhookPayload);
-
-          const response = await fetch('/api/chat/action', {
+          const res = await fetch('http://localhost:8080/ai/stream-webhook', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              action: 'trigger_webhook',
-              payload: webhookPayload,
-            }),
+            body: JSON.stringify(payload),
           });
 
-          if (response.ok) {
-            console.log("[MessageInputWithWebhook] ✅ Agent webhook triggered successfully");
-          } else {
-            console.error("[MessageInputWithWebhook] ❌ Agent webhook failed:", response.status, response.statusText);
-          }
+          console.log('[MessageInputWithWebhook] 🤖 AI webhook response:', res.status);
         } else {
-          console.log("[MessageInputWithWebhook] Agent disabled - skipping webhook");
+          console.log('[MessageInputWithWebhook] Agent disabled - skipping webhook');
         }
+
+        // 3. Refresh channel to see new messages
+        await activeChannel.watch();
+        console.log('[MessageInputWithWebhook] ✅ Channel rehydrated');
       } catch (err) {
-        console.error("[MessageInputWithWebhook] ❌ Failed to send message:", err);
+        console.error('[MessageInputWithWebhook] ❌ Send failed:', err);
       }
     },
     [sendMessage, activeChannel, user, agentEnabled],
