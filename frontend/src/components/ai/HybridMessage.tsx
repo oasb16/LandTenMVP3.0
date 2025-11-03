@@ -18,15 +18,7 @@ export function HybridMessage(props: MessageUIComponentProps) {
   const channelState = useChannelStateContext();
   const { message } = props;
 
-  // Debug logging
-  console.log("[HybridMessage] Rendering message:", {
-    id: message?.id,
-    text: message?.text?.substring(0, 50),
-    userId: message?.user?.id,
-    userName: message?.user?.name,
-    hasMessage: !!message,
-  });
-
+  // Defensive null check at top
   if (!message) {
     console.warn("[HybridMessage] No message provided, returning null");
     return null;
@@ -38,28 +30,21 @@ export function HybridMessage(props: MessageUIComponentProps) {
   // Detect if this is an AI message
   const isAIMessage =
     actorId.startsWith("ai-") ||
-    actorName.includes("PropertyHelper") ||
-    actorName.includes("PropertyManager") ||
-    actorName.includes("JobAssistant") ||
-    actorName.includes("LandTen Agent");
+    ["PropertyHelper", "PropertyManager", "JobAssistant", "LandTen Agent"].some((name) =>
+      actorName.includes(name),
+    );
 
-  console.log("[HybridMessage] Message classification:", {
-    id: message.id,
-    actorId,
-    actorName,
-    isAIMessage,
-    renderingWith: isAIMessage ? "CustomMessageUI" : "MessageSimple",
-  });
+  // Concise logging for debugging
+  console.log("[HybridMessage] rendering:", message.id, message.text?.substring(0, 50));
 
   // For AI messages, use our custom rendering with flow stages and action cards
   if (isAIMessage) {
     // Get current user ID from channel state
     const currentUserId = Object.values(channelState?.members || {}).find((member) => member.user?.id)?.user?.id;
-    console.log("[HybridMessage] Rendering AI message with CustomMessageUI");
-    // Type assertion: MessageUIComponentProps.message is compatible with MessageResponse
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (
       <CustomMessageUI
+        // Type assertion: MessageUIComponentProps.message is compatible with MessageResponse
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         message={message as any}
         currentUserId={currentUserId}
         onActionClick={triggerAction}
@@ -68,6 +53,5 @@ export function HybridMessage(props: MessageUIComponentProps) {
   }
 
   // For regular messages, use Stream's default component with reactions, threads, etc.
-  console.log("[HybridMessage] Rendering regular message with MessageSimple");
   return <MessageSimple {...props} />;
 }
