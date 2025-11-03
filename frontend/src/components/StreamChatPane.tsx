@@ -1,9 +1,11 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, Send, WifiOff } from "lucide-react";
+import { useEffect } from "react";
+import { Loader2, WifiOff } from "lucide-react";
 import { useStreamChat } from "@/hooks/chat/StreamChatContext";
-import { CustomMessageUI } from "./ai/CustomMessageUI";
+import { Chat, Channel, ChannelHeader, MessageList, MessageInput, Window, Thread } from "stream-chat-react";
+import { HybridMessage } from "./ai/HybridMessage";
+import "stream-chat-react/dist/css/v2/index.css";
 
 type Props = {
   className?: string;
@@ -11,42 +13,30 @@ type Props = {
 
 export default function StreamChatPane({ className }: Props) {
   const {
+    client,
     activeChannel,
-    messages,
     loading,
     error,
     user,
-    sendMessage,
-    triggerAction,
   } = useStreamChat();
-
-  const [input, setInput] = useState("");
-  const [isSending, setIsSending] = useState(false);
-  const messageEndRef = useRef<HTMLDivElement | null>(null);
-  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
 
   // ====== COMPREHENSIVE DEBUG LOGGING ======
   useEffect(() => {
     console.log("[StreamChatPane] 🟢 COMPONENT MOUNTED");
     console.log("[StreamChatPane] Context values:", {
+      hasClient: !!client,
       hasActiveChannel: !!activeChannel,
       activeChannelCid: activeChannel?.cid,
-      hasSendMessage: typeof sendMessage === "function",
       hasUser: !!user,
       userId: user?.id,
-      messagesCount: messages.length,
       loading,
       error,
     });
     return () => {
       console.log("[StreamChatPane] 🔴 COMPONENT UNMOUNTED");
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Only run on mount/unmount
-
-  // Log messages changes for debugging
-  useEffect(() => {
-    console.log("[StreamChatPane] Messages updated. Count:", messages.length);
-  }, [messages]);
 
   // Log active channel changes
   useEffect(() => {
@@ -56,162 +46,76 @@ export default function StreamChatPane({ className }: Props) {
   // Log context changes
   useEffect(() => {
     console.log("[StreamChatPane] Context update:", {
+      hasClient: !!client,
       activeChannel: activeChannel?.cid,
-      sendMessageType: typeof sendMessage,
       userDefined: !!user,
     });
-  }, [activeChannel, sendMessage, user]);
-
-  useEffect(() => {
-    messageEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length, activeChannel?.cid]);
-
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    console.log("[StreamChatPane] 🎯 handleSubmit FIRED!");
-    event.preventDefault();
-    const value = input.trim();
-
-    console.log("[StreamChatPane] Submit validation:", {
-      value: value.substring(0, 50),
-      valueLength: value.length,
-      isSending,
-      hasActiveChannel: !!activeChannel,
-      activeChannelCid: activeChannel?.cid,
-      hasSendMessage: typeof sendMessage === "function",
-    });
-
-    if (!value) {
-      console.warn("[StreamChatPane] ❌ Submit blocked: empty value");
-      return;
-    }
-    if (isSending) {
-      console.warn("[StreamChatPane] ❌ Submit blocked: already sending");
-      return;
-    }
-    if (!activeChannel) {
-      console.warn("[StreamChatPane] ❌ Submit blocked: no active channel");
-      return;
-    }
-    if (typeof sendMessage !== "function") {
-      console.error("[StreamChatPane] ❌ Submit blocked: sendMessage is not a function!");
-      return;
-    }
-
-    console.log("[StreamChatPane] ✅ Validation passed, sending message:", value.substring(0, 30));
-    try {
-      setIsSending(true);
-      await sendMessage(value);
-      setInput("");
-      console.log("[StreamChatPane] ✅ Message sent successfully");
-    } catch (err) {
-      console.error("[StreamChatPane] ❌ Failed to send message:", err);
-    } finally {
-      setIsSending(false);
-    }
-  };
-
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    console.log("[StreamChatPane] 🔑 KeyDown event:", event.key);
-    // Send message on Enter (without Shift)
-    if (event.key === "Enter" && !event.shiftKey) {
-      console.log("[StreamChatPane] ⏎ Enter key detected, requesting submit");
-      event.preventDefault();
-      const form = event.currentTarget.form;
-      if (form) {
-        console.log("[StreamChatPane] Form found, calling requestSubmit()");
-        form.requestSubmit();
-      } else {
-        console.error("[StreamChatPane] ❌ No form found for input element!");
-      }
-    }
-  };
-
-  const handleAction = useCallback(
-    async (actionValue: string) => {
-      try {
-        await triggerAction(actionValue);
-      } catch (err) {
-        console.error("[StreamChatPane] Failed to trigger action", err);
-      }
-    },
-    [triggerAction],
-  );
+  }, [client, activeChannel, user]);
 
   const showEmptyState = !loading && !activeChannel;
 
+  // Loading state
+  if (loading) {
+    return (
+      <div
+        className={`flex h-full min-h-[360px] flex-col overflow-hidden rounded-2xl bg-slate-950/70 backdrop-blur ${className ?? ""}`.trim()}
+      >
+        <div className="flex h-full items-center justify-center text-slate-400">
+          <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Connecting to chat…
+        </div>
+      </div>
+    );
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <div
+        className={`flex h-full min-h-[360px] flex-col overflow-hidden rounded-2xl bg-slate-950/70 backdrop-blur ${className ?? ""}`.trim()}
+      >
+        <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-rose-300">
+          <WifiOff className="h-5 w-5" />
+          <p className="max-w-sm text-center">{error}</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Empty state (no channel selected)
+  if (showEmptyState) {
+    return (
+      <div
+        className={`flex h-full min-h-[360px] flex-col overflow-hidden rounded-2xl bg-slate-950/70 backdrop-blur ${className ?? ""}`.trim()}
+      >
+        <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-slate-300">
+          <WifiOff className="h-5 w-5" />
+          <p className="max-w-sm text-center">
+            Select a conversation to view messages or start a new thread from the sidebar.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Main chat UI using Stream SDK components
+  if (!client || !activeChannel) {
+    return null;
+  }
+
   return (
     <div
-      className={`flex h-full min-h-[360px] flex-col overflow-hidden rounded-2xl bg-slate-950/70 backdrop-blur ${className ?? ""}`.trim()}
+      className={`str-chat str-chat__theme-dark flex h-full min-h-[360px] flex-col overflow-hidden rounded-2xl bg-slate-950/70 backdrop-blur ${className ?? ""}`.trim()}
     >
-      <div className="flex-1 overflow-y-auto px-4 py-6">
-        {loading ? (
-          <div className="flex h-full items-center justify-center text-slate-400">
-            <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Connecting to chat…
-          </div>
-        ) : error ? (
-          <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-rose-300">
-            <WifiOff className="h-5 w-5" />
-            <p className="max-w-sm text-center">{error}</p>
-          </div>
-        ) : showEmptyState ? (
-          <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-slate-300">
-            <WifiOff className="h-5 w-5" />
-            <p className="max-w-sm text-center">
-              Select a conversation to view messages or start a new thread from the sidebar.
-            </p>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-3" ref={messagesContainerRef}>
-            {messages.length === 0 ? (
-              <div className="flex h-full items-center justify-center text-sm text-slate-400">
-                No messages yet. Start the conversation!
-              </div>
-            ) : (
-              messages.map((message, index) => {
-                const messageId = message.id || `msg-${index}-${message.cid}`;
-                return (
-                  <CustomMessageUI
-                    key={messageId}
-                    message={message}
-                    currentUserId={user?.id}
-                    onActionClick={handleAction}
-                  />
-                );
-              })
-            )}
-            <div ref={messageEndRef} />
-          </div>
-        )}
-      </div>
-
-      <form
-        onSubmit={handleSubmit}
-        className="border-t border-slate-800/70 bg-slate-950/80 px-4 py-3"
-        onClick={() => console.log("[StreamChatPane] 🖱️  Form area clicked")}
-      >
-        <fieldset className="flex items-center gap-3 rounded-full border border-slate-800/80 bg-slate-900/70 px-4 py-2 shadow-lg shadow-slate-950/40">
-          <input
-            className="flex-1 bg-transparent text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none"
-            placeholder={activeChannel ? "Type a message… (Press Enter to send)" : "Select a channel to begin"}
-            value={input}
-            onChange={(event) => {
-              console.log("[StreamChatPane] Input changed:", event.target.value.substring(0, 20));
-              setInput(event.target.value);
-            }}
-            onKeyDown={handleKeyDown}
-            onFocus={() => console.log("[StreamChatPane] Input focused")}
-            disabled={!activeChannel || isSending}
-          />
-          <button
-            type="submit"
-            disabled={!activeChannel || isSending || !input.trim()}
-            onClick={() => console.log("[StreamChatPane] 🖱️  Submit button clicked")}
-            className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-500 text-emerald-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
-          >
-            {isSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-          </button>
-        </fieldset>
-      </form>
+      <Chat client={client} theme="str-chat__theme-dark">
+        <Channel channel={activeChannel} Message={HybridMessage}>
+          <Window>
+            <ChannelHeader />
+            <MessageList />
+            <MessageInput />
+          </Window>
+          <Thread />
+        </Channel>
+      </Chat>
     </div>
   );
 }
