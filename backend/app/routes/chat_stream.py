@@ -170,7 +170,9 @@ def _handle_discovery_message(
     discovery = channel_data.get("discovery") or {}
     lower_text = (message.get("text") or "").lower()
     context = build_context(channel_state.get("messages", []))
-    channel_id = _channel_identifier(channel, channel_state)
+    channel_id = _channel_identifier(channel, channel_state)        
+
+    print(f"[discovery] Current discovery state: {discovery} for channel_data : {channel_data} for message: {lower_text} for persona: {persona} with context: {context}")
 
     def ask_question(index: int, acknowledgement: Optional[str] = None):
         question = DISCOVERY_QUESTIONS[index]["prompt"]
@@ -179,6 +181,8 @@ def _handle_discovery_message(
             f"{acknowledgement or ''} Ask them: {question}. Keep it short and friendly."
         )
         reply = agent_reply(prompt, context, persona)
+        print(f"[discovery] Asking question {index}: {question}"
+              f"Reply: {reply}")
         post_agent_message(client, channel_id, reply)
 
     if not discovery or discovery.get("stage") in {None, "complete"} or "start discovery" in lower_text:
@@ -189,16 +193,22 @@ def _handle_discovery_message(
             "history": [],
         }
         _persist_discovery(channel, discovery)
+        print(f"\n\n[discovery] Starting new discovery flow ... \n\n")
         prompt = (
             "A tenant requested help with a maintenance issue. "
             f"Let them know you'll gather a few details and ask the first question: {DISCOVERY_QUESTIONS[0]['prompt']}"
+            f" Keep it short and friendly." 
         )
         reply = agent_reply(prompt, context, persona)
+        print("[discovery] Initiating discovery with first question."
+              " Reply: {reply}"
+              f" {DISCOVERY_QUESTIONS[0]['prompt']}")
         post_agent_message(client, channel_id, reply)
         return
 
     if discovery.get("stage") == "questions":
         idx = discovery.get("question_index", 0)
+        print(f"\n\n[discovery] Handling question {idx} response.\n\n")
         if idx < len(DISCOVERY_QUESTIONS):
             key = DISCOVERY_QUESTIONS[idx]["key"]
             discovery.setdefault("answers", {})[key] = message.get("text")
@@ -837,6 +847,7 @@ def _handle_action_message(
         return
 
     action_type = parts[1].lower()
+    action_type = action_type.strip()
     incident_id = parts[2] if len(parts) > 2 else None
 
     print(f"[🎯 ACTION] Type: {action_type}, Incident: {incident_id or 'none'}")
@@ -925,7 +936,7 @@ async def stream_webhook(request: Request):
         return {"status": "ignored", "reason": f"event_type_{event_type}"}
 
     message = payload.get("message") or {}
-    message_text = message.get("text", "")
+    message_text = message.get("text", "").strip()
     message_id = message.get("id", "unknown")
     user_id = message.get("user", {}).get("id", "unknown")
 
