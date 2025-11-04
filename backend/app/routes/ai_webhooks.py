@@ -259,7 +259,7 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
             # ============================================================================
             # INCIDENT CLASSIFICATION & REGISTRATION PIPELINE
             # ============================================================================
-            logger.info("[incident-flow] 🔍 Incident detected - starting classification pipeline")
+            logger.info("[incident-flow] 🔍 Classifying issue")
 
             # Step 1: Classify the issue using AI-based classification
             category, severity, urgency = classify_issue(message_text)
@@ -269,10 +269,34 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
             maintenance_categories = {"plumbing", "electrical", "hvac", "appliance", "structural"}
             is_maintenance = category in maintenance_categories
 
-            if is_maintenance:
+            # Step 3: Threshold decision - determine if actionable based on severity
+            # Low severity issues get conversational response instead of formal incident
+            is_actionable = severity in {"medium", "high", "emergency"} and is_maintenance
+
+            if is_maintenance and not is_actionable:
+                # Low severity maintenance - acknowledge but don't create formal incident
+                logger.info(f"[incident-flow] ⚖️  Threshold decision: actionable=False (severity too low)")
+                logger.info(f"[incident-flow] ⏭️  Responding conversationally to low-severity {category} issue")
+
+                low_severity_response = (
+                    f"I understand you're experiencing a minor {category} issue. "
+                    "If this becomes more urgent, please let me know and I'll create a formal maintenance request."
+                )
+                bot.send_ai_message(channel_id, persona, low_severity_response, metadata={"context_type": "low_severity"})
+                context_manager.append_message(user_id, channel_id, "assistant", low_severity_response)
+
+            elif is_actionable:
+                # High priority maintenance - proceed with full incident creation
+                logger.info(f"[incident-flow] ⚖️  Threshold decision: actionable=True")
                 logger.info(f"[incident-flow] ✅ Maintenance-related issue detected - proceeding with incident creation")
 
-                # Step 3: Create incident card with classified data
+                # Step 4: Generate cost estimate for threshold validation
+                contractor_bids = generate_contractor_bids(category)
+                estimated_cost = contractor_bids[0]["quote"] if contractor_bids else 150.0
+                approval_threshold = threshold_decision(estimated_cost)
+                logger.info(f"[incident-flow] 💰 Estimated cost: ${estimated_cost} | Approval threshold: {approval_threshold}")
+
+                # Step 5: Create incident card with classified data
                 incident_payload = {
                     "user_id": user_id,
                     "tenant_name": user.get("name") or user_id,
@@ -283,9 +307,9 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
                 }
                 incident_response = bot.send_incident_card(channel_id, persona, incident_payload)
                 incident_id = incident_response.get("incident_id")
-                logger.info(f"[incident-flow] 📋 Incident card created: {incident_id}")
+                logger.info(f"[incident-flow] 📋 Created incident {incident_id}")
 
-                # Step 4: Persist incident to DynamoDB
+                # Step 6: Persist incident to DynamoDB
                 try:
                     incident_record = create_incident_record(
                         thread_id=channel_id,
@@ -299,13 +323,38 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
                             "diy_attempted": False,
                             "diy_result": None,
                             "media": [],
+                            "estimated_cost": estimated_cost,
+                            "approval_threshold": approval_threshold,
                         },
                     )
                     logger.info(f"[incident-flow] 💾 Incident persisted to DynamoDB: {incident_record['incident_id']}")
                 except Exception as e:
                     logger.error(f"[incident-flow] ❌ Failed to persist incident to DynamoDB: {e}")
 
-                # Step 5: Send confirmation message to user
+                # Step 7: Update context manager for session continuity
+                try:
+                    context_manager.set_active_incident(user_id, channel_id, incident_id)
+                    logger.info(f"[context-manager] ✅ Active incident set: {incident_id}")
+
+                    context_manager.advance_flow_state(
+                        user_id,
+                        channel_id,
+                        "incident.active",
+                        {
+                            "incident_id": incident_id,
+                            "question_index": 0,
+                            "answers": {},
+                            "category": category,
+                            "severity": severity,
+                            "urgency": urgency,
+                        }
+                    )
+                    logger.info(f"[context-manager] ✅ Flow state advanced to incident.active")
+                    logger.info(f"[incident-flow] 💾 Context updated successfully")
+                except Exception as e:
+                    logger.error(f"[context-manager] ❌ Failed to update context: {e}")
+
+                # Step 8: Send confirmation message to user
                 confirmation_text = (
                     f"I've created a maintenance incident for your {category} issue and will notify your landlord. "
                     f"Incident ID: {incident_id}"
@@ -319,8 +368,8 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
                 context_manager.append_message(user_id, channel_id, "assistant", confirmation_text)
                 logger.info(f"[incident-flow] 📨 Confirmation message sent to user")
 
+                # Step 9: Begin discovery flow
                 card_sent = True
-                context_manager.advance_flow_state(user_id, channel_id, "incident", {"question_index": 0, "answers": {}})
                 _send_discovery_progress(
                     bot,
                     channel_id,
@@ -334,6 +383,8 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
                 first_question = _get_discovery_question(0)
                 if first_question:
                     _ask_discovery_question(bot, context_manager, channel_id, persona, user_id, first_question, incident_id, 0)
+                    logger.info(f"[incident-flow] 🔍 Discovery flow initiated - asking question 1/{len(DISCOVERY_QUESTIONS)}")
+
             else:
                 logger.info(f"[incident-flow] ⏭️  Skipped non-maintenance message (category: {category})")
                 # Not a maintenance issue - respond conversationally without incident creation
