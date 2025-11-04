@@ -61,4 +61,5 @@ def post_agent_message(client: "StreamChat", channel_id: str, text: str, msg_typ
     channel = client.channel("messaging", channel_id)
     if msg_type not in ["regular", "system"]:
         msg_type = "regular"
+    print(f"[stream-bot] posting {msg_type} message to channel {channel_id}: {len(text)}")
     channel.send_message({"text": text, "type": msg_type}, user_id=AGENT_USER_ID)
