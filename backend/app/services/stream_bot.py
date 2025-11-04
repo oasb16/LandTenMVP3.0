@@ -771,14 +771,20 @@ Current conversation context: {context if context else 'New conversation'}
         persona: str,
         incident_data: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """Create an incident record and send a structured card."""
+        """
+        Create an incident record and send a structured card.
+
+        Returns:
+            Dict with incident_id and card_response for downstream use
+        """
         incident_id = incident_data.get("incident_id") or f"INC-{int(datetime.now().timestamp())}"
         bot_id = self.get_bot_id(persona)
         user_id = incident_data.get("user_id")
 
-        print(f"[stream-bot] Creating incident card {incident_id} for channel {channel_id}")
+        print(f"[stream-bot] 📋 Creating incident card {incident_id} for channel {channel_id}")
 
         # Persist incident to DynamoDB (best effort)
+        persistence_success = False
         try:
             IncidentDB.create_incident(
                 {
@@ -796,8 +802,10 @@ Current conversation context: {context if context else 'New conversation'}
                     "metadata": incident_data.get("metadata", {}),
                 }
             )
+            persistence_success = True
+            print(f"[stream-bot] ✅ Incident {incident_id} persisted to DynamoDB")
         except Exception as exc:  # pragma: no cover - external service
-            print(f"[stream-bot] WARN: Incident persistence failed: {exc}")
+            print(f"[stream-bot] ❌ Incident persistence failed: {exc}")
 
         card = CardBuilder.incident_card(
             incident_id=incident_id,
@@ -817,16 +825,26 @@ Current conversation context: {context if context else 'New conversation'}
             metadata={"context_type": "incident", "incident_id": incident_id},
         )
 
+        # Update context manager with incident state
         if user_id:
-            self.context_manager.set_active_incident(user_id, channel_id, incident_id)
-            self.context_manager.advance_flow_state(
-                user_id,
-                channel_id,
-                "incident",
-                {"question_index": 0},
-            )
+            try:
+                self.context_manager.set_active_incident(user_id, channel_id, incident_id)
+                self.context_manager.advance_flow_state(
+                    user_id,
+                    channel_id,
+                    "incident",
+                    {"incident_id": incident_id, "question_index": 0},
+                )
+                print(f"[stream-bot] ✅ Context updated with incident {incident_id}")
+            except Exception as exc:
+                print(f"[stream-bot] ❌ Context update failed: {exc}")
 
-        return {"incident_id": incident_id, "card_response": response}
+        # Always return incident_id for downstream use
+        return {
+            "incident_id": incident_id,
+            "card_response": response,
+            "persisted": persistence_success,
+        }
 
 
 # Singleton instance
