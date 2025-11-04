@@ -15,6 +15,7 @@ from app.services.context_manager import get_context_manager
 from app.services.ai_reasoning import get_ai_reasoning, Intent
 from app.services.policy_validator import get_policy_validator
 from app.services.card_builder import CardBuilder, send_card_message
+from app.services.flow_engine import process_transition
 from app.services.incident_flow import (
     classify_issue,
     create_incident_record,

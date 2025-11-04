@@ -59,4 +59,6 @@ def post_agent_message(client: "StreamChat", channel_id: str, text: str, msg_typ
         raise RuntimeError("stream-chat SDK not installed")
     ensure_agent_user(client)
     channel = client.channel("messaging", channel_id)
+    if msg_type not in ["regular", "system"]:
+        msg_type = "regular"
     channel.send_message({"text": text, "type": msg_type}, user_id=AGENT_USER_ID)
