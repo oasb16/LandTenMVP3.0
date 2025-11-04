@@ -571,7 +571,11 @@ class AIReasoning:
         persona: str,
         suggested_intent: str,
     ) -> Dict[str, Any]:
-        """Deterministic reasoning when LLM is unavailable."""
+        """
+        Deterministic reasoning when LLM is unavailable.
+
+        Protects high-confidence incident signals from being downgraded.
+        """
         message_lower = message.lower()
         for loc in ["kitchen", "bathroom", "basement", "ceiling", "living room", "bedroom"]:
             if loc in message_lower:
@@ -580,34 +584,63 @@ class AIReasoning:
         else:
             location = None
 
-        if suggested_intent == Intent.DISCOVERY_RESPONSE.value:
+        # High-priority incident keywords - preserve intent with high confidence
+        high_priority_keywords = ["incident", "emergency", "urgent", "flood", "burst", "gas leak"]
+        has_high_priority = any(keyword in message_lower for keyword in high_priority_keywords)
+
+        # Standard incident keywords
+        incident_keywords = ["water", "leak", "broken", "damage", "not working", "pipe", "electrical"]
+        has_incident_signal = any(keyword in message_lower for keyword in incident_keywords)
+
+        # Priority 1: If suggested_intent is already INCIDENT_REPORT, preserve it
+        if suggested_intent == Intent.INCIDENT_REPORT.value:
+            summary = "Maintenance incident reported."
+            reply = "I understand — I've logged this as an incident and will help you through the next steps."
+            entities = self._fallback_entity_extraction(message)
+            actions = ["create_incident", "start_discovery"]
+            intent = Intent.INCIDENT_REPORT.value
+
+        # Priority 2: High-priority incident keywords override suggested intent
+        elif has_high_priority or (has_incident_signal and suggested_intent == Intent.GENERAL_CHAT.value):
+            summary = "High-priority incident detected."
+            reply = "I've detected a potential incident that needs attention. Let me help you get this resolved."
+            entities = self._fallback_entity_extraction(message)
+            if entities.get("category") == "plumbing":
+                entities["severity"] = "high"
+            actions = ["create_incident", "start_discovery"]
+            intent = Intent.INCIDENT_REPORT.value
+
+        # Priority 3: Respect suggested_intent for flow continuity
+        elif suggested_intent == Intent.DISCOVERY_RESPONSE.value:
             summary = "Continuing discovery for the active incident."
-            reply = "Thanks — I’m tracking that. I’ll keep guiding you through the next questions."
+            reply = "Thanks — I'm tracking that. I'll keep guiding you through the next questions."
             entities = self._fallback_entity_extraction(message)
             actions = ["continue_discovery"]
             intent = suggested_intent
+
         elif suggested_intent == Intent.JOB_REQUEST.value:
             summary = "Tenant requested a work order."
-            reply = "Understood. I’ll move ahead with preparing a work order so we can dispatch help."
+            reply = "Understood. I'll move ahead with preparing a work order so we can dispatch help."
             entities = self._fallback_entity_extraction(message)
             actions = ["create_job"]
             intent = suggested_intent
+
         elif suggested_intent == Intent.APPROVAL_DECISION.value:
             summary = "User wants to make an approval decision."
             reply = "Let me record that decision and make sure the right person is notified."
             entities = {}
             actions = ["approval_decision"]
             intent = suggested_intent
-        elif any(keyword in message_lower for keyword in ["water", "leak", "flood", "burst pipe", "pipe"]):
-            summary = "Severe water leak detected."
-            reply = "Got it — that sounds serious. I've created an incident to track this leak."
-            entities = {
-                "category": "plumbing",
-                "severity": "high",
-                "location": location,
-            }
+
+        # Priority 4: Detect incident from keywords even without suggested_intent
+        elif has_incident_signal:
+            summary = "Maintenance issue detected from keywords."
+            reply = "I've picked up on a potential issue. Let me help you document this properly."
+            entities = self._fallback_entity_extraction(message)
             actions = ["create_incident", "start_discovery"]
             intent = Intent.INCIDENT_REPORT.value
+
+        # Priority 5: Default to general chat
         else:
             summary = "General assistance requested."
             reply = "I'm on it. Could you share a little more about what's happening?"
@@ -649,12 +682,33 @@ class AIReasoning:
         """
         Fallback rule-based intent detection when LLM fails.
         This ensures the system degrades gracefully.
+
+        High-confidence incident signals take priority over generic classification.
         """
         message_lower = message.lower()
 
-        # Greeting detection
+        # High-priority incident keywords - these should never be downgraded
+        high_priority_keywords = ["incident", "emergency", "urgent", "flood", "burst", "gas leak"]
+        has_high_priority = any(keyword in message_lower for keyword in high_priority_keywords)
+
+        # Standard incident keywords
+        incident_keywords = ["leak", "broken", "damage", "not working", "issue", "problem", "repair needed"]
+        has_incident_signal = any(keyword in message_lower for keyword in incident_keywords)
+
+        # If high-priority incident keyword detected, ALWAYS classify as incident
+        if has_high_priority:
+            return {
+                "intent": Intent.INCIDENT_REPORT.value,
+                "confidence": 0.9,  # High confidence
+                "entities": self._fallback_entity_extraction(message),
+                "next_actions": ["create_incident", "start_discovery"],
+                "card_type": CardType.INCIDENT.value,
+                "reasoning": "Fallback: HIGH PRIORITY incident keyword detected - preserving intent"
+            }
+
+        # Greeting detection (only if no incident signals)
         greeting_words = ["hello", "hi", "hey", "good morning", "good afternoon"]
-        if any(word in message_lower for word in greeting_words):
+        if any(word in message_lower for word in greeting_words) and not has_incident_signal:
             return {
                 "intent": Intent.GREETING.value,
                 "confidence": 0.7,
@@ -664,14 +718,13 @@ class AIReasoning:
                 "reasoning": "Fallback: detected greeting"
             }
 
-        # Incident keywords
-        incident_keywords = ["leak", "broken", "damage", "not working", "issue", "problem"]
-        if any(keyword in message_lower for keyword in incident_keywords):
+        # Standard incident detection
+        if has_incident_signal:
             # Check if we have an active incident - then it's a followup
-            if context.get("active_incident_id"):
+            if context.get("active_incident_id") or context.get("active_incident"):
                 return {
                     "intent": Intent.INCIDENT_FOLLOWUP.value,
-                    "confidence": 0.6,
+                    "confidence": 0.7,
                     "entities": {},
                     "next_actions": ["continue_discovery"],
                     "card_type": CardType.DISCOVERY.value,
@@ -680,8 +733,8 @@ class AIReasoning:
             else:
                 return {
                     "intent": Intent.INCIDENT_REPORT.value,
-                    "confidence": 0.6,
-                    "entities": {},
+                    "confidence": 0.8,  # Strong confidence for incident keywords
+                    "entities": self._fallback_entity_extraction(message),
                     "next_actions": ["create_incident", "start_discovery"],
                     "card_type": CardType.INCIDENT.value,
                     "reasoning": "Fallback: detected incident keywords"
