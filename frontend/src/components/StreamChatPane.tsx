@@ -195,35 +195,70 @@ export default function StreamChatPane({ className }: Props) {
  * and forwards to AI webhook when agent is enabled.
  */
 function MessageInputWithWebhook({ agentEnabled }: { agentEnabled: boolean }) {
-  const { sendMessage } = useChannelActionContext();
-  const { user, activeChannel } = useStreamChat();
-
+  const {sendMessage, user, activeChannel } = useStreamChat();
+  console.log("[MessageInputWithWebhook] Initialized with agentEnabled =", agentEnabled, user, activeChannel);
   const handleSubmit = useCallback(
-    async (text: string) => {
-      if (!text?.trim() || !activeChannel) {
-        console.warn('[MessageInputWithWebhook] Missing text or channel');
+    async (input: any) => {
+      const messageText =
+        typeof input === "string"
+          ? input
+          : typeof input?.message?.text === "string"
+          ? input.message.text
+          : typeof input?.text === "string"
+          ? input.text
+          : "";
+
+      if (!messageText.trim()) {
+        console.warn("[MessageInputWithWebhook] ⚠️ No valid text extracted from input:", input);
         return;
       }
 
-      console.log('[MessageInputWithWebhook] Sending:', text.substring(0, 50));
+      console.log("[MessageInputWithWebhook] Extracted messageText:", messageText);
+      const text = messageText
+
+      // if (!text?.trim() || !activeChannel) {
+      //   console.log('[MessageInputWithWebhook] Missing text or channel');
+      //   return;
+      // }
+
+      console.log('[MessageInputWithWebhook] Sending:', text);
       console.log('[MessageInputWithWebhook] Agent:', agentEnabled ? 'ON' : 'OFF');
 
+      console.log("[MessageInputWithWebhook] Active channel before send:", activeChannel?.cid);
+      console.log("[MessageInputWithWebhook] User before send:", user?.id);
+      console.log("[MessageInputWithWebhook] Preparing message payload for ...", user);
+      console.log("[MessageInputWithWebhook] Message text:", text);
+      console.log("[MessageInputWithWebhook] Agent enabled:", agentEnabled);
+      console.log("[MessageInputWithWebhook] Preparing to send message...");
+      console.log("[MessageInputWithWebhook] Message payload:", {
+        text,
+        user,
+        attachments: [],
+        mentioned_users: [],
+        metadata: {
+          agentEnabled,
+          persona: user?.role || 'tenant',
+        },
+      });
+
       try {
-        // 1. Send message normally to Stream with metadata
-        await sendMessage({
-          text,
-          metadata: {
-            agentEnabled,
-            persona: user?.role || 'tenant',
-          },
-        });
+        // // ✅ Step 1: Send valid message to Stream
+      //   const messagePayload = {
+      //     text,
+      //     attachments: [], // must be present
+      //     mentioned_users: [], // also optional, but safer
+      //     metadata: {
+      //       agentEnabled,
+      //       persona: user?.role || 'tenant',
+      //     },
+      //   };
+      //   console.log("[MessageInputWithWebhook] Sending message to Stream:", messagePayload);
+        const result = await sendMessage(text);
+        console.log('[MessageInputWithWebhook] ✅ Sent to Stream:', result);
 
-        console.log('[MessageInputWithWebhook] ✅ Sent to Stream');
-
-        // 2. Forward to AI webhook only if agent enabled
+        // ✅ Step 2: Forward to AI webhook if enabled
+        console.log("[MessageInputWithWebhook] Forwarding to AI webhook...");
         if (agentEnabled) {
-          console.log('[MessageInputWithWebhook] 🤖 Triggering AI webhook');
-
           const payload = {
             type: 'message.new',
             message: {
@@ -243,7 +278,7 @@ function MessageInputWithWebhook({ agentEnabled }: { agentEnabled: boolean }) {
               name: user?.name,
               is_bot: false,
             },
-            channel_id: activeChannel.id || 'landten-default',
+            channel_id: activeChannel.cid || 'landten-default',
             channel_type: 'messaging',
           };
 
@@ -255,10 +290,10 @@ function MessageInputWithWebhook({ agentEnabled }: { agentEnabled: boolean }) {
 
           console.log('[MessageInputWithWebhook] 🤖 AI webhook response:', res.status);
         } else {
-          console.log('[MessageInputWithWebhook] Agent disabled - skipping webhook');
+          console.log('[MessageInputWithWebhook] Agent disabled — skipping webhook');
         }
 
-        // 3. Refresh channel to see new messages
+        // ✅ Step 3: Rehydrate channel so message list updates
         await activeChannel.watch();
         console.log('[MessageInputWithWebhook] ✅ Channel rehydrated');
       } catch (err) {
