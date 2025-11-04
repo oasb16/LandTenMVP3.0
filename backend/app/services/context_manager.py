@@ -152,11 +152,40 @@ class ContextManager:
         return self.update_context(user_id, channel_id, {"persona": persona})
 
     def set_active_incident(self, user_id: str, channel_id: str, incident_id: str) -> bool:
-        return self.update_context(
+        """
+        Set active incident and persist to both context and flow_state.
+
+        This ensures the incident is tracked in:
+        - context["active_incident"]
+        - context["flow_state"]["incident_id"]
+        """
+        # Get current flow_state
+        context = self.get_context(user_id, channel_id, create_if_missing=True)
+        if context is None:
+            logger.error(f"[context-manager] Unable to get context for {user_id}/{channel_id}")
+            return False
+
+        current_flow_state = dict(context.get("flow_state") or {})
+        current_flow_state["incident_id"] = incident_id
+
+        success = self.update_context(
             user_id,
             channel_id,
-            {"active_incident": incident_id, "active_intent": "incident.report"},
+            {
+                "active_incident": incident_id,
+                "active_intent": "incident.report",
+                "flow_state": current_flow_state,
+            },
         )
+
+        if success:
+            logger.info(
+                "[context-manager] ✅ Incident %s persisted in flow state for %s",
+                incident_id,
+                user_id,
+            )
+
+        return success
 
     def set_active_job(self, user_id: str, channel_id: str, job_id: str) -> bool:
         return self.update_context(
