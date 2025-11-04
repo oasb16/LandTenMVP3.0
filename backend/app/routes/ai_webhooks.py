@@ -15,6 +15,14 @@ from app.services.context_manager import get_context_manager
 from app.services.ai_reasoning import get_ai_reasoning, Intent
 from app.services.policy_validator import get_policy_validator
 from app.services.card_builder import CardBuilder, send_card_message
+from app.services.incident_flow import (
+    classify_issue,
+    create_incident_record,
+    diy_suggestions,
+    summarize_for_landlord,
+    threshold_decision,
+    generate_contractor_bids,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -248,31 +256,90 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
         card_sent = False
 
         if intent == Intent.INCIDENT_REPORT.value:
-            incident_payload = {
-                "user_id": user_id,
-                "tenant_name": user.get("name") or user_id,
-                "description": message_text,
-                "category": entities.get("category", "plumbing"),
-                "severity": entities.get("severity", "high"),
-                "title": entities.get("summary") or "Maintenance Issue",
-            }
-            incident_response = bot.send_incident_card(channel_id, persona, incident_payload)
-            incident_id = incident_response.get("incident_id")
-            card_sent = True
-            context_manager.advance_flow_state(user_id, channel_id, "incident", {"question_index": 0, "answers": {}})
-            _send_discovery_progress(
-                bot,
-                channel_id,
-                persona,
-                incident_id,
-                0,
-                len(DISCOVERY_QUESTIONS),
-                _get_discovery_question(0),
-                {},
-            )
-            first_question = _get_discovery_question(0)
-            if first_question:
-                _ask_discovery_question(bot, context_manager, channel_id, persona, user_id, first_question, incident_id, 0)
+            # ============================================================================
+            # INCIDENT CLASSIFICATION & REGISTRATION PIPELINE
+            # ============================================================================
+            logger.info("[incident-flow] 🔍 Incident detected - starting classification pipeline")
+
+            # Step 1: Classify the issue using AI-based classification
+            category, severity, urgency = classify_issue(message_text)
+            logger.info(f"[incident-flow] ✅ Classified as: {category} | Severity: {severity} | Urgency: {urgency}")
+
+            # Step 2: Check if this is maintenance-related (actionable incident)
+            maintenance_categories = {"plumbing", "electrical", "hvac", "appliance", "structural"}
+            is_maintenance = category in maintenance_categories
+
+            if is_maintenance:
+                logger.info(f"[incident-flow] ✅ Maintenance-related issue detected - proceeding with incident creation")
+
+                # Step 3: Create incident card with classified data
+                incident_payload = {
+                    "user_id": user_id,
+                    "tenant_name": user.get("name") or user_id,
+                    "description": message_text,
+                    "category": category,
+                    "severity": severity,
+                    "title": entities.get("summary") or f"{category.capitalize()} Issue",
+                }
+                incident_response = bot.send_incident_card(channel_id, persona, incident_payload)
+                incident_id = incident_response.get("incident_id")
+                logger.info(f"[incident-flow] 📋 Incident card created: {incident_id}")
+
+                # Step 4: Persist incident to DynamoDB
+                try:
+                    incident_record = create_incident_record(
+                        thread_id=channel_id,
+                        tenant_email=user_id,
+                        payload={
+                            "incident_id": incident_id,
+                            "category": category,
+                            "severity": severity,
+                            "urgency": urgency,
+                            "summary": message_text,
+                            "diy_attempted": False,
+                            "diy_result": None,
+                            "media": [],
+                        },
+                    )
+                    logger.info(f"[incident-flow] 💾 Incident persisted to DynamoDB: {incident_record['incident_id']}")
+                except Exception as e:
+                    logger.error(f"[incident-flow] ❌ Failed to persist incident to DynamoDB: {e}")
+
+                # Step 5: Send confirmation message to user
+                confirmation_text = (
+                    f"I've created a maintenance incident for your {category} issue and will notify your landlord. "
+                    f"Incident ID: {incident_id}"
+                )
+                bot.send_ai_message(
+                    channel_id,
+                    persona,
+                    confirmation_text,
+                    metadata={"context_type": "incident_confirmation", "incident_id": incident_id},
+                )
+                context_manager.append_message(user_id, channel_id, "assistant", confirmation_text)
+                logger.info(f"[incident-flow] 📨 Confirmation message sent to user")
+
+                card_sent = True
+                context_manager.advance_flow_state(user_id, channel_id, "incident", {"question_index": 0, "answers": {}})
+                _send_discovery_progress(
+                    bot,
+                    channel_id,
+                    persona,
+                    incident_id,
+                    0,
+                    len(DISCOVERY_QUESTIONS),
+                    _get_discovery_question(0),
+                    {},
+                )
+                first_question = _get_discovery_question(0)
+                if first_question:
+                    _ask_discovery_question(bot, context_manager, channel_id, persona, user_id, first_question, incident_id, 0)
+            else:
+                logger.info(f"[incident-flow] ⏭️  Skipped non-maintenance message (category: {category})")
+                # Not a maintenance issue - respond conversationally without incident creation
+                general_response = "I understand. Let me know if you need help with anything else!"
+                bot.send_ai_message(channel_id, persona, general_response, metadata={"context_type": "general"})
+                context_manager.append_message(user_id, channel_id, "assistant", general_response)
 
         elif next_stage == "discovery.response":
             incident_id = incident_id or context.get("active_incident")
