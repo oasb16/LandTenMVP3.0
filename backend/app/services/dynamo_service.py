@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 from decimal import Decimal
 import json
+import time
 
 # Boto3 client singleton
 _dynamodb_client = None
@@ -472,3 +473,21 @@ class UserDB:
         except Exception as e:
             print(f"[UserDB] Error getting user: {e}")
             return None
+
+
+def save_channel_snapshot(channel_id: str, snapshot: Dict[str, Any]) -> None:
+    """Save a lightweight channel snapshot for analytics/debugging.
+
+    This stores snapshots in a dedicated table 'channel_snapshots'. The table
+    should be created ahead of time (or this will raise). Each item contains
+    channel_id (PK), snapshot (map), and timestamp (int).
+    """
+    dynamodb = get_dynamodb_resource()
+    table_name = os.getenv("CHANNEL_SNAPSHOTS_TABLE", "channel_snapshots")
+    table = dynamodb.Table(table_name)
+    try:
+        item = {"channel_id": channel_id, "snapshot": snapshot, "timestamp": int(time.time())}
+        table.put_item(Item=item)
+        print(f"[dynamo] Saved channel snapshot for {channel_id}")
+    except Exception as e:
+        print(f"[dynamo] Failed to save channel snapshot: {e}")
