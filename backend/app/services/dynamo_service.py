@@ -4,6 +4,7 @@ Handles all database operations for incidents, jobs, bids, properties, and users
 """
 
 import os
+import time
 import boto3
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
@@ -408,6 +409,67 @@ class PropertyDB:
         except Exception as e:
             print(f"[PropertyDB] Error listing properties: {e}")
             return []
+
+
+class ChannelSnapshotDB:
+    """Manage landten_channel_snapshots table for intelligent orchestration tracking"""
+
+    TABLE_NAME = "landten_channel_snapshots"
+
+    @staticmethod
+    def save_channel_snapshot(channel_id: str, snapshot: Dict[str, Any]) -> bool:
+        """
+        Save a channel state snapshot for tracking orchestration and debugging.
+
+        Schema:
+        - channel_id (PK): string
+        - timestamp (SK): int (epoch seconds)
+        - snapshot: map (the full snapshot data)
+        - persona: string
+        - incident_id: string (optional)
+        - flow_stage: string (optional)
+        """
+        dynamodb = get_dynamodb_resource()
+        table = dynamodb.Table(ChannelSnapshotDB.TABLE_NAME)
+
+        now = int(time.time())
+
+        item = {
+            "channel_id": channel_id,
+            "timestamp": now,
+            "snapshot": snapshot,
+            "persona": snapshot.get("persona", "unknown"),
+            "incident_id": snapshot.get("incident_id"),
+            "flow_stage": snapshot.get("flow_stage"),
+            "severity": snapshot.get("severity"),
+        }
+
+        try:
+            table.put_item(Item=item)
+            print(f"[ChannelSnapshotDB] Saved snapshot for channel {channel_id} at {now}")
+            return True
+        except Exception as e:
+            print(f"[ChannelSnapshotDB] Error saving snapshot: {e}")
+            return False
+
+    @staticmethod
+    def get_latest_snapshot(channel_id: str) -> Optional[Dict[str, Any]]:
+        """Get the most recent snapshot for a channel"""
+        dynamodb = get_dynamodb_resource()
+        table = dynamodb.Table(ChannelSnapshotDB.TABLE_NAME)
+
+        try:
+            response = table.query(
+                KeyConditionExpression="channel_id = :cid",
+                ExpressionAttributeValues={":cid": channel_id},
+                ScanIndexForward=False,  # Sort descending by timestamp
+                Limit=1
+            )
+            items = response.get("Items", [])
+            return decimal_to_float(items[0]) if items else None
+        except Exception as e:
+            print(f"[ChannelSnapshotDB] Error getting snapshot: {e}")
+            return None
 
 
 class UserDB:

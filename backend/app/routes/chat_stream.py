@@ -26,6 +26,8 @@ from app.services.incident_flow import (
     threshold_decision,
     generate_contractor_bids,
 )
+from app.services.context_manager import get_context_manager
+from app.services.dynamo_service import IncidentDB, ChannelSnapshotDB
 
 try:
     from stream_chat import StreamChat
@@ -152,6 +154,74 @@ def _channel_identifier(channel, channel_state: Dict[str, Any]) -> str:
     )
 
 
+def _enrich_channel_state(channel_state: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Deeply enrich channel_state with high-value metadata for intelligent orchestration.
+
+    This function merges:
+    - Timestamp
+    - Persona
+    - Active incident/job tracking
+    - Flow state
+    - Incident details
+    - Context snapshot (last 10 messages)
+
+    Returns enriched channel_state with metadata field.
+    """
+    channel_data = channel_state.get("channel", {}).get("data", {}) or {}
+
+    # Extract last 10 messages for context snapshot
+    messages = channel_state.get("messages", [])
+    context_snapshot = [
+        {
+            "user": msg.get("user", {}).get("id"),
+            "text": msg.get("text"),
+            "ts": msg.get("created_at"),
+        }
+        for msg in messages[-10:]
+    ]
+
+    # Build enriched metadata
+    channel_state["metadata"] = {
+        "timestamp": time.time(),
+        "persona": channel_data.get("persona", "tenant"),
+        "active_incident": channel_data.get("active_incident"),
+        "active_job": channel_data.get("active_job"),
+        "flow_state": channel_data.get("flow_state", {}),
+        "incident_details": channel_data.get("incident_details", {}),
+        "context_snapshot": context_snapshot,
+    }
+
+    return channel_state
+
+
+def summarize_channel_state(channel_state: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Extract high-value keys from channel_state for logging, dashboards, and AI context.
+
+    Returns a clean summary dictionary with:
+    - channel_id
+    - persona
+    - incident_id
+    - flow_stage
+    - summary
+    - severity
+    - timestamp
+    """
+    data = channel_state.get("channel", {}).get("data", {})
+    meta = channel_state.get("metadata", {})
+
+    return {
+        "channel_id": data.get("id"),
+        "persona": data.get("persona"),
+        "incident_id": data.get("active_incident"),
+        "flow_stage": meta.get("flow_state", {}).get("stage"),
+        "summary": data.get("incident_details", {}).get("summary"),
+        "severity": data.get("incident_details", {}).get("severity"),
+        "timestamp": meta.get("timestamp"),
+    }
+
+
 def _persist_discovery(channel, discovery: Dict[str, Any]) -> None:
     try:
         channel.update({"discovery": discovery})
@@ -275,6 +345,30 @@ def _handle_discovery_message(
                 "media": discovery.get("media", []),
             },
         )
+
+        # 🧠 ENHANCEMENT: Persist incident in channel + context
+        incident_id = incident["incident_id"]
+        try:
+            channel.update({
+                "active_incident": incident_id,
+                "incident_details": incident,
+                "flow_state": {
+                    "stage": "incident.active",
+                    "incident_id": incident_id,
+                },
+            })
+            print(f"[incident-flow] 💾 Persisted incident {incident_id} into channel data")
+        except (KeyError, StreamAPIException) as exc:
+            print(f"[incident-flow] ⚠️ Failed to update channel with incident: {exc}")
+
+        # Sync with context_manager
+        try:
+            context_mgr = get_context_manager()
+            context_mgr.set_active_incident(tenant_email, channel_id, incident_id)
+            print(f"[incident-flow] 💾 Synced incident {incident_id} to context_manager")
+        except Exception as exc:
+            print(f"[incident-flow] ⚠️ Failed to sync incident to context_manager: {exc}")
+
         bids = generate_contractor_bids(classification.get("category", "general"))
         decision = threshold_decision(bids[0]["quote"])
         landlord_summary = summarize_for_landlord(incident)
@@ -744,9 +838,23 @@ def _handle_intelligent_message(
 
     print(f"[intelligent-handler] Intent: {intent}, Confidence: {confidence:.2f}")
 
-    # Decide how to respond based on intent
+    # 🧠 ENHANCEMENT: Smart incident flow engagement with auto-detection
     if intent == "incident.report" and confidence > 0.6:
-        # Escalate to discovery flow
+        print("[intelligent-handler] 🚨 High confidence incident detected")
+
+        # Create preliminary incident candidate
+        preliminary_incident = {
+            "summary": message_text,
+            "persona": persona,
+            "entities": entities,
+            "confidence": confidence,
+            "timestamp": time.time(),
+        }
+
+        # Store in channel state for continuity
+        channel_data = channel_state.get("channel", {}).get("data", {}) or {}
+        channel_data.setdefault("incident_candidate", preliminary_incident)
+
         print("[intelligent-handler] Escalating to discovery flow")
         # Simulate "start discovery" to trigger structured flow
         modified_message = {**message, "text": "start discovery"}
@@ -777,11 +885,24 @@ def _send_conversational_response(
     """
     Send a natural conversational response based on AI reasoning.
     This restores free-flow chat capability.
+
+    🧠 ENHANCEMENT: Includes adaptive flow reinforcement to detect unresolved issues.
     """
     intent = intent_result.get("intent", "general.chat")
     entities = intent_result.get("entities", {})
     next_actions = intent_result.get("next_actions", [])
     reasoning = intent_result.get("reasoning", "")
+
+    # 🧠 ENHANCEMENT: Adaptive flow reinforcement for unresolved issues
+    unresolved_keywords = ["still leaking", "not fixed", "unresolved", "still broken", "worse", "getting worse"]
+    if any(keyword in message_text.lower() for keyword in unresolved_keywords):
+        print("[intelligent-handler] ⚠️ User indicates unresolved issue — escalating to incident.")
+        # Get channel reference for discovery flow
+        channel = client.channel("messaging", channel_id)
+        channel_state = channel.query(state=True, watch=False)
+        modified_message = {"text": "start discovery", "user": {"id": "user"}}
+        _handle_discovery_message(client, channel, channel_state, modified_message, persona)
+        return
 
     # Build prompt for conversational response
     if intent == "greeting":
@@ -853,9 +974,18 @@ def _handle_action_message(
     print(f"[🎯 ACTION] Type: {action_type}, Incident: {incident_id or 'none'}")
 
     # Route action to appropriate handler
-    if action_type == "start_discovery":
-        # Trigger discovery flow
-        print(f"[🔍 ACTION] Starting discovery flow")
+    if action_type in {"start_discovery", "resume_flow"}:
+        # 🧠 ENHANCEMENT: Smarter action resumption
+        print(f"[🔍 ACTION] {'Resuming' if action_type == 'resume_flow' else 'Starting'} discovery flow for {incident_id or 'new incident'}")
+
+        # If incident_id provided, restore it to channel state
+        if incident_id:
+            try:
+                channel.update({"active_incident": incident_id})
+                print(f"[🔍 ACTION] Restored active_incident: {incident_id}")
+            except (KeyError, StreamAPIException) as exc:
+                print(f"[🔍 ACTION] ⚠️ Failed to restore incident to channel: {exc}")
+
         modified_message = {**message, "text": "start discovery"}
         _handle_discovery_message(client, channel, channel_state, modified_message, persona)
 
@@ -965,12 +1095,20 @@ async def stream_webhook(request: Request):
     bot_ensure_agent_user(client)
     channel = client.channel(channel_type, channel_id)
     channel_state = channel.query(state=True, watch=False)
+
+    # 🧠 ENHANCEMENT: Enrich channel_state with metadata
+    channel_state = _enrich_channel_state(channel_state)
+
     channel_data = channel_state.get("channel", {}).get("data", {}) or {}
     persona = channel_data.get("persona")
     discovery = channel_data.get("discovery") or {}
 
     print(f"[👔 WEBHOOK] Persona: {persona}")
     print(f"[🔍 WEBHOOK] Discovery stage: {discovery.get('stage', 'none')}")
+
+    # 🧠 ENHANCEMENT: Log channel summary for visibility
+    summary = summarize_channel_state(channel_state)
+    print(f"[channel-summary] {json.dumps(summary, indent=2)}")
 
     # Check if this is an action message (button click)
     if message_text.startswith("action:"):
@@ -983,5 +1121,12 @@ async def stream_webhook(request: Request):
     print(f"[🧠 WEBHOOK] Routing to intelligent message handler")
     _handle_intelligent_message(client, channel, channel_state, message, persona)
     print(f"[✅ WEBHOOK] Message handled successfully")
+
+    # 🧠 ENHANCEMENT: Optional snapshot persistence for debugging and analytics
+    try:
+        ChannelSnapshotDB.save_channel_snapshot(channel_id, summary)
+    except Exception as exc:
+        print(f"[⚠️  WEBHOOK] Failed to save channel snapshot: {exc}")
+
     print(f"{'='*80}\n")
     return {"status": "ok"}
