@@ -673,6 +673,29 @@ class AIReasoning:
 
         return entities
 
+    def _analyze_message_fallback(self, message: str) -> Dict[str, Any]:
+        """Lightweight analysis that complements intent detection for fallback mode.
+
+        Returns ai_analysis with category, severity, urgency and a suggested next_action.
+        """
+        entities = self._fallback_entity_extraction(message)
+        msg = message.lower()
+        ai_analysis: Dict[str, Any] = {
+            "category": entities.get("category", "general"),
+            "severity": entities.get("severity", "medium"),
+            "urgency": entities.get("urgency", "routine"),
+            "next_action": "respond_general",
+        }
+
+        if any(k in msg for k in ["emergency", "fire", "gas", "flood", "burst"]):
+            ai_analysis.update({"urgency": "immediate", "severity": "high", "next_action": "create_incident"})
+        elif any(k in msg for k in ["leak", "water", "broken", "not working"]):
+            ai_analysis.update({"urgency": "urgent", "next_action": "start_discovery"})
+        elif any(k in msg for k in ["rent", "payment", "bill"]):
+            ai_analysis.update({"category": "finance", "next_action": "show_payment_info"})
+
+        return ai_analysis
+
     def _fallback_intent_detection(
         self,
         message: str,
@@ -765,13 +788,15 @@ class AIReasoning:
             }
 
         # Default to general chat
+        ai_analysis = self._analyze_message_fallback(message)
         return {
             "intent": Intent.GENERAL_CHAT.value,
             "confidence": 0.5,
             "entities": {},
             "next_actions": ["respond_general"],
             "card_type": CardType.NONE.value,
-            "reasoning": "Fallback: no specific intent detected"
+            "reasoning": "Fallback: no specific intent detected",
+            "ai_analysis": ai_analysis,
         }
 
     def _fallback_response_plan(

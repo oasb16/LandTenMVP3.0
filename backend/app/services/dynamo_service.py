@@ -491,3 +491,50 @@ def save_channel_snapshot(channel_id: str, snapshot: Dict[str, Any]) -> None:
         print(f"[dynamo] Saved channel snapshot for {channel_id}")
     except Exception as e:
         print(f"[dynamo] Failed to save channel snapshot: {e}")
+
+
+def record_mttr_event(incident_id: str, event: Dict[str, Any]) -> None:
+    """Record MTTR lifecycle events for an incident.
+
+    event should contain keys like 'first_response_at', 'resolved_at', 'created_at'.
+    """
+    dynamodb = get_dynamodb_resource()
+    table_name = os.getenv("MTTR_EVENTS_TABLE", "mttr_events")
+    table = dynamodb.Table(table_name)
+    try:
+        item = {"incident_id": incident_id, **event, "timestamp": int(time.time())}
+        table.put_item(Item=item)
+        print(f"[sla-metrics] Recorded MTTR event for {incident_id}")
+    except Exception as e:
+        print(f"[sla-metrics] Failed to record MTTR event: {e}")
+
+
+def record_ai_feedback(feedback: Dict[str, Any]) -> None:
+    """Persist training feedback for AI models.
+
+    feedback example: {"incident_id": "INC-...", "label": "severity.high", "correct": True}
+    """
+    dynamodb = get_dynamodb_resource()
+    table_name = os.getenv("AI_FEEDBACK_TABLE", "ai_training_feedback")
+    table = dynamodb.Table(table_name)
+    try:
+        item = {**feedback, "timestamp": int(time.time())}
+        table.put_item(Item=item)
+        print(f"[ai-feedback] Saved AI training feedback")
+    except Exception as e:
+        print(f"[ai-feedback] Failed to save feedback: {e}")
+
+
+def get_aggregated_metrics(entity_type: str, entity_id: str) -> Dict[str, Any]:
+    """Return lightweight aggregated metrics for tenant/landlord/contractor.
+
+    This is a placeholder that can be replaced by a proper analytics pipeline.
+    """
+    # For now return stubbed metrics; a proper implementation would query DynamoDB or a metrics store
+    return {
+        "entity_type": entity_type,
+        "entity_id": entity_id,
+        "mttr_hours": None,
+        "fill_rate": None,
+        "engagement": None,
+    }

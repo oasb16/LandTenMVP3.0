@@ -28,6 +28,9 @@ from app.services.incident_flow import (
     threshold_decision,
     generate_contractor_bids,
 )
+from app.services.ai_reasoning import get_ai_reasoning
+from app.services.dynamo_service import record_mttr_event, record_ai_feedback, get_aggregated_metrics
+from app.services.incident_flow import create_work_order
 
 try:
     from stream_chat import StreamChat
@@ -174,7 +177,7 @@ def _handle_discovery_message(
     context = build_context(channel_state.get("messages", []))
     channel_id = _channel_identifier(channel, channel_state)        
 
-    print(f"[discovery] Current discovery state: {discovery} for channel_data : {channel_data} for message: {lower_text} for persona: {persona} with context: {context}")
+    print(f"[discovery] Current discovery state: {discovery} for channel_data : {channel_data} for message: {lower_text} for persona: {persona}")
 
     def ask_question(index: int, acknowledgement: Optional[str] = None):
         question = DISCOVERY_QUESTIONS[index]["prompt"]
@@ -297,6 +300,12 @@ def _handle_discovery_message(
             print(f"[incident-flow] failed to update context manager: {e}")
         bids = generate_contractor_bids(classification.get("category", "general"))
         decision = threshold_decision(bids[0]["quote"])
+        # Create a work order for the incident
+        try:
+            work_order = create_work_order(incident)
+            print(f"[workorder-flow] Created work order {work_order.get('job_id')} for incident {incident.get('incident_id')}")
+        except Exception as e:
+            print(f"[workorder-flow] failed to create work order: {e}")
         landlord_summary = summarize_for_landlord(incident)
         prompt = (
             f"Inform the tenant that Incident {incident['incident_id']} has been created and will be shared with the landlord. "
@@ -312,6 +321,32 @@ def _handle_discovery_message(
             channel_id,
             f"Sample contractor options:\n{bids_text}\nWe'll finalize once the landlord approves.",
         )
+        # Auto-assign best contractor if SLA is close / decision recommends auto-approve
+        try:
+            mttr_target = channel_state.get("metadata", {}).get("mttr_target_hours") or incident.get("mttr_target_hours")
+            if (mttr_target and mttr_target <= 12) or decision == "auto-approve":
+                best = bids[0]
+                assigned = best.get("name")
+                # Update incident assignment
+                try:
+                    channel.update({"active_incident": incident["incident_id"], "assigned_contractor": assigned})
+                except Exception:
+                    pass
+                try:
+                    # Record assignment in context
+                    cm = get_context_manager()
+                    cm.update_context(tenant_email, channel_id, {"active_job": work_order.get("job_id"), "assigned_contractor": assigned})
+                except Exception:
+                    pass
+                print(f"[workorder-flow] Auto-assigned contractor {assigned} for incident {incident.get('incident_id')}")
+        except Exception as e:
+            print(f"[workorder-flow] auto-assign logic failed: {e}")
+
+        # Record an MTTR event for incident creation
+        try:
+            record_mttr_event(incident.get("incident_id"), {"created_at": incident.get("created_at")})
+        except Exception as e:
+            print(f"[sla-metrics] failed to record mttr event: {e}")
         # Optionally persist a snapshot for analytics / debugging
         try:
             try:
@@ -1058,6 +1093,51 @@ async def stream_webhook(request: Request):
     except Exception as e:
         print(f"[channel-summary] failed: {e}")
 
+    # Run lightweight AI analysis for classification and suggested next actions
+    try:
+        reasoning = get_ai_reasoning()
+        ai_result = reasoning.infer_intent(message_text, {"recent_conversation": channel_state.get("messages", [])}, persona or "tenant")
+        # Ensure ai_analysis exists (from LLM or fallback)
+        ai_analysis = ai_result.get("ai_analysis") or ai_result.get("entities") or reasoning._analyze_message_fallback(message_text)
+        channel_state.setdefault("ai_analysis", ai_analysis)
+        print(f"[ai-analysis] {json.dumps(ai_analysis, indent=2)}")
+
+        # Enrich metadata with unified flow intelligence
+        category = ai_analysis.get("category") or channel_state.get("metadata", {}).get("incident_details", {}).get("category")
+        urgency = ai_analysis.get("urgency") or channel_state.get("metadata", {}).get("incident_details", {}).get("urgency")
+        severity = ai_analysis.get("severity") or channel_state.get("metadata", {}).get("incident_details", {}).get("severity")
+        created_at = channel_state.get("metadata", {}).get("timestamp") or time.time()
+        # Simple priority score: severity weight (high=3, medium=2, low=1) * urgency weight * recency factor
+        sev_weight = {"high": 3, "medium": 2, "low": 1}.get(severity, 2)
+        urg_weight = {"immediate": 4, "urgent": 3, "routine": 1}.get(urgency, 1)
+        age_hours = max(0.1, (time.time() - float(created_at)) / 3600.0)
+        priority_score = round((sev_weight * urg_weight) / age_hours, 3)
+
+        # Populate standardized metadata fields
+        meta = channel_state.setdefault("metadata", {})
+        meta.update({
+            "urgency_level": urgency,
+            "category": category,
+            "priority_score": priority_score,
+            "assigned_contractor": channel_data.get("assigned_contractor"),
+            "tenant_id": channel_data.get("tenant_id") or message.get("user", {}).get("id"),
+            "landlord_id": channel_data.get("landlord_id"),
+            "mttr_target_hours": channel_data.get("mttr_target_hours") or (8 if urgency == "immediate" else 48),
+            "status_metric_flags": channel_data.get("status_metric_flags", {}),
+        })
+
+        # Emit SLA metrics log
+        sla_payload = {
+            "channel_id": channel_id,
+            "incident_id": channel_data.get("active_incident"),
+            "priority_score": priority_score,
+            "mttr_target_hours": meta.get("mttr_target_hours"),
+        }
+        print(f"[sla-metrics] {json.dumps(sla_payload)}")
+
+    except Exception as e:
+        print(f"[ai-analysis] failed to analyze message: {e}")
+
     # Check if this is an action message (button click)
     if message_text.startswith("action:"):
         print(f"[🎯 WEBHOOK] ACTION DETECTED: {message_text}")
@@ -1086,3 +1166,24 @@ def summarize_channel_state(channel_state: Dict[str, Any]) -> Dict[str, Any]:
         "severity": data.get("incident_details", {}).get("severity"),
         "timestamp": meta.get("timestamp"),
     }
+
+
+@router.get("/metrics/tenant/{tenant_id}")
+def metrics_tenant(tenant_id: str, token: str = Depends(verify_firebase_token)):
+    metrics = get_aggregated_metrics("tenant", tenant_id)
+    print(f"[metrics] tenant {tenant_id}: {metrics}")
+    return metrics
+
+
+@router.get("/metrics/landlord/{landlord_id}")
+def metrics_landlord(landlord_id: str, token: str = Depends(verify_firebase_token)):
+    metrics = get_aggregated_metrics("landlord", landlord_id)
+    print(f"[metrics] landlord {landlord_id}: {metrics}")
+    return metrics
+
+
+@router.get("/metrics/contractor/{contractor_id}")
+def metrics_contractor(contractor_id: str, token: str = Depends(verify_firebase_token)):
+    metrics = get_aggregated_metrics("contractor", contractor_id)
+    print(f"[metrics] contractor {contractor_id}: {metrics}")
+    return metrics
