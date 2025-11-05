@@ -4,6 +4,9 @@ from typing import Dict, Any, Tuple, List, Optional
 
 from app.repos.incident_repo import IncidentRepo
 from app.services.chatbot import agent_reply
+from app.services.dynamo_service import JobDB, save_channel_snapshot
+from app.services.context_manager import get_context_manager
+import time
 
 
 INCIDENT_THRESHOLD_LOW = float(os.getenv("INCIDENT_THRESHOLD_LOW", "200"))
@@ -44,10 +47,13 @@ def diy_suggestions(category: str) -> List[str]:
 def create_incident_record(thread_id: str, tenant_email: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     repo = IncidentRepo()
     now = datetime.now(timezone.utc).isoformat()
+    incident_id = payload.get("incident_id") or f"INC-{int(datetime.now().timestamp())}"
     item = {
-        "incident_id": payload.get("incident_id") or f"INC-{int(datetime.now().timestamp())}",
+        "incident_id": incident_id,
         "thread_id": thread_id,
         "tenant_email": tenant_email,
+        "tenant_id": payload.get("tenant_id", tenant_email),
+        "landlord_id": payload.get("landlord_id"),
         "category": payload.get("category"),
         "severity": payload.get("severity"),
         "urgency": payload.get("urgency"),
@@ -56,10 +62,40 @@ def create_incident_record(thread_id: str, tenant_email: str, payload: Dict[str,
         "diy_result": payload.get("diy_result"),
         "media": payload.get("media", []),
         "created_at": now,
-        "status": "pending",
+        "first_response_at": payload.get("first_response_at"),
+        "resolved_at": payload.get("resolved_at"),
+        "mttr_target_hours": payload.get("mttr_target_hours", 8 if payload.get("urgency") == "immediate" else 48),
+        "assigned_contractor": payload.get("assigned_contractor"),
+        "status": payload.get("status", "detected"),
+        "status_metric_flags": payload.get("status_metric_flags", {}),
     }
     repo.create_incident(item)
     return item
+
+
+def create_work_order(incident: Dict[str, Any], title: str = None) -> Dict[str, Any]:
+    """Create a work order (job) for a given incident and persist via JobDB.
+
+    Returns the created job record.
+    """
+    job_id = f"JOB-{int(time.time())}"
+    job_payload = {
+        "job_id": job_id,
+        "incident_id": incident.get("incident_id"),
+        "property_id": incident.get("property_id"),
+        "landlord_id": incident.get("landlord_id"),
+        "title": title or f"Work order for {incident.get('summary')[:60]}",
+        "category": incident.get("category"),
+        "estimated_cost": incident.get("estimated_cost", ""),
+        "urgency": incident.get("urgency", "routine"),
+        "status": "created",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "channel_id": incident.get("thread_id"),
+    }
+
+    job = JobDB.create_job(job_payload)
+    print(f"[workorder-flow] ✅ Created work order {job.get('job_id')} for incident {incident.get('incident_id')}")
+    return job
 
 
 def summarize_for_landlord(incident: Dict[str, Any]) -> str:
