@@ -18,6 +18,8 @@ from app.services.chatbot import (
     agent_reply,
     post_agent_message,
 )
+from app.services.context_manager import get_context_manager
+from app.services.dynamo_service import save_channel_snapshot
 from app.services.incident_flow import (
     classify_issue,
     diy_suggestions,
@@ -160,7 +162,7 @@ def _persist_discovery(channel, discovery: Dict[str, Any]) -> None:
 
 
 def _handle_discovery_message(
-    client: "StreamChat",
+    client: Any,
     channel,
     channel_state: Dict[str, Any],
     message: Dict[str, Any],
@@ -275,6 +277,24 @@ def _handle_discovery_message(
                 "media": discovery.get("media", []),
             },
         )
+        # Persist incident into channel data and context manager so future messages are aware
+        try:
+            channel.update({
+                "active_incident": incident["incident_id"],
+                "incident_details": incident,
+                "flow_state": {"stage": "incident.active", "incident_id": incident["incident_id"]},
+            })
+            print(f"[incident-flow] \ud83d\udcbe Persisted incident {incident['incident_id']} into channel data")
+        except Exception as e:
+            print(f"[incident-flow] failed to persist incident into channel: {e}")
+
+        try:
+            context_manager = get_context_manager()
+            user_id = tenant_email
+            context_manager.set_active_incident(user_id, channel_id, incident["incident_id"])
+            print(f"[incident-flow] Context manager updated active incident for {user_id}")
+        except Exception as e:
+            print(f"[incident-flow] failed to update context manager: {e}")
         bids = generate_contractor_bids(classification.get("category", "general"))
         decision = threshold_decision(bids[0]["quote"])
         landlord_summary = summarize_for_landlord(incident)
@@ -292,9 +312,18 @@ def _handle_discovery_message(
             channel_id,
             f"Sample contractor options:\n{bids_text}\nWe'll finalize once the landlord approves.",
         )
+        # Optionally persist a snapshot for analytics / debugging
+        try:
+            try:
+                summary_snapshot = summarize_channel_state(channel.query(state=True, watch=False))
+            except Exception:
+                summary_snapshot = summarize_channel_state(channel_state)
+            save_channel_snapshot(channel_id, summary_snapshot)
+        except Exception as e:
+            print(f"[snapshot] failed to save channel snapshot: {e}")
 
 
-def _get_stream_client() -> "StreamChat":
+def _get_stream_client() -> Any:
     if StreamChat is None:
         raise HTTPException(status_code=500, detail="stream-chat SDK not installed on backend")
     api_key = os.getenv("STREAM_CHAT_API_KEY")
@@ -683,7 +712,7 @@ def post_agent_reply(req: AgentMessageRequest, token: str = Depends(verify_fireb
     }
 
 def _handle_intelligent_message(
-    client: "StreamChat",
+    client: Any,
     channel,
     channel_state: Dict[str, Any],
     message: Dict[str, Any],
@@ -744,6 +773,21 @@ def _handle_intelligent_message(
 
     print(f"[intelligent-handler] Intent: {intent}, Confidence: {confidence:.2f}")
 
+    # Auto-engage discovery flow for high-confidence incident reports
+    if intent in {"incident.report", "maintenance"} and confidence > 0.6:
+        print("[intelligent-handler] 🚨 High confidence incident detected")
+        preliminary_incident = {
+            "summary": message_text,
+            "persona": persona,
+            "entities": entities,
+            "confidence": confidence,
+            "timestamp": time.time(),
+        }
+        channel_state.setdefault("incident_candidate", preliminary_incident)
+        # Start discovery automatically
+        _handle_discovery_message(client, channel, channel_state, {"text": "start discovery"}, persona)
+        return
+
     # Decide how to respond based on intent
     if intent == "incident.report" and confidence > 0.6:
         # Escalate to discovery flow
@@ -767,7 +811,7 @@ def _handle_intelligent_message(
 
 
 def _send_conversational_response(
-    client: "StreamChat",
+    client: Any,
     channel_id: str,
     message_text: str,
     context: str,
@@ -815,11 +859,24 @@ def _send_conversational_response(
         )
 
     reply = agent_reply(prompt, context, persona)
+    # Adaptive escalation: if user indicates unresolved issue, trigger discovery
+    lowered = message_text = message_text if 'message_text' in locals() else ''
+    if isinstance(lowered, str):
+        lowered = lowered.lower()
+        if any(word in lowered for word in ["still leaking", "not fixed", "unresolved"]):
+            print("[intelligent-handler] ⚠️ User indicates unresolved issue — escalating to incident.")
+            modified_message = {"text": "start discovery", "user": {"id": "unknown"}}
+            try:
+                _handle_discovery_message(client, client.channel("messaging", channel_id), {}, modified_message, persona)
+            except Exception as e:
+                print(f"[intelligent-handler] failed to escalate to discovery: {e}")
+            return
+
     post_agent_message(client, channel_id, reply)
 
 
 def _handle_action_message(
-    client: "StreamChat",
+    client: Any,
     channel,
     channel_state: Dict[str, Any],
     message: Dict[str, Any],
@@ -853,9 +910,14 @@ def _handle_action_message(
     print(f"[🎯 ACTION] Type: {action_type}, Incident: {incident_id or 'none'}")
 
     # Route action to appropriate handler
-    if action_type == "start_discovery":
-        # Trigger discovery flow
-        print(f"[🔍 ACTION] Starting discovery flow")
+    if action_type in {"start_discovery", "resume_flow"}:
+        # Trigger or resume discovery flow
+        print(f"[🔍 ACTION] Resuming flow for {incident_id or 'new incident'}")
+        if incident_id:
+            try:
+                channel.update({"active_incident": incident_id})
+            except Exception as e:
+                print(f"[🔍 ACTION] Failed to set active incident on channel: {e}")
         modified_message = {**message, "text": "start discovery"}
         _handle_discovery_message(client, channel, channel_state, modified_message, persona)
 
@@ -965,12 +1027,36 @@ async def stream_webhook(request: Request):
     bot_ensure_agent_user(client)
     channel = client.channel(channel_type, channel_id)
     channel_state = channel.query(state=True, watch=False)
+    # Enrich channel_state with useful metadata snapshot to aid reasoning and discovery
     channel_data = channel_state.get("channel", {}).get("data", {}) or {}
+    channel_state["metadata"] = {
+        "timestamp": time.time(),
+        "persona": channel_data.get("persona", "tenant"),
+        "active_incident": channel_data.get("active_incident"),
+        "active_job": channel_data.get("active_job"),
+        "flow_state": channel_data.get("flow_state", {}),
+        "incident_details": channel_data.get("incident_details", {}),
+        "context_snapshot": [
+            {
+                "user": msg.get("user", {}).get("id"),
+                "text": msg.get("text"),
+                "ts": msg.get("created_at"),
+            }
+            for msg in channel_state.get("messages", [])[-10:]
+        ],
+    }
     persona = channel_data.get("persona")
     discovery = channel_data.get("discovery") or {}
 
     print(f"[👔 WEBHOOK] Persona: {persona}")
     print(f"[🔍 WEBHOOK] Discovery stage: {discovery.get('stage', 'none')}")
+
+    # Print a concise channel summary for logging / dashboards
+    try:
+        summary = summarize_channel_state(channel_state)
+        print(f"[channel-summary] {json.dumps(summary, indent=2)}")
+    except Exception as e:
+        print(f"[channel-summary] failed: {e}")
 
     # Check if this is an action message (button click)
     if message_text.startswith("action:"):
@@ -985,3 +1071,18 @@ async def stream_webhook(request: Request):
     print(f"[✅ WEBHOOK] Message handled successfully")
     print(f"{'='*80}\n")
     return {"status": "ok"}
+
+
+def summarize_channel_state(channel_state: Dict[str, Any]) -> Dict[str, Any]:
+    """Extracts high-value keys for logging, dashboards, and AI context."""
+    data = channel_state.get("channel", {}).get("data", {})
+    meta = channel_state.get("metadata", {})
+    return {
+        "channel_id": data.get("id"),
+        "persona": data.get("persona"),
+        "incident_id": data.get("active_incident"),
+        "flow_stage": meta.get("flow_state", {}).get("stage"),
+        "summary": data.get("incident_details", {}).get("summary"),
+        "severity": data.get("incident_details", {}).get("severity"),
+        "timestamp": meta.get("timestamp"),
+    }

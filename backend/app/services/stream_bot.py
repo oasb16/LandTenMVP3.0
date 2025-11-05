@@ -349,12 +349,14 @@ Current conversation context: {context if context else 'New conversation'}
                         persona=persona,
                         incident_data=incident_payload,
                     )
+                    print("[stream-bot] Incident detected and card sent.")
                     # Also send a conversational response
                     response_text = self.process_tenant_message(
                         message=message_text,
                         user_id=user_id,
                         channel_id=channel_id
                     )
+                    print("\n\n\n\n\n[stream-bot] Sending conversational response after incident detection.\n\n\n\n\n\n\n\n")
                     return self.send_ai_message(
                         channel_id=channel_id,
                         persona=persona,
