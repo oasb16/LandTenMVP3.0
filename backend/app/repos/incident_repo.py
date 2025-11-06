@@ -17,8 +17,8 @@ class IncidentRepo:
         """Alias for create_incident for backward compatibility"""
         self.create_incident(payload)
 
-    def get_incident(self, incident_id: str) -> Dict[str, Any]:
-        resp = self.table.get_item(Key={"incident_id": incident_id})
+    def get_incident(self, incident_id: str, user_id: str) -> Dict[str, Any]:
+        resp = self.table.get_item(Key={"incident_id": incident_id, "user_id": user_id})
         return resp.get("Item", {})
 
     def list_incidents(self, tenant_id: str) -> List[Dict[str, Any]]:

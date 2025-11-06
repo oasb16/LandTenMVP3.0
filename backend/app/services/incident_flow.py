@@ -33,8 +33,8 @@ def diy_suggestions(category: str) -> List[str]:
     suggestions = {
         "plumbing": [
             "Tighten any visible fittings slightly with a wrench.",
-            "Place a bucket under the leak and turn off nearby valves.",
-            "Dry the area and check if the leak persists.",
+            "Place a temporary fix and secure area.",
+            "Cordone off the perimeter and check if issue persists.",
         ],
         "electrical": [
             "Turn off the breaker controlling the outlet.",
@@ -46,9 +46,11 @@ def diy_suggestions(category: str) -> List[str]:
 
 def create_incident_record(thread_id: str, tenant_email: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     repo = IncidentRepo()
-    now = datetime.now(timezone.utc).isoformat()
-    incident_id = payload.get("incident_id") or f"INC-{int(datetime.now().timestamp())}"
+    # Use UTC ISO timestamps for Dynamo
+    now = datetime.utcnow().isoformat()
+    incident_id = payload.get("incident_id") or f"INC-{int(datetime.utcnow().timestamp())}"
     item = {
+        "user_id": thread_id,
         "incident_id": incident_id,
         "thread_id": thread_id,
         "tenant_email": tenant_email,
@@ -69,8 +71,15 @@ def create_incident_record(thread_id: str, tenant_email: str, payload: Dict[str,
         "status": payload.get("status", "detected"),
         "status_metric_flags": payload.get("status_metric_flags", {}),
     }
-    repo.create_incident(item)
-    return item
+    try:
+        repo.create_incident(item)
+        # Validate persistence
+        assert "incident_id" in item, "Incident must have an ID"
+        print(f"[incident-flow] ✅ Incident persisted successfully: {incident_id}")
+        return item
+    except Exception as e:
+        print(f"[error][incident-flow] Failed to create incident {incident_id}: {e}")
+        raise
 
 
 def create_work_order(incident: Dict[str, Any], title: str = None) -> Dict[str, Any]:

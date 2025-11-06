@@ -118,22 +118,37 @@ class IncidentDB:
             raise
 
     @staticmethod
-    def get_incident(incident_id: str) -> Optional[Dict[str, Any]]:
-        """Get incident by ID"""
+    def get_incident(incident_id: str, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Get incident by ID (requires both user_id and incident_id for composite key)"""
         dynamodb = get_dynamodb_resource()
         table = dynamodb.Table(IncidentDB.TABLE_NAME)
 
         try:
-            response = table.get_item(Key={"incident_id": incident_id})
+            # If no user_id provided, try scanning (slower but fallback-safe)
+            if user_id:
+                key = {"user_id": user_id, "incident_id": incident_id}
+                response = table.get_item(Key=key)
+            else:
+                print(f"[IncidentDB] get_incident fallback scan for {incident_id}")
+                response = table.scan(
+                    FilterExpression="incident_id = :iid",
+                    ExpressionAttributeValues={":iid": incident_id},
+                    Limit=1
+                )
+                items = response.get("Items", [])
+                return decimal_to_float(items[0]) if items else None
+
             item = response.get("Item")
             return decimal_to_float(item) if item else None
+
         except Exception as e:
             print(f"[IncidentDB] Error getting incident: {e}")
             return None
 
+
     @staticmethod
-    def update_incident_status(incident_id: str, status: str, **kwargs) -> bool:
-        """Update incident status and optional fields"""
+    def update_incident_status(incident_id: str, status: str, user_id: Optional[str] = None, **kwargs) -> bool:
+        """Update incident status and optional fields (requires both keys)"""
         dynamodb = get_dynamodb_resource()
         table = dynamodb.Table(IncidentDB.TABLE_NAME)
 
@@ -149,9 +164,20 @@ class IncidentDB:
             update_expr += f", {key} = :{key}"
             expr_values[f":{key}"] = value
 
+        print(f"[IncidentDB] Updating incident {incident_id} with status {status} and {kwargs}")
+
         try:
+            if not user_id:
+                print(f"[IncidentDB] Missing user_id for update_incident_status, attempting fallback lookup...")
+                found = IncidentDB.get_incident(incident_id, user_id=user_id)
+                if found:
+                    user_id = found.get("user_id")
+                if not user_id:
+                    print(f"[IncidentDB] Cannot update {incident_id} — user_id missing.")
+                    return False
+
             table.update_item(
-                Key={"incident_id": incident_id},
+                Key={"user_id": user_id, "incident_id": incident_id},
                 UpdateExpression=update_expr,
                 ExpressionAttributeValues=expr_values,
                 ExpressionAttributeNames=expr_names
@@ -161,6 +187,7 @@ class IncidentDB:
         except Exception as e:
             print(f"[IncidentDB] Error updating incident: {e}")
             return False
+
 
     @staticmethod
     def list_incidents_by_tenant(tenant_id: str) -> List[Dict[str, Any]]:
