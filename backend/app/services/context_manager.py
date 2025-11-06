@@ -184,6 +184,14 @@ class ContextManager:
                 incident_id,
                 user_id,
             )
+            # Mirror user-visible context update log
+            print(f"[context-update] Active incident set for {user_id} on {channel_id}: {incident_id}")
+        else:
+            logger.error(
+                "[context-manager] ❌ Failed to persist active incident %s for %s",
+                incident_id,
+                user_id,
+            )
 
         return success
 
@@ -388,7 +396,10 @@ class ContextManager:
         if updates:
             current_state.update(updates)
         current_state["stage"] = stage
-        return self.update_context(user_id, channel_id, {"flow_state": current_state})
+        success = self.update_context(user_id, channel_id, {"flow_state": current_state})
+        if success:
+            print(f"[context-update] Flow state advanced for {user_id} on {channel_id}: {stage}")
+        return success
 
     def _coerce_numbers(self, value: Any) -> Any:
         if isinstance(value, float):

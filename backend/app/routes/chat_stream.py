@@ -6,6 +6,10 @@ from typing import List, Dict, Any, Optional, Tuple
 from collections import OrderedDict
 from threading import Lock
 
+from openai import OpenAI
+from difflib import SequenceMatcher
+import math
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
@@ -20,6 +24,7 @@ from app.services.chatbot import (
 )
 from app.services.context_manager import get_context_manager
 from app.services.dynamo_service import save_channel_snapshot
+from app.services.dynamo_service import IncidentDB
 from app.services.incident_flow import (
     classify_issue,
     diy_suggestions,
@@ -138,7 +143,7 @@ AUTOJOIN_AGENT = os.getenv("STREAM_AGENT_AUTOJOIN", "true").lower() not in {"fal
 WEBHOOK_SECRET = os.getenv("STREAM_WEBHOOK_SECRET", "")
 
 DISCOVERY_QUESTIONS = [
-    {"key": "location", "prompt": "Where exactly is the leak or issue located?"},
+    {"key": "location", "prompt": "Where exactly is the issue located?"},
     {"key": "severity", "prompt": "How severe is the issue right now (drip, steady leak, flooding, etc.)?"},
     {"key": "noticed", "prompt": "When did you first notice the problem?"},
     {"key": "media", "prompt": "Can you upload a photo or short video so I can see what you're seeing?"},
@@ -162,7 +167,6 @@ def _persist_discovery(channel, discovery: Dict[str, Any]) -> None:
         channel.update({"discovery": discovery})
     except (KeyError, StreamAPIException) as exc:  # pragma: no cover - logging only
         print(f"[stream] failed to persist discovery state: {exc}")
-
 
 def _handle_discovery_message(
     client: Any,
@@ -188,7 +192,9 @@ def _handle_discovery_message(
         reply = agent_reply(prompt, context, persona)
         print(f"[discovery] Asking question {index}: {question}"
               f"Reply: {reply}")
-        post_agent_message(client, channel_id, reply)
+        # Sanitize reply to plain text before posting
+        reply_text = reply if isinstance(reply, str) else (json.dumps(reply, ensure_ascii=False) if isinstance(reply, (dict, list)) else str(reply))
+        post_agent_message(client, channel_id, reply_text)
 
     if not discovery or discovery.get("stage") in {None, "complete"} or "start discovery" in lower_text:
         discovery = {
@@ -205,10 +211,9 @@ def _handle_discovery_message(
             f" Keep it short and friendly." 
         )
         reply = agent_reply(prompt, context, persona)
-        print("[discovery] Initiating discovery with first question."
-              " Reply: {reply}"
-              f" {DISCOVERY_QUESTIONS[0]['prompt']}")
-        post_agent_message(client, channel_id, reply)
+        reply_text = reply if isinstance(reply, str) else (json.dumps(reply, ensure_ascii=False) if isinstance(reply, (dict, list)) else str(reply))
+        print("[discovery] Initiating discovery with first question.")
+        post_agent_message(client, channel_id, reply_text)
         return
 
     if discovery.get("stage") == "questions":
@@ -244,7 +249,8 @@ def _handle_discovery_message(
                 "Ask them to reply 'Resolved' if it works or 'Not resolved' if it still needs help."
             )
             reply = agent_reply(prompt, context, persona)
-            post_agent_message(client, channel_id, reply)
+            reply_text = reply if isinstance(reply, str) else (json.dumps(reply, ensure_ascii=False) if isinstance(reply, (dict, list)) else str(reply))
+            post_agent_message(client, channel_id, reply_text)
         return
 
     if discovery.get("stage") == "diy":
@@ -258,7 +264,8 @@ def _handle_discovery_message(
                 "and close the conversation without escalating."
             )
             reply = agent_reply(prompt, context, persona)
-            post_agent_message(client, channel_id, reply)
+            reply_text = reply if isinstance(reply, str) else (json.dumps(reply, ensure_ascii=False) if isinstance(reply, (dict, list)) else str(reply))
+            post_agent_message(client, channel_id, reply_text)
             return
 
         discovery["stage"] = "incident"
@@ -267,19 +274,55 @@ def _handle_discovery_message(
         classification = discovery.get("classification", {})
         summary = discovery.get("summary", message.get("text"))
         tenant_email = message.get("user", {}).get("id", "tenant")
-        incident = create_incident_record(
-            channel_id,
-            tenant_email,
-            {
-                "category": classification.get("category", "general"),
-                "severity": classification.get("severity", "medium"),
-                "urgency": classification.get("urgency", "routine"),
-                "summary": summary,
-                "diy_attempted": True,
-                "diy_result": "Unresolved",
-                "media": discovery.get("media", []),
-            },
-        )
+        # === Context check before discovery-based incident creation ===
+        try:
+            cm = get_context_manager()
+            analysis = smart_incident_context_analyzer(tenant_email, channel_id, summary)
+            decision = analysis.get("decision")
+            reuse_incident = analysis.get("incident_id")
+            similarity = analysis.get("similarity", 0.0)
+        except Exception as exc:
+            print(f"[context-analyzer-error] {exc}")
+            decision, reuse_incident, similarity = ("create", None, 0.0)
+
+        if decision == "reuse" and reuse_incident:
+            print(f"[context-analyzer] Reusing incident {reuse_incident} (sim={similarity:.2f}) from discovery flow")
+            return
+
+        elif decision == "close" and reuse_incident:
+            try:
+                IncidentDB.update_incident_status(reuse_incident, "stale", user_id=user_id)
+                cm = get_context_manager()
+                cm.update_context(tenant_email, channel_id, {"active_incident": None})
+                print(f"[context-analyzer] Closed old incident {reuse_incident} (sim={similarity:.2f}) before discovery create")
+            except Exception as e:
+                print(f"[context-analyzer-error] Failed to close old incident {reuse_incident}: {e}")
+            # continue to create new
+
+        elif decision == "ignore":
+            print(f"[context-analyzer] Ignored general message during discovery; skipping incident creation.")
+            return
+        # ==============================================================
+
+        # Create canonical incident record (create_incident_record uses UTC ISO for created_at)
+        try:
+            incident = create_incident_record(
+                thread_id=channel_id,
+                tenant_email=tenant_email,
+                payload={
+                    "category": classification.get("category", "general"),
+                    "severity": classification.get("severity", "medium"),
+                    "urgency": classification.get("urgency", "routine"),
+                    "summary": summary,
+                    "diy_attempted": True,
+                    "diy_result": "Unresolved",
+                    "media": discovery.get("media", []),
+                },
+            )
+            print(f"[incident-flow] Created incident via discovery: {incident.get('incident_id')}")
+        except Exception as e:
+            print(f"[error][incident-flow] create_incident_record failed: {e}")
+            return
         # Persist incident into channel data and context manager so future messages are aware
         try:
             channel.update({
@@ -295,7 +338,14 @@ def _handle_discovery_message(
             context_manager = get_context_manager()
             user_id = tenant_email
             context_manager.set_active_incident(user_id, channel_id, incident["incident_id"])
-            print(f"[incident-flow] Context manager updated active incident for {user_id}")
+            print(f"[context-update] Set active incident {incident['incident_id']} for user {user_id} in channel {channel_id}")
+            context_manager.advance_flow_state(user_id, channel_id, "incident", {"incident_id": incident["incident_id"], "stage": "active"})
+            print(f"[context-update] Set active incident {incident['incident_id']} for user {user_id} in channel {channel_id}")
+            try:
+                # Persist a convenient incident summary in context to aid later similarity checks
+                context_manager.update_context(user_id, channel_id, {"active_incident": incident["incident_id"], "incident_summary": (summary or "").strip()})
+            except Exception:
+                pass
         except Exception as e:
             print(f"[incident-flow] failed to update context manager: {e}")
         bids = generate_contractor_bids(classification.get("category", "general"))
@@ -808,7 +858,7 @@ def _handle_intelligent_message(
 
     print(f"[intelligent-handler] Intent: {intent}, Confidence: {confidence:.2f}")
 
-    # Auto-engage discovery flow for high-confidence incident reports
+        # Auto-engage discovery flow for high-confidence incident reports
     if intent in {"incident.report", "maintenance"} and confidence > 0.6:
         print("[intelligent-handler] 🚨 High confidence incident detected")
         preliminary_incident = {
@@ -819,6 +869,95 @@ def _handle_intelligent_message(
             "timestamp": time.time(),
         }
         channel_state.setdefault("incident_candidate", preliminary_incident)
+        # Before starting discovery, create a preliminary incident record and persist it
+        try:
+            from app.services.incident_flow import create_incident_record
+            from app.services.stream_bot import get_bot
+
+            tenant_email = (message.get("user") or {}).get("email") or (message.get("user") or {}).get("id") or "unknown"
+            user_id = (message.get("user") or {}).get("id") or tenant_email
+
+            # === Context check before creating new incident ===
+            try:
+                cm = get_context_manager()
+                analysis = smart_incident_context_analyzer(user_id, channel_id, message_text)
+                decision = analysis.get("decision")
+                reuse_incident = analysis.get("incident_id")
+                similarity = analysis.get("similarity", 0.0)
+            except Exception as exc:
+                print(f"[context-analyzer-error] {exc}")
+                decision, reuse_incident, similarity = ("create", None, 0.0)
+
+            if decision == "reuse" and reuse_incident:
+                print(f"[context-analyzer] Reusing existing incident {reuse_incident} (sim={similarity:.2f})")
+                return
+
+            elif decision == "close" and reuse_incident:
+                try:
+                    IncidentDB.update_incident_status(reuse_incident, "stale", user_id=user_id)
+                    cm = get_context_manager()
+                    cm.update_context(user_id, channel_id, {"active_incident": None})
+                    print(f"[context-analyzer] Closed old incident {reuse_incident} (sim={similarity:.2f})")
+                except Exception as e:
+                    print(f"[context-analyzer-error] Error closing old incident {reuse_incident}: {e}")
+                # continue to create a new one
+
+            elif decision == "ignore":
+                print(f"[context-analyzer] Ignored trivial message; skipping incident creation.")
+                return
+            # ==================================================
+
+            # Create preliminary incident (only if not reused/ignored)
+            try:
+                incident = create_incident_record(
+                    thread_id=channel_id,
+                    tenant_email=tenant_email,
+                    payload={
+                        "category": entities.get("category", "general"),
+                        "severity": entities.get("severity", "medium"),
+                        "urgency": entities.get("urgency", "routine"),
+                        "summary": message_text,
+                        "status": "detected",
+                    },
+                )
+                print(f"[incident-flow] Created preliminary incident {incident}")
+            except Exception as e:
+                print(f"[error][incident-flow] ❌ Incident creation failed in discovery path: {e}")
+                return
+
+            # Update context and flow state
+            try:
+                cm = get_context_manager()
+                cm.set_active_incident(user_id, channel_id, incident.get("incident_id"))
+                cm.advance_flow_state(user_id, channel_id, "incident", {"incident_id": incident.get("incident_id")})
+                print(f"[context-update] Active incident set for {user_id} on {channel_id}: {incident.get('incident_id')}")
+            except Exception as e:
+                print(f"[context-update] failed to update context: {e}")
+            try:
+                # Store the incident summary into context for future analyzer checks
+                cm.update_context(user_id, channel_id, {"active_incident": incident.get("incident_id"), "incident_summary": (message_text or "").strip()})
+            except Exception:
+                pass
+
+            # Send incident card to the channel via stream bot for visibility
+            try:
+                bot = get_bot()
+                bot.send_incident_card(
+                    channel_id=channel_id,
+                    persona=persona or "tenant",
+                    incident_data={
+                        **incident,
+                        "user_id": user_id,
+                        "tenant_name": (message.get("user") or {}).get("name"),
+                        "description": message_text,
+                    },
+                )
+            except Exception as e:
+                print(f"[stream-bot] failed to send incident card: {e}")
+
+        except Exception as e:
+            print(f"[error][incident-flow] ❌ Incident creation failed in discovery path: {e}")
+
         # Start discovery automatically
         _handle_discovery_message(client, channel, channel_state, {"text": "start discovery"}, persona)
         return
@@ -843,6 +982,100 @@ def _handle_intelligent_message(
         # General conversation, help, greeting, or unclear
         # Provide intelligent free-form response
         _send_conversational_response(client, channel_id, message_text, context, persona, intent_result)
+
+
+
+
+
+client = OpenAI()
+
+def cosine_similarity(vec1, vec2):
+    """Compute cosine similarity between two vectors (pure Python, no numpy)."""
+    if not vec1 or not vec2 or len(vec1) != len(vec2):
+        return 0.0
+    dot = sum(a * b for a, b in zip(vec1, vec2))
+    mag1 = math.sqrt(sum(a * a for a in vec1))
+    mag2 = math.sqrt(sum(b * b for b in vec2))
+    return dot / (mag1 * mag2) if mag1 and mag2 else 0.0
+
+
+def get_embedding_safe(text):
+    """Get text embedding with safe fallback."""
+    try:
+        return client.embeddings.create(input=text, model="text-embedding-3-small").data[0].embedding
+    except Exception as e:
+        print(f"[context-analyzer-error] embedding failed: {e}")
+        return []
+
+
+def smart_incident_context_analyzer(user_id: str, channel_id: str, message_text: str):
+    """
+    Semantic analyzer to decide whether to reuse, close, or create an incident.
+    Uses embeddings for meaning-based comparison and lexical ratio as fallback.
+    """
+    from app.services.context_manager import get_context_manager
+    from app.services.dynamo_service import IncidentDB
+
+    cm = get_context_manager()
+    context = cm.get_context(user_id, channel_id, create_if_missing=True) or {}
+    from pathlib import Path; Path("my_file.json").write_text("JSON_channel_data : "+json.dumps(context))
+    print(f"[context-analyzer] Context for user {user_id} on channel {channel_id}: {context}")
+    active_incident = context.get("active_incident")
+
+    if not active_incident:
+        print("[context-analyzer] no active incident; decision=create")
+        return {"decision": "create", "incident_id": None, "similarity": 0.0}
+
+    # Try to fetch existing summary
+    summary = (
+        context.get("incident_summary")
+        or context.get("summary")
+        or context.get("last_incident_summary")
+        or ""
+    )
+
+    if not summary:
+        try:
+            # Match your DynamoDB schema: both user_id + incident_id
+            incident_data = IncidentDB.get_incident(active_incident, user_id=user_id)
+            if incident_data and isinstance(incident_data, dict):
+                summary = incident_data.get("summary") or incident_data.get("description") or ""
+        except Exception as e:
+            print(f"[context-analyzer-warning] failed to fetch incident {active_incident}: {e}")
+
+    summary = summary.strip()
+    message_text = (message_text or "").strip()
+
+    if not summary or not message_text:
+        print("[context-analyzer] missing baseline text; decision=create")
+        return {"decision": "create", "incident_id": None, "similarity": 0.0}
+
+    # Compute semantic + lexical similarity
+    emb1, emb2 = get_embedding_safe(summary), get_embedding_safe(message_text)
+    sem_sim = cosine_similarity(emb1, emb2) if emb1 and emb2 else 0.0
+    lex_sim = SequenceMatcher(None, summary.lower(), message_text.lower()).ratio()
+    similarity = max(sem_sim, lex_sim)
+
+    # Apply thresholds
+    if similarity >= 0.80:
+        decision = "reuse"
+    elif similarity >= 0.60:
+        decision = "close"
+    else:
+        decision = "create"
+
+    print(f"[context-analyzer] active_incident={active_incident} "
+          f"semantic={sem_sim:.2f} lexical={lex_sim:.2f} "
+          f"→ similarity={similarity:.2f} decision={decision}")
+
+    # If reused, refresh context summary for next comparisons
+    if decision == "reuse":
+        try:
+            cm.update_context(user_id, channel_id, {"incident_summary": message_text})
+        except Exception as e:
+            print(f"[context-analyzer-warning] failed to update summary: {e}")
+
+    return {"decision": decision, "incident_id": active_incident, "similarity": similarity}
 
 
 def _send_conversational_response(
@@ -1155,6 +1388,7 @@ async def stream_webhook(request: Request):
 
 def summarize_channel_state(channel_state: Dict[str, Any]) -> Dict[str, Any]:
     """Extracts high-value keys for logging, dashboards, and AI context."""
+    from pathlib import Path; Path("my_file.json").write_text(json.dumps(channel_state))
     data = channel_state.get("channel", {}).get("data", {})
     meta = channel_state.get("metadata", {})
     return {

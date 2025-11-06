@@ -16,7 +16,7 @@ AGENT_ROLE = os.getenv("STREAM_AGENT_ROLE", "user")
 AGENT_PERSONA = os.getenv("STREAM_AGENT_PERSONA", "assistant")
 
 
-def ensure_agent_user(client: "StreamChat") -> Optional[str]:
+def ensure_agent_user(client: Any) -> Optional[str]:
     if StreamChat is None:
         return None
     if not AGENT_USER_ID:
@@ -54,12 +54,22 @@ def agent_reply(prompt: str, context: Optional[str], persona: Optional[str]) -> 
     return get_ai_response(combined, persona=persona, context=context)
 
 
-def post_agent_message(client: "StreamChat", channel_id: str, text: str, msg_type: str = "agent") -> None:
+def post_agent_message(client: Any, channel_id: str, text: str, msg_type: str = "agent") -> None:
     if StreamChat is None:
         raise RuntimeError("stream-chat SDK not installed")
     ensure_agent_user(client)
     channel = client.channel("messaging", channel_id)
     if msg_type not in ["regular", "system"]:
         msg_type = "regular"
-    print(f"[stream-bot] posting {msg_type} message to channel {channel_id}: {len(text)}")
-    channel.send_message({"text": text, "type": msg_type}, user_id=AGENT_USER_ID)
+    # If text is JSON-like with message + next_steps, use bot helper to render card
+    try:
+        from app.services.stream_bot import get_bot
+
+        bot = get_bot()
+        # Use send_ai_message which will detect JSON and render cards
+        bot.send_ai_message(channel_id=channel_id, persona=AGENT_PERSONA, text=text, metadata={"context_type": "agent"})
+        return
+    except Exception:
+        # Fallback to legacy behavior
+        print(f"[stream-bot] posting {msg_type} message to channel {channel_id}: {text}")
+        channel.send_message({"text": text, "type": msg_type}, user_id=AGENT_USER_ID)

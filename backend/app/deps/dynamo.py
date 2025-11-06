@@ -11,7 +11,9 @@ def get_dynamo_resource():
 
 
 def table_name(base: str) -> str:
-    prefix = os.getenv("TABLE_PREFIX", "landtenmvp")
+    prefix = os.getenv("TABLE_PREFIX", "landten")
     stage = os.getenv("STAGE", "dev")
-    return f"{prefix}_{stage}_{base}"
+    print(f"[dynamo] Using table prefix: {os.getenv('TABLE_PREFIX', 'landtenmvp')}, stage: {os.getenv('STAGE', 'dev')}")
+    print(f"[dynamo] Full table name: {prefix}_{base}")
+    return f"{prefix}_{base}"
 

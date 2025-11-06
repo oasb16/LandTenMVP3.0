@@ -33,6 +33,221 @@ from app.services.context_manager import get_context_manager
 import json
 import re
 
+
+def handle_ai_json_response(client, channel_id: str, bot_id: str, text: Any, metadata: Optional[Dict[str, Any]] = None) -> Optional[Dict]:
+    """
+    Detect JSON-like AI responses and render them as a 'custom_actions' card via send_card_message.
+
+    Returns the Stream response if sent, or None if fallback should be used.
+    """
+    # Idempotency: if metadata already indicates a card was sent, skip
+    try:
+        if metadata and metadata.get("ai_card_sent"):
+            return None
+    except Exception:
+        pass
+
+    # Parse input (handle dict/list or JSON string)
+    try:
+        parsed = None
+        if isinstance(text, (dict, list)):
+            parsed = text
+        else:
+            parsed = json.loads(text)
+    except Exception:
+        return None
+
+    if not parsed:
+        return None
+
+    # Normalize wrapper: support {"response": { ... }}
+    if isinstance(parsed, dict) and "response" in parsed and isinstance(parsed["response"], dict):
+        parsed = parsed["response"]
+
+    # If AI returned a JSON array (list of actions), render as a Next Steps card
+    if isinstance(parsed, (list, tuple)):
+        data = list(parsed)
+        if len(data) == 0:
+            return None
+
+        # Best-effort discovery/context metadata
+        extra_metadata = dict(metadata or {})
+        try:
+            chan = client.channel("messaging", channel_id)
+            state = chan.query()
+            chdata = state.get("channel", {}).get("data") or state.get("channel", {}).get("custom") or state.get("channel", {})
+            flow = None
+            if isinstance(chdata, dict):
+                flow = chdata.get("flow_state") or chdata.get("flow")
+            if isinstance(flow, dict) and flow.get("stage") == "discovery":
+                extra_metadata.setdefault("context_type", "discovery")
+        except Exception:
+            flow = None
+
+        # Build buttons from array elements (dicts or strings)
+        buttons = []
+        for idx, act in enumerate(data):
+            if isinstance(act, dict):
+                label = act.get("action") or act.get("text") or str(act)
+            else:
+                label = str(act)
+            step_text = label
+            slug = re.sub(r"[^a-z0-9_]+", "_", step_text.lower()).strip("_")[:80]
+            buttons.append({
+                "name": slug,
+                "text": step_text,
+                "style": "primary" if idx == 0 else "default",
+                "type": "custom_button",
+                "value": f"action:{slug}",
+            })
+
+        card_data = {
+            "type": "custom_actions",
+            "title": "Next Steps",
+            "text": "Here are the next recommended actions:",
+            "color": "#3b82f6",
+            "buttons": buttons,
+            "fallback": json.dumps(data),
+        }
+
+        extra_metadata["ai_card_sent"] = True
+        try:
+            print(f"[card-builder] Sending custom_actions card with {len(buttons)} buttons (from array)")
+            resp = send_card_message(client, channel_id, bot_id, card_data, message_text=card_data["text"], metadata=extra_metadata)
+            try:
+                print(f"[bot-message] user={bot_id} channel={channel_id} text={card_data['text'][:200]}")
+            except Exception:
+                pass
+            try:
+                cm = get_context_manager()
+                user_id = extra_metadata.get("user_id") or extra_metadata.get("tenant_id")
+                if user_id:
+                    cm.append_message(user_id, channel_id, "assistant", card_data["text"])
+            except Exception:
+                pass
+            return resp
+        except Exception as e:
+            print(f"[card-builder] Error sending custom_actions card from array: {e}")
+            return None
+
+    # Extract message and candidate step lists (support many alias keys)
+    message = parsed.get("message") or parsed.get("text") or parsed.get("body")
+
+    # Treat multiple next-step aliases as equivalent
+    next_step_keys = [
+        "next_steps",
+        "next_step",
+        "nextActions",
+        "next_actions",
+        "next_action",
+        "actions",
+        "steps",
+    ]
+
+    next_steps_raw = None
+    for k in next_step_keys:
+        if k in parsed and parsed.get(k) is not None:
+            next_steps_raw = parsed.get(k)
+            break
+
+    # Normalize single string into a list; accept lists/tuples as-is
+    next_steps = None
+    if isinstance(next_steps_raw, (list, tuple)):
+        next_steps = list(next_steps_raw)
+    elif isinstance(next_steps_raw, str):
+        next_steps = [next_steps_raw]
+    elif next_steps_raw is None:
+        next_steps = None
+    else:
+        # Fallback: coerce other types to string in a single-item list
+        try:
+            next_steps = [str(next_steps_raw)]
+        except Exception:
+            next_steps = None
+
+    if not message:
+        return None
+
+    # If we have no actionable steps but this is in discovery flow, create a continue button
+    has_steps = isinstance(next_steps, list) and len(next_steps) > 0
+
+    # Determine current channel flow to attach discovery metadata if applicable
+    extra_metadata = dict(metadata or {})
+    try:
+        chan = client.channel("messaging", channel_id)
+        state = chan.query()
+        chdata = state.get("channel", {}).get("data") or state.get("channel", {}).get("custom") or state.get("channel", {})
+        flow = None
+        if isinstance(chdata, dict):
+            flow = chdata.get("flow_state") or chdata.get("flow")
+        if isinstance(flow, dict) and flow.get("stage") == "discovery":
+            extra_metadata.setdefault("context_type", "discovery")
+    except Exception:
+        # best-effort, ignore failures
+        flow = None
+
+    # If we have explicit actionable steps, always render the Next Steps card
+    if not has_steps:
+        # If in discovery stage, provide a fallback Continue Discovery button
+        if isinstance(flow, dict) and flow.get("stage") == "discovery":
+            next_steps = ["Continue Discovery"]
+            has_steps = True
+        else:
+            # No steps to show and not in discovery -> nothing to build
+            return None
+
+    # Log detection
+    print("[json-detect] Found structured AI response with next_steps")
+
+    # Build buttons
+    buttons = []
+    for idx, step in enumerate(next_steps):
+        step_text = str(step)
+        slug = re.sub(r"[^a-z0-9_]+", "_", step_text.lower()).strip("_")[:80]
+        buttons.append({
+            "name": slug,
+            "text": step_text,
+            "style": "primary" if idx == 0 else "default",
+            "type": "custom_button",
+            "value": f"action:{slug}",
+        })
+
+    card_data = {
+        "type": "custom_actions",
+        "title": "Next Steps",
+        "text": message,
+        "color": "#3b82f6",
+        "buttons": buttons,
+        "fallback": message,
+    }
+
+    # Mark that we attempted to send a card to avoid duplicate sends
+    extra_metadata["ai_card_sent"] = True
+
+    try:
+        print(f"[card-builder] Sending custom_actions card with {len(buttons)} buttons")
+        resp = send_card_message(client, channel_id, bot_id, card_data, message_text=message, metadata=extra_metadata)
+
+        # Log bot-message short preview
+        try:
+            print(f"[bot-message] user={bot_id} channel={channel_id} text={message[:200]}")
+        except Exception:
+            pass
+
+        # Append assistant message to context if we can find a user id
+        try:
+            cm = get_context_manager()
+            user_id = extra_metadata.get("user_id") or extra_metadata.get("tenant_id")
+            if user_id:
+                cm.append_message(user_id, channel_id, "assistant", message)
+        except Exception:
+            pass
+
+        return resp
+    except Exception as e:
+        print(f"[card-builder] Error sending custom_actions card: {e}")
+        return None
+
 def is_ai_trojan_message(text: str) -> bool:
     return bool(re.match(r"^\[AI_TYPE:.*?\]", text or ""))
 
@@ -133,23 +348,40 @@ class PropertyAIBot:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict]:
         """Send a message from an AI bot to a channel with natural formatting."""
+        # Build channel reference
+        channel = self.client.channel("messaging", channel_id)
+
+        # Ensure text is a plain human-readable string; coerce complex objects to JSON
+        if text is None:
+            text_str = ""
+        elif isinstance(text, (dict, list)):
+            try:
+                text_str = json.dumps(text, ensure_ascii=False)
+            except Exception:
+                text_str = str(text)
+        else:
+            text_str = str(text)
+
+        # Safety net: avoid empty text payloads when only attachments are present
+        if not text_str or not text_str.strip():
+            text_str = "(no text)"
+
+        payload: Dict[str, Any] = {
+            "text": text_str,
+            "type": "regular",
+            "ai_type": internal_type,
+        }
+
+        if attachments:
+            payload["attachments"] = attachments
+        if custom_data:
+            payload.update(custom_data)
+        if metadata:
+            payload["metadata"] = metadata
+
+        # Log bot messages for observability and keep text readable
+        print(f"[bot-message] user={bot_id} channel={channel_id} text={text_str[:1000]}")
         try:
-            channel = self.client.channel("messaging", channel_id)
-
-            payload: Dict[str, Any] = {
-                "text": text,
-                "type": "regular",
-                "ai_type": internal_type,
-            }
-
-            if attachments:
-                payload["attachments"] = attachments
-            if custom_data:
-                payload.update(custom_data)
-            if metadata:
-                payload["metadata"] = metadata
-
-            print(f"[stream-bot] send_message -> {channel_id} [{bot_id}] :: {text}")
             response = channel.send_message(payload, user_id=bot_id)
             return response
         except Exception as e:  # pragma: no cover - network path
@@ -165,6 +397,15 @@ class PropertyAIBot:
     ) -> Optional[Dict]:
         """Convenience wrapper for conversational replies."""
         bot_id = self.get_bot_id(persona)
+        # Try the centralized JSON -> card handler first
+        try:
+            resp = handle_ai_json_response(self.client, channel_id, bot_id, text, metadata=metadata)
+            if resp is not None:
+                return resp
+        except Exception as e:
+            print(f"[card-builder] handler error: {e}")
+
+        # Fallback to plain text message
         return self.send_message(
             channel_id=channel_id,
             bot_id=bot_id,
@@ -333,6 +574,14 @@ Current conversation context: {context if context else 'New conversation'}
                 return None
 
             print(f"[stream-bot] Handling message from {user_name} ({user_id}) in channel {channel_id} as persona {persona}: {message_text} with type {message_type}")
+            # Optional: auto-run AI JSON -> card test on each incoming message for debugging
+            try:
+                if os.getenv("STREAM_AI_JSON_AUTO_TEST") == "1":
+                    print("[stream-bot] STREAM_AI_JSON_AUTO_TEST=1 -> running test_ai_json_flow()")
+                    test_resp = self.test_ai_json_flow(channel_id, persona)
+                    print(f"[stream-bot] test_ai_json_flow returned: {test_resp}")
+            except Exception as exc:
+                print(f"[stream-bot] Error running test_ai_json_flow: {exc}")
             # Check if message is an action trigger
             if message_text.startswith("action:") or "@agent action:" in message_text:
                 action_value = message_text.replace("@agent ", "").strip()
@@ -409,10 +658,6 @@ Current conversation context: {context if context else 'New conversation'}
 
         Action format: "action:action_name:param1:param2"
         """
-        print(f"[stream-bot] ========== ACTION RECEIVED ==========")
-        print(f"[stream-bot] Raw action value: {action_value}")
-        print(f"[stream-bot] User: {user_id}, Channel: {channel_id}, Persona: {persona}")
-
         try:
             parts = action_value.split(":")
             if len(parts) < 2 or parts[0] != "action":
@@ -422,7 +667,7 @@ Current conversation context: {context if context else 'New conversation'}
             action_name = parts[1]
             params = parts[2:] if len(parts) > 2 else []
 
-            print(f"[stream-bot] → Routing to handler: {action_name} with params: {params}")
+            print(f"[stream-bot] action -> {channel_id} name={action_name} params={params}")
 
             # Route to appropriate handler
             if action_name == "start_discovery":
@@ -442,7 +687,6 @@ Current conversation context: {context if context else 'New conversation'}
             else:
                 print(f"[stream-bot] Unknown action: {action_name}")
                 return None
-
         except Exception as e:
             print(f"[stream-bot] Error handling action: {e}")
             return None
@@ -485,6 +729,21 @@ Current conversation context: {context if context else 'New conversation'}
             discovery_card
         )
 
+    def test_ai_json_flow(self, channel_id: str, persona: str):
+        """Utility to run a small AI JSON -> card flow for quick verification.
+
+        This is intentionally small and opt-in via STREAM_AI_JSON_AUTO_TEST=1.
+        It constructs a sample payload and routes it through handle_ai_json_response().
+        """
+        payload = {
+            "message": "Please follow these steps",
+            "next_action": "Gather photos of the damage"
+        }
+        text = json.dumps(payload)
+        bot_id = self.get_bot_id(persona)
+        print(f"[stream-bot] test_ai_json_flow -> sending sample payload as {bot_id} to {channel_id}")
+        return handle_ai_json_response(self.client, channel_id, bot_id, text, metadata={"user_id": "test-user"})
+
     def _handle_upload_photos(self, channel_id, user_id, persona, params):
         """Handle upload photos action"""
         bot_id = self.get_bot_id(persona)
@@ -507,7 +766,7 @@ Current conversation context: {context if context else 'New conversation'}
         print(f"[PropertyAIBot] Creating work order - incident: {incident_id}, job: {job_id}")
 
         # Get incident data if available
-        incident_data = IncidentDB.get_incident(incident_id) if incident_id else None
+        incident_data = IncidentDB.get_incident(incident_id, user_id=user_id) if incident_id else None
 
         # Determine category, cost, urgency from incident or use defaults
         category = incident_data.get("category", "plumbing") if incident_data else "plumbing"
@@ -541,7 +800,7 @@ Current conversation context: {context if context else 'New conversation'}
 
             # Update incident status to work_order
             if incident_id:
-                IncidentDB.update_incident_status(incident_id, "work_order", job_id=job_id)
+                IncidentDB.update_incident_status(incident_id, "work_order", user_id=user_id ,job_id=job_id)
                 print(f"[PropertyAIBot] Updated incident {incident_id} status to work_order")
 
         except Exception as e:

@@ -30,7 +30,7 @@ router = APIRouter()
 
 DISCOVERY_QUESTIONS = [
     "Is the water still flowing right now?",
-    "Where exactly is the leak located?",
+    "Where exactly is the issue located?",
     "When did you first notice the issue?",
     "Are there any electrical outlets or appliances nearby?",
 ]
