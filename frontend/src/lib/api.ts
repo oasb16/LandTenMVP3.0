@@ -426,3 +426,99 @@ export async function getAIBotStatus(): Promise<AIBotStatus> {
 
   return await response.json();
 }
+
+// ==================== PAYMENTS ====================
+
+export interface BankAccountDetails {
+  contractor_id: string;
+  account_number: string;
+  routing_number: string;
+  account_holder_name: string;
+  account_holder_type?: string;
+}
+
+export interface PaymentInfo {
+  contractor_id: string;
+  payment_enabled: boolean;
+  bank_account_last4?: string;
+  bank_account_status?: string;
+  has_stripe_account: boolean;
+}
+
+export interface PaymentRequest {
+  contractor_id: string;
+  amount: number;
+  description: string;
+  job_id?: string;
+  incident_id?: string;
+}
+
+export interface PaymentResponse {
+  status: string;
+  transfer_id: string;
+  amount: number;
+  contractor_id: string;
+  contractor_name?: string;
+  description: string;
+  transfer_status: string;
+}
+
+/**
+ * Add bank account details for a contractor
+ */
+export async function addBankAccount(details: BankAccountDetails): Promise<any> {
+  const backendUrl = getBackendUrl();
+  if (!backendUrl) throw new Error('Backend URL not configured');
+
+  const response = await fetch(`${backendUrl}/contractor/bank-account`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify(details),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Failed to add bank account: ${response.statusText}`);
+  }
+
+  return await response.json();
+}
+
+/**
+ * Get payment information for a contractor
+ */
+export async function getPaymentInfo(contractorId: string): Promise<PaymentInfo> {
+  const backendUrl = getBackendUrl();
+  if (!backendUrl) throw new Error('Backend URL not configured');
+
+  const response = await fetch(`${backendUrl}/contractor/payment-info/${encodeURIComponent(contractorId)}`, {
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to get payment info: ${response.statusText}`);
+  }
+
+  return await response.json();
+}
+
+/**
+ * Initiate a payment from landlord to contractor
+ */
+export async function initiatePayment(payment: PaymentRequest): Promise<PaymentResponse> {
+  const backendUrl = getBackendUrl();
+  if (!backendUrl) throw new Error('Backend URL not configured');
+
+  const response = await fetch(`${backendUrl}/contractor/payment/initiate`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify(payment),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Failed to initiate payment: ${response.statusText}`);
+  }
+
+  return await response.json();
+}
