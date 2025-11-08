@@ -1,0 +1,5 @@
+version: 3
+agent:
+  authtoken: 3555QDl9JXvdDD5bxS9PTZgsGsP_R2ALsKaoRiJ679b16b8z
+  log_level: info
+  log_format: logfmt

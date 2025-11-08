@@ -341,8 +341,9 @@ export function StreamChatProvider({ children }: { children: ReactNode }) {
         let tokenData = getCachedToken(userEmail, userPersona);
 
         if (!tokenData) {
-          console.log("[StreamChat] Fetching new token from /api/chat/token");
-          const tokenRes = await fetch("/api/chat/token");
+          const tokenUrl = "/api/chat/token";
+          console.log("[StreamChat] Fetching new token from local API", tokenUrl);
+          const tokenRes = await fetch(tokenUrl);
           if (!tokenRes.ok) {
             const problem = await tokenRes.json().catch(() => ({}));
             throw new Error(problem.error || "Unable to fetch Stream token");

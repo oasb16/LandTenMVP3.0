@@ -59,6 +59,8 @@ def post_agent_message(client: Any, channel_id: str, text: str, msg_type: str = 
         raise RuntimeError("stream-chat SDK not installed")
     ensure_agent_user(client)
     channel = client.channel("messaging", channel_id)
+    channel_type, channel_id = (tuple(channel_id.split(":", 1)) if ":" in channel_id else ("messaging", channel_id)); channel = client.channel(channel_type, channel_id)
+    print(f"[stream-bot] Preparing to post {msg_type} message to channel {channel_id} to channel type {channel_type}")
     if msg_type not in ["regular", "system"]:
         msg_type = "regular"
     # If text is JSON-like with message + next_steps, use bot helper to render card

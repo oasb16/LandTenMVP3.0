@@ -580,6 +580,8 @@ def send_card_message(
     """
     try:
         channel = client.channel("messaging", channel_id)
+        channel_type, channel_id = (tuple(channel_id.split(":", 1)) if ":" in channel_id else ("messaging", channel_id)); channel = client.channel(channel_type, channel_id)
+        print(f"[card-builder] Preparing to send card to channel {channel_id} to channel type {channel_type}")
 
         message: Dict[str, Any] = {
             "text": message_text or card_data.get("text", ""),

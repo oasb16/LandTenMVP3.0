@@ -20,6 +20,37 @@ const authConfig: NextAuthConfig = {
       },
     }),
   ],
+  // Trust host and global error redirect safeguard
+  trustHost: true,
+  pages: {
+    error: "/auth/error",
+  },
+  // Provide a logger to capture NextAuth internal errors in a typed way
+  logger: {
+    error: (error: Error) => {
+      try {
+        console.error("[auth][critical-error]", error?.message || error, error);
+      } catch (e) {
+        // swallow
+      }
+    },
+    warn: (message: string) => {
+      try {
+        console.warn("[auth][warn]", message);
+      } catch (e) {
+        // swallow
+      }
+    },
+    debug: (message: string) => {
+      if (process.env.NODE_ENV !== "production") {
+        try {
+          console.debug("[auth][debug]", message);
+        } catch (e) {
+          // swallow
+        }
+      }
+    },
+  },
   cookies: {
     pkceCodeVerifier: {
       name: "next-auth.pkce.code_verifier",
@@ -31,8 +62,7 @@ const authConfig: NextAuthConfig = {
       },
     },
   },
-  debug: process.env.NODE_ENV === "development",
-  trustHost: true,
+  debug: process.env.NODE_ENV !== "production",
   callbacks: {
     async jwt({ token, trigger, session, account, profile }) {
       if (account?.provider === "google" && profile?.email) {

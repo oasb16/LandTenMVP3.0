@@ -890,6 +890,9 @@ def _handle_intelligent_message(
 
             if decision == "reuse" and reuse_incident:
                 print(f"[context-analyzer] Reusing existing incident {reuse_incident} (sim={similarity:.2f})")
+                reply = f"Noted. Continuing with existing incident {reuse_incident}."
+                cm.update_context(user_id, channel_id, {"active_incident": reuse_incident})
+                post_agent_message(client, channel_id, reply)                
                 return
 
             elif decision == "close" and reuse_incident:
@@ -921,6 +924,8 @@ def _handle_intelligent_message(
                     },
                 )
                 print(f"[incident-flow] Created preliminary incident {incident}")
+                cm.update_context(user_id, channel_id, {"active_incident": incident.get("incident_id")})
+                print(f"[context-update] Set active incident {incident.get('incident_id')} for user {user_id} in channel {channel_id}")
             except Exception as e:
                 print(f"[error][incident-flow] ❌ Incident creation failed in discovery path: {e}")
                 return
@@ -1223,7 +1228,7 @@ def _handle_action_message(
 
 
 @router.post("/chat/stream/webhook")
-@router.post("/ai/stream-webhook")  # Alternative path for compatibility
+# @router.post("/ai/stream-webhook")  # Alternative path for compatibility
 async def stream_webhook(request: Request):
     """
     Stream Chat webhook endpoint that receives message.new and other events.

@@ -282,7 +282,10 @@ function MessageInputWithWebhook({ agentEnabled }: { agentEnabled: boolean }) {
             channel_type: 'messaging',
           };
 
-          const res = await fetch('http://localhost:8080/ai/stream-webhook', {
+          const backendBase = process.env.NEXT_PUBLIC_BACKEND_URL?.replace(/\/api$/, '') || window.location.origin;
+          console.log("[MessageInputWithWebhook] Posting to webhook at", `${backendBase}/ai/stream-webhook`, "with payload:", payload);
+          const res = await fetch(`${backendBase}/ai/stream-webhook`, {
+
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),

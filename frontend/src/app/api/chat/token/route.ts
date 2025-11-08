@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 
-const backendBase = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || "";
+// Use internal backend URL for server-side proxying (prefer BACKEND_INTERNAL_URL, then BACKEND_URL)
+const backendBase = (process.env.BACKEND_INTERNAL_URL || process.env.BACKEND_URL || "http://localhost:8080").replace(/\/$/, "");
 
 export async function GET() {
   const session = await auth();
@@ -15,11 +16,10 @@ export async function GET() {
   if (!persona) {
     return NextResponse.json({ error: "Persona not set" }, { status: 400 });
   }
-  const query = new URLSearchParams({
-    user_id: session.user.email,
-    persona,
-  });
-  const res = await fetch(`${backendBase}/chat/stream/token?${query.toString()}`);
+  const user_id = session.user.email as string;
+  const url = `${backendBase}/chat/stream/token?user_id=${encodeURIComponent(user_id)}&persona=${encodeURIComponent(persona)}`;
+  console.log("[chat-token] Proxying token request to backend:", url);
+  const res = await fetch(url);
   if (!res.ok) {
     return NextResponse.json({ error: await res.text() }, { status: res.status });
   }

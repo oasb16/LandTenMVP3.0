@@ -1109,6 +1109,8 @@ async def initialize_ai_channel(request: Request):
         # --- Ensure channel exists or create it ---
         try:
             channel = client.channel("messaging", channel_id)
+            channel_type, channel_id = (tuple(channel_id.split(":", 1)) if ":" in channel_id else ("messaging", channel_id)); channel = client.channel(channel_type, channel_id)
+            print(f"[ai-webhook] Checking existence of channel '{channel_id}'... channel_type={channel_type}") 
             channel.query()  # check existence
             print(f"[ai-webhook] Channel '{channel_id}' already exists.")
         except Exception:

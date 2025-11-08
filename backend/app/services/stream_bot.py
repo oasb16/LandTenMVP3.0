@@ -350,6 +350,7 @@ class PropertyAIBot:
         """Send a message from an AI bot to a channel with natural formatting."""
         # Build channel reference
         channel = self.client.channel("messaging", channel_id)
+        print(f"[stream-bot] Preparing to send {internal_type} message to channel {channel_id}")
 
         # Ensure text is a plain human-readable string; coerce complex objects to JSON
         if text is None:
