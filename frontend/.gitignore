@@ -12,6 +12,9 @@
 
 # testing
 /coverage
+backend/.env
+backend/.env.local
+backend/.env.example
 
 # next.js
 /.next/
