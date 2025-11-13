@@ -74,4 +74,6 @@ def post_agent_message(client: Any, channel_id: str, text: str, msg_type: str = 
     except Exception:
         # Fallback to legacy behavior
         print(f"[stream-bot] posting {msg_type} message to channel {channel_id}: {text}")
+        channel_type, channel_id = (tuple(channel_id.split(":", 1)) if ":" in channel_id else ("messaging", channel_id))
+        print(f"[stream-bot] Sending message to channel {channel_id} of type {channel_type}")
         channel.send_message({"text": text, "type": msg_type}, user_id=AGENT_USER_ID)

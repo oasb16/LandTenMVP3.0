@@ -115,7 +115,7 @@ def handle_ai_json_response(client, channel_id: str, bot_id: str, text: Any, met
             print(f"[card-builder] Sending custom_actions card with {len(buttons)} buttons (from array)")
             resp = send_card_message(client, channel_id, bot_id, card_data, message_text=card_data["text"], metadata=extra_metadata)
             try:
-                print(f"[bot-message] user={bot_id} channel={channel_id} text={card_data['text'][:200]}")
+                print(f"[bot-message] From handle_ai_json_response, user={bot_id} channel={channel_id} text={card_data['text'][:200]}")
             except Exception:
                 pass
             try:
@@ -127,7 +127,7 @@ def handle_ai_json_response(client, channel_id: str, bot_id: str, text: Any, met
                 pass
             return resp
         except Exception as e:
-            print(f"[card-builder] Error sending custom_actions card from array: {e}")
+            print(f"[card-builder] ❌ Error sending custom_actions card from array: {e}")
             return None
 
     # Extract message and candidate step lists (support many alias keys)
@@ -230,7 +230,7 @@ def handle_ai_json_response(client, channel_id: str, bot_id: str, text: Any, met
 
         # Log bot-message short preview
         try:
-            print(f"[bot-message] user={bot_id} channel={channel_id} text={message[:200]}")
+            print(f"[bot-message] From handle_ai_json_responsem, user={bot_id} channel={channel_id} text={message[:200]}")
         except Exception:
             pass
 
@@ -245,7 +245,7 @@ def handle_ai_json_response(client, channel_id: str, bot_id: str, text: Any, met
 
         return resp
     except Exception as e:
-        print(f"[card-builder] Error sending custom_actions card: {e}")
+        print(f"[card-builder] ❌ Error sending custom_actions card: {e}")
         return None
 
 def is_ai_trojan_message(text: str) -> bool:
@@ -303,7 +303,7 @@ class PropertyAIBot:
                 })
                 print(f"[stream-bot] Created/updated bot: {config['name']} ({config['id']})")
             except Exception as e:
-                print(f"[stream-bot] Error creating bot {config['id']}: {e}")
+                print(f"[stream-bot] ❌ Error creating bot {config['id']}: {e}")
 
     def get_bot_id(self, persona: str) -> str:
         """Get bot ID for a persona"""
@@ -313,6 +313,8 @@ class PropertyAIBot:
         """Add appropriate AI bot to a channel"""
         try:
             bot_id = self.get_bot_id(persona)
+            channel_type, channel_id = (tuple(channel_id.split(":", 1)) if ":" in channel_id else ("messaging", channel_id))
+            print(f"[stream-bot] add_bot_to_channel for channel {channel_id} of type {channel_type}")
             channel = self.client.channel("messaging", channel_id)
 
             # Add bot as member with moderator privileges
@@ -334,7 +336,7 @@ class PropertyAIBot:
 
             return True
         except Exception as e:
-            print(f"[stream-bot] Error adding bot to channel {channel_id}: {e}")
+            print(f"[stream-bot] ❌ Error adding bot to channel {channel_id}: {e}")
             return False
 
     def send_message(
@@ -349,6 +351,8 @@ class PropertyAIBot:
     ) -> Optional[Dict]:
         """Send a message from an AI bot to a channel with natural formatting."""
         # Build channel reference
+        channel_type, channel_id = (tuple(channel_id.split(":", 1)) if ":" in channel_id else ("messaging", channel_id))
+        print(f"[stream-bot] Sending message to channel {channel_id} of type {channel_type}")
         channel = self.client.channel("messaging", channel_id)
         print(f"[stream-bot] Preparing to send {internal_type} message to channel {channel_id}")
 
@@ -381,12 +385,12 @@ class PropertyAIBot:
             payload["metadata"] = metadata
 
         # Log bot messages for observability and keep text readable
-        print(f"[bot-message] user={bot_id} channel={channel_id} text={text_str[:1000]}")
+        print(f"[bot-message] From send_message user={bot_id} channel={channel_id} text={text_str[:1000]}")
         try:
             response = channel.send_message(payload, user_id=bot_id)
             return response
         except Exception as e:  # pragma: no cover - network path
-            print(f"[stream-bot] Error sending message: {e}")
+            print(f"[stream-bot] ❌ Error sending message: {e}")
             return None
 
     def send_ai_message(
@@ -537,6 +541,8 @@ Current conversation context: {context if context else 'New conversation'}
     def get_channel_persona(self, channel_id: str) -> Optional[str]:
         """Determine persona from channel metadata"""
         try:
+            channel_type, channel_id = (tuple(channel_id.split(":", 1)) if ":" in channel_id else ("messaging", channel_id))
+            print(f"[stream-bot] get_channel_persona for channel {channel_id} of type {channel_type}")
             channel = self.client.channel("messaging", channel_id)
             channel_data = channel.query()
 
@@ -544,7 +550,7 @@ Current conversation context: {context if context else 'New conversation'}
             custom_data = channel_data.get("channel", {}).get("custom", {})
             return custom_data.get("persona")
         except Exception as e:
-            print(f"[stream-bot] Error getting channel persona: {e}")
+            print(f"[stream-bot] ❌ Error getting channel persona: {e}")
             return None
 
     def handle_message_event(self, event_data: Dict[str, Any]) -> Optional[Dict]:
@@ -582,7 +588,7 @@ Current conversation context: {context if context else 'New conversation'}
                     test_resp = self.test_ai_json_flow(channel_id, persona)
                     print(f"[stream-bot] test_ai_json_flow returned: {test_resp}")
             except Exception as exc:
-                print(f"[stream-bot] Error running test_ai_json_flow: {exc}")
+                print(f"[stream-bot] ❌ Error running test_ai_json_flow: {exc}")
             # Check if message is an action trigger
             if message_text.startswith("action:") or "@agent action:" in message_text:
                 action_value = message_text.replace("@agent ", "").strip()
@@ -644,7 +650,7 @@ Current conversation context: {context if context else 'New conversation'}
             )
 
         except Exception as e:
-            print(f"[stream-bot] Error handling message event: {e}")
+            print(f"[stream-bot] ❌ Error handling message event: {e}")
             return None
 
     def handle_action(
@@ -662,7 +668,7 @@ Current conversation context: {context if context else 'New conversation'}
         try:
             parts = action_value.split(":")
             if len(parts) < 2 or parts[0] != "action":
-                print(f"[stream-bot] Invalid action format: {action_value}")
+                print(f"[stream-bot] ❌ Invalid action format: {action_value}")
                 return None
 
             action_name = parts[1]
@@ -689,7 +695,7 @@ Current conversation context: {context if context else 'New conversation'}
                 print(f"[stream-bot] Unknown action: {action_name}")
                 return None
         except Exception as e:
-            print(f"[stream-bot] Error handling action: {e}")
+            print(f"[stream-bot] ❌ Error handling action: {e}")
             return None
 
     def _handle_start_discovery(self, channel_id, user_id, persona, params):
@@ -805,7 +811,7 @@ Current conversation context: {context if context else 'New conversation'}
                 print(f"[PropertyAIBot] Updated incident {incident_id} status to work_order")
 
         except Exception as e:
-            print(f"[PropertyAIBot] ERROR persisting job to DynamoDB: {e}")
+            print(f"[PropertyAIBot] ❌ Error persisting job to DynamoDB: {e}")
             # Continue anyway - don't block UI
 
         # Send confirmation message
@@ -889,7 +895,7 @@ Current conversation context: {context if context else 'New conversation'}
                 })
                 print(f"[PropertyAIBot] Bid persisted to DynamoDB: {bid_id} from {contractor_name}")
             except Exception as e:
-                print(f"[PropertyAIBot] ERROR persisting bid to DynamoDB: {e}")
+                print(f"[PropertyAIBot] ❌ Error persisting bid to DynamoDB: {e}")
                 # Continue anyway - don't block UI
 
         # Send bids card
@@ -939,7 +945,7 @@ Current conversation context: {context if context else 'New conversation'}
                 print(f"[PropertyAIBot] Updated incident {incident_id} status to scheduled")
 
         except Exception as e:
-            print(f"[PropertyAIBot] ERROR updating job in DynamoDB: {e}")
+            print(f"[PropertyAIBot] ❌ Error updating job in DynamoDB: {e}")
             # Continue anyway - don't block UI
 
         # Send approval card

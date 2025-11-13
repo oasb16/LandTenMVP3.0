@@ -1,8 +1,11 @@
-import React, { memo, useMemo } from "react";
-import { MessageCircle, TriangleAlert } from "lucide-react";
+import React, { memo, useMemo, useState } from "react";
+import { MessageCircle, TriangleAlert, Plus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useStreamChat } from "@/hooks/chat/StreamChatContext";
+// import { auth } from "@/utils/firebase";
+import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 
 const stageTone = (stage: string | null | undefined) => {
   if (!stage) return "bg-slate-800/60 text-slate-200 border border-slate-700/40";
@@ -27,11 +30,20 @@ const formatSnippet = (text: string | undefined) => {
 };
 
 function ConversationListComponent() {
-  const { channels, activeChannel, selectChannel, flowState } = useStreamChat();
+  const { client, channels, activeChannel, selectChannel, flowState } = useStreamChat();
+  const { data: session } = useSession();
+  const router = useRouter();
+  const [creating, setCreating] = useState(false);
+  const [localChannels, setLocalChannels] = useState<any[]>([]);
+  // simple inline toast state as a fallback to a global toast provider
+  const [toast, setToast] = useState<{ id: number; message: string } | null>(null);
 
   const items = useMemo(
-    () =>
-      channels.map((channel) => {
+    () => {
+      // Merge locally-created channels (optimistic) with the canonical channels
+      const merged = [...localChannels, ...channels.filter((c) => !localChannels.find((lc) => lc.cid === c.cid))];
+
+      return merged.map((channel) => {
         const lastMessage = channel.state.messages.at(-1);
         const channelData = (channel.data ?? {}) as Record<string, unknown>;
         const flowMeta = (channelData.flow_state as Record<string, unknown> | undefined) ?? {};
@@ -46,9 +58,50 @@ function ConversationListComponent() {
           stage: stageFromChannel,
           severity,
         };
-      }),
-    [channels, flowState?.incidentId, flowState?.stage],
+      });
+    },
+    [channels, flowState?.incidentId, flowState?.stage, localChannels],
   );
+
+  const handleNewChat = async () => {
+    if (!client) {
+      setToast({ id: Date.now(), message: "Chat client not ready — please try again in a moment." });
+      return;
+    }
+    setCreating(true);
+    try {
+      const payload = {
+        creator: session?.user?.email,
+        participants: [session?.user?.email],
+        persona: session?.user?.persona ?? "tenant",
+        include_agent: true,
+        extra_data: { initiated_by: session?.user?.email },
+      };
+
+      const res = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL?.replace(/\/api$/, "")}/chat/stream/thread`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) throw new Error(`Backend error: ${res.status}`);
+      const data = await res.json();
+
+      const channelId = data.channel_id || data.channel?.id;
+      const streamChannel = client.channel("messaging", channelId);
+      await streamChannel.watch();
+
+      setLocalChannels((prev) => [streamChannel, ...prev]);
+      selectChannel(streamChannel);
+      router.push(`/dashboard/${session?.user?.persona ?? "tenant"}?cid=${channelId}`);
+    } catch (err) {
+      console.error("Failed to create thread", err);
+      setToast({ id: Date.now(), message: "Failed to create new chat — please try again." });
+    } finally {
+      setCreating(false);
+    }
+  };
+
 
   return (
     <div className="flex h-full flex-col gap-4">
@@ -57,10 +110,22 @@ function ConversationListComponent() {
           <h2 className="text-base font-semibold text-slate-100">Active Conversations</h2>
           <p className="text-xs text-slate-400">Monitor AI-guided flows across your portfolio.</p>
         </div>
-        <Badge className="bg-slate-800/80 text-slate-200">
-          <MessageCircle className="mr-1 h-3.5 w-3.5" />
-          {items.length}
-        </Badge>
+        <div className="flex items-center gap-3">
+          <Badge className="bg-slate-800/80 text-slate-200">
+            <MessageCircle className="mr-1 h-3.5 w-3.5" />
+            {items.length}
+          </Badge>
+
+          <button
+            type="button"
+            onClick={handleNewChat}
+            disabled={creating}
+            className={`inline-flex items-center gap-2 rounded-md px-3 py-1 text-sm font-medium transition disabled:opacity-60 disabled:pointer-events-none bg-emerald-600/90 hover:bg-emerald-600/100 text-white`}
+          >
+            <Plus className="h-4 w-4" />
+            {creating ? "Creating…" : "New Chat"}
+          </button>
+        </div>
       </div>
 
       <ScrollArea className="flex-1 rounded-2xl border border-slate-800/60 bg-slate-900/40 p-2">
@@ -107,3 +172,4 @@ function ConversationListComponent() {
 }
 
 export const ConversationList = memo(ConversationListComponent);
+

@@ -62,13 +62,14 @@ class PolicyValidator:
         return {
             Persona.TENANT.value: {
                 "allowed_intents": [
+                    "report_issue",
                     "incident.report",
                     "incident.followup",
                     "discovery.response",
-                "discovery.continue",
-                "job.request",
-                "job.inquiry",
-                "job.status",
+                    "discovery.continue",
+                    "job.request",
+                    "job.inquiry",
+                    "job.status",
                     "general.chat",
                     "greeting",
                     "help"
@@ -194,11 +195,14 @@ class PolicyValidator:
         policy = self.policies[persona]
         allowed_intents = policy.get("allowed_intents", [])
 
+        print(f"[policy-validator] Validating intent '{intent}' for persona '{persona}'")
+
         if intent in allowed_intents:
             return True, None
 
         # Check if this is a forbidden intent with a custom message
         message = self._get_violation_message(intent, persona)
+        print(f"[policy-validator] Intent '{intent}' blocked for {persona}: {message}")
         return False, message
 
     def validate_action(self, action: str, persona: str) -> Tuple[bool, Optional[str]]:
@@ -219,8 +223,10 @@ class PolicyValidator:
         forbidden_actions = policy.get("forbidden_actions", [])
 
         if action in forbidden_actions:
+            print(f"[policy-validator] Action '{action}' is not allower for {persona} for policy: {policy}")
             message = self._get_violation_message(action, persona)
             return False, message
+
 
         return True, None
 
@@ -341,6 +347,7 @@ class PolicyValidator:
         }
 
         persona_messages = messages.get(persona, {})
+        print(f"[policy-validator] Violation message for {persona} on {intent_or_action}")
         return persona_messages.get(intent_or_action, persona_messages.get("default", "That action isn't allowed by your account type."))
 
     def validate_response(

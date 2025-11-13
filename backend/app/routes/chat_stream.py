@@ -746,7 +746,7 @@ def post_agent_reply(req: AgentMessageRequest, token: str = Depends(verify_fireb
         )
         print(f"[agent_reply] AI response posted to channel {req.channel_id}")
     except (KeyError, StreamAPIException) as exc:
-        print(f"[agent_reply] ERROR: failed to post agent reply: {exc}")
+        print(f"[agent_reply] ❌ ERROR: failed to post agent reply: {exc}")
         raise HTTPException(status_code=500, detail=f"Stream error posting agent reply: {exc}")
 
     # Trigger PropertyAIBot incident detection
@@ -902,7 +902,7 @@ def _handle_intelligent_message(
                     cm.update_context(user_id, channel_id, {"active_incident": None})
                     print(f"[context-analyzer] Closed old incident {reuse_incident} (sim={similarity:.2f})")
                 except Exception as e:
-                    print(f"[context-analyzer-error] Error closing old incident {reuse_incident}: {e}")
+                    print(f"[context-analyzer-error] ❌ Error closing old incident {reuse_incident}: {e}")
                 # continue to create a new one
 
             elif decision == "ignore":

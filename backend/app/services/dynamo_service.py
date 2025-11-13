@@ -114,7 +114,7 @@ class IncidentDB:
             print(f"[IncidentDB] Created incident: {item['incident_id']}")
             return decimal_to_float(item)
         except Exception as e:
-            print(f"[IncidentDB] Error creating incident: {e}")
+            print(f"[IncidentDB] ❌ Error creating incident: {e}")
             raise
 
     @staticmethod
@@ -142,7 +142,7 @@ class IncidentDB:
             return decimal_to_float(item) if item else None
 
         except Exception as e:
-            print(f"[IncidentDB] Error getting incident: {e}")
+            print(f"[IncidentDB] ❌ Error getting incident: {e}")
             return None
 
 
@@ -185,7 +185,7 @@ class IncidentDB:
             print(f"[IncidentDB] Updated incident {incident_id} status to {status}")
             return True
         except Exception as e:
-            print(f"[IncidentDB] Error updating incident: {e}")
+            print(f"[IncidentDB] ❌ Error updating incident: {e}")
             return False
 
 
@@ -203,7 +203,7 @@ class IncidentDB:
             items = response.get("Items", [])
             return [decimal_to_float(item) for item in items]
         except Exception as e:
-            print(f"[IncidentDB] Error listing incidents: {e}")
+            print(f"[IncidentDB] ❌ Error listing incidents: {e}")
             return []
 
 
@@ -265,7 +265,7 @@ class JobDB:
             print(f"[JobDB] Created job: {item['job_id']}")
             return decimal_to_float(item)
         except Exception as e:
-            print(f"[JobDB] Error creating job: {e}")
+            print(f"[JobDB] ❌ Error creating job: {e}")
             raise
 
     @staticmethod
@@ -279,7 +279,7 @@ class JobDB:
             item = response.get("Item")
             return decimal_to_float(item) if item else None
         except Exception as e:
-            print(f"[JobDB] Error getting job: {e}")
+            print(f"[JobDB] ❌ Error getting job: {e}")
             return None
 
     @staticmethod
@@ -307,7 +307,7 @@ class JobDB:
             print(f"[JobDB] Updated job {job_id}: {updates}")
             return True
         except Exception as e:
-            print(f"[JobDB] Error updating job: {e}")
+            print(f"[JobDB] ❌ Error updating job: {e}")
             return False
 
 
@@ -358,7 +358,7 @@ class BidDB:
             print(f"[BidDB] Created bid: {item['bid_id']}")
             return decimal_to_float(item)
         except Exception as e:
-            print(f"[BidDB] Error creating bid: {e}")
+            print(f"[BidDB] ❌ Error creating bid: {e}")
             raise
 
     @staticmethod
@@ -375,7 +375,7 @@ class BidDB:
             items = response.get("Items", [])
             return [decimal_to_float(item) for item in items]
         except Exception as e:
-            print(f"[BidDB] Error listing bids: {e}")
+            print(f"[BidDB] ❌ Error listing bids: {e}")
             return []
 
     @staticmethod
@@ -397,7 +397,7 @@ class BidDB:
             print(f"[BidDB] Updated bid {bid_id} status to {status}")
             return True
         except Exception as e:
-            print(f"[BidDB] Error updating bid: {e}")
+            print(f"[BidDB] ❌ Error updating bid: {e}")
             return False
 
 
@@ -417,7 +417,7 @@ class PropertyDB:
             item = response.get("Item")
             return decimal_to_float(item) if item else None
         except Exception as e:
-            print(f"[PropertyDB] Error getting property: {e}")
+            print(f"[PropertyDB] ❌ Error getting property: {e}")
             return None
 
     @staticmethod
@@ -434,7 +434,7 @@ class PropertyDB:
             items = response.get("Items", [])
             return [decimal_to_float(item) for item in items]
         except Exception as e:
-            print(f"[PropertyDB] Error listing properties: {e}")
+            print(f"[PropertyDB] ❌ Error listing properties: {e}")
             return []
 
 
@@ -484,7 +484,7 @@ class UserDB:
             print(f"[UserDB] Upserted user: {item['user_id']}")
             return decimal_to_float(item)
         except Exception as e:
-            print(f"[UserDB] Error upserting user: {e}")
+            print(f"[UserDB] ❌ Error upserting user: {e}")
             raise
 
     @staticmethod
@@ -498,7 +498,7 @@ class UserDB:
             item = response.get("Item")
             return decimal_to_float(item) if item else None
         except Exception as e:
-            print(f"[UserDB] Error getting user: {e}")
+            print(f"[UserDB] ❌ Error getting user: {e}")
             return None
 
 

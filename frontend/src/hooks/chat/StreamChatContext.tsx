@@ -340,6 +340,13 @@ export function StreamChatProvider({ children }: { children: ReactNode }) {
         // Try to get cached token first
         let tokenData = getCachedToken(userEmail, userPersona);
 
+        // Block token fetch when unauthenticated or missing email (race during reauth)
+        if ((status as string) === "unauthenticated" || !session?.user?.email) {
+          console.warn("[chat] Blocked token fetch — user not authenticated");
+          disconnectClient();
+          return;
+        }
+
         if (!tokenData) {
           const tokenUrl = "/api/chat/token";
           console.log("[StreamChat] Fetching new token from local API", tokenUrl);
@@ -367,6 +374,13 @@ export function StreamChatProvider({ children }: { children: ReactNode }) {
           console.log("[StreamChat] Creating new singleton client");
           streamClient = StreamChat.getInstance(api_key, { timeout: 6000 });
           singletonClient = streamClient;
+        }
+
+        // Guard: ensure session still has user email before connecting
+        if (!session?.user?.email) {
+          console.warn("[chat] Blocked connection — missing session user email");
+          disconnectClient();
+          return;
         }
 
         // Guard: Only connect if not already connected to this user

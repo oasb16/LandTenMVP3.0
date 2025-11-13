@@ -139,6 +139,8 @@ class AIReasoning:
                 response_format={"type": "json_object"},
             )
 
+            response_choices = json.loads(response.choices)
+            print(f"response_choices : {response_choices}")  # Debug print
             result = json.loads(response.choices[0].message.content)
             normalized_result = self._normalize_intent_result(result)
 
@@ -196,7 +198,8 @@ class AIReasoning:
                 ],
                 response_format={"type": "json_object"},
             )
-
+            response_choices = json.loads(response.choices)
+            print(f"response_choices : {response_choices}")  # Debug print
             result = json.loads(response.choices[0].message.content)
             return self._normalize_response_plan(result)
 
@@ -254,6 +257,8 @@ class AIReasoning:
                 response_format={"type": "json_object"},
             )
 
+            response_choices = json.loads(response.choices)
+            print(f"response_choices : {response_choices}")  # Debug print
             entities = json.loads(response.choices[0].message.content)
             logger.debug(f"[ai-reasoning] Extracted entities: {entities}")
             return entities
@@ -437,6 +442,8 @@ class AIReasoning:
                     ],
                     response_format={"type": "json_object"},
                 )
+                response_choices = json.loads(response.choices)
+                print(f"response_choices : {response_choices}")  # Debug print
                 payload = json.loads(response.choices[0].message.content)
                 normalized = self._normalize_reasoning_output(payload, message, persona)
                 if suggested_intent and suggested_intent != Intent.GENERAL_CHAT.value:
@@ -643,7 +650,7 @@ class AIReasoning:
         # Priority 5: Default to general chat
         else:
             summary = "General assistance requested."
-            reply = "I'm on it. Could you share a little more about what's happening?"
+            reply = "Thank you for engaging me. Could you share a little more about what's happening?"
             entities = {}
             actions = ["clarify"]
             intent = Intent.GENERAL_CHAT.value

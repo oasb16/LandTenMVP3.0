@@ -5,6 +5,7 @@
   },
   "dependencies": {
     "framer-motion": "^12.23.24",
-    "numpy": "^0.0.1"
+    "numpy": "^0.0.1",
+    "stripe": "^19.3.0"
   }
 }

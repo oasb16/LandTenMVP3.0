@@ -53,7 +53,7 @@ def verify_webhook_signature(payload: bytes, signature: str) -> bool:
         if os.getenv("AUTH_DISABLED") == "true":
             print("[ai-webhook] WARNING: Webhook signature verification DISABLED (AUTH_DISABLED=true)")
             return True
-        print("[ai-webhook] ERROR: STREAM_WEBHOOK_SECRET not configured, rejecting webhook")
+        print("[ai-webhook] ❌ ERROR: STREAM_WEBHOOK_SECRET not configured, rejecting webhook")
         return False
 
     # Calculate expected signature
@@ -69,12 +69,12 @@ def verify_webhook_signature(payload: bytes, signature: str) -> bool:
         if is_valid:
             print("[ai-webhook] Webhook signature verified successfully")
         else:
-            print(f"[ai-webhook] ERROR: Invalid webhook signature - expected: {expected_signature[:8]}..., got: {signature[:8]}...")
+            print(f"[ai-webhook] ❌ ERROR: Invalid webhook signature - expected: {expected_signature[:8]}..., got: {signature[:8]}...")
 
         return is_valid
 
     except Exception as e:
-        print(f"[ai-webhook] ERROR: Exception during signature verification: {e}")
+        print(f"[ai-webhook] ❌ ERROR: Exception during signature verification: {e}")
         return False
 
 
@@ -99,14 +99,14 @@ async def handle_stream_webhook(
         body = await request.body()
         print(f"[ai-webhook] Received {len(body)} bytes of payload")
     except Exception as e:
-        print(f"[ai-webhook] ERROR: Failed to read request body: {e}")
+        print(f"[ai-webhook] ❌ ERROR: Failed to read request body: {e}")
         raise HTTPException(status_code=400, detail=f"Failed to read request body: {e}")
 
     # Verify webhook signature
     if x_signature:
         print(f"[ai-webhook] Verifying webhook signature (x-signature header present)")
         if not verify_webhook_signature(body, x_signature):
-            print("[ai-webhook] ERROR: Webhook signature verification FAILED")
+            print("[ai-webhook] ❌ ERROR: Webhook signature verification FAILED")
             raise HTTPException(
                 status_code=401,
                 detail={"error": "Invalid webhook signature", "hint": "Check STREAM_WEBHOOK_SECRET configuration"}
@@ -120,12 +120,13 @@ async def handle_stream_webhook(
         event_type = payload.get("type")
         print(f"[ai-webhook] Event type: {event_type}")
     except Exception as e:
-        print(f"[ai-webhook] ERROR: Failed to parse JSON payload: {e}")
+        print(f"[ai-webhook] ❌ ERROR: Failed to parse JSON payload: {e}")
         raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
 
     # Handle different event types
     if event_type == "message.new":
         print("[ai-webhook] Routing to handle_new_message()")
+        print(f"payload : {payload}")
         return await handle_new_message(payload)
 
     elif event_type == "message.updated":
@@ -198,6 +199,8 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
         intent = reasoning["intent"]
         entities = reasoning.get("entities", {})
 
+        print(f"[ai-webhook] Detected intent: {intent} (previous: {previous_intent}) for persona: {persona} entities: {entities.keys()} and reasoning: {reasoning.get('reasoning','N/A')[:100]}...")
+
         allowed_intent, violation_message = policy_validator.validate_intent(intent, persona)
         if not allowed_intent:
             violation_text = violation_message or "I’m not able to complete that step for you, but I’ve noted the request."
@@ -207,6 +210,7 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
 
         transition = process_transition(user_id, channel_id, persona, intent, message_text, context)
         next_stage = transition["next_stage"]
+        print(f"[ai-webhook] Transitioning to next stage: {next_stage}")
 
         if not transition["allowed"]:
             violation_text = transition.get("violation_message") or "That action needs landlord approval – I've queued it for them."
@@ -527,7 +531,7 @@ async def _detect_persona(
         if persona:
             return persona
     except Exception as e:
-        logger.warning(f"[ai-webhook] Error detecting persona from channel: {e}")
+        logger.warning(f"[ai-webhook] ❌ Error detecting persona from channel: {e}")
 
     # Default to tenant
     return "tenant"
@@ -1015,7 +1019,7 @@ async def handle_general_assistance(
         return {"response_text": ai_response, "action": "general_chat"}
 
     except Exception as e:
-        logger.error(f"[ai-webhook] Error getting AI response: {e}")
+        logger.error(f"[ai-webhook] ❌ Error getting AI response: {e}")
         fallback_text = "I'm here to help! Could you tell me more about what you need?"
 
         bot.send_message(
@@ -1055,7 +1059,7 @@ async def handle_reaction(payload: Dict[str, Any]) -> Dict[str, str]:
         }
 
     except Exception as e:
-        print(f"[ai-webhook] ERROR: Exception while handling reaction: {e}")
+        print(f"[ai-webhook] ❌ ERROR: Exception while handling reaction: {e}")
         import traceback
         traceback.print_exc()
         return {
@@ -1175,7 +1179,7 @@ async def initialize_ai_channel(request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        print(f"[ai-webhook] ERROR: Exception during channel initialization: {e}")
+        print(f"[ai-webhook] ❌ ERROR: Exception during channel initialization: {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(
@@ -1213,7 +1217,7 @@ async def send_ai_action(request: Request):
         print(f"[ai-webhook]   - Actions: {len(actions)} buttons")
 
         if not channel_id or not text:
-            print("[ai-webhook] ERROR: Missing required fields (channel_id or text)")
+            print("[ai-webhook] ❌ ERROR: Missing required fields (channel_id or text)")
             raise HTTPException(
                 status_code=400,
                 detail={
@@ -1241,7 +1245,7 @@ async def send_ai_action(request: Request):
                 "action_count": len(actions)
             }
         else:
-            print(f"[ai-webhook] ERROR: Failed to send action message")
+            print(f"[ai-webhook] ❌ ERROR: Failed to send action message")
             raise HTTPException(
                 status_code=500,
                 detail={
@@ -1253,7 +1257,7 @@ async def send_ai_action(request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        print(f"[ai-webhook] ERROR: Exception during send action: {e}")
+        print(f"[ai-webhook] ❌ ERROR: Exception during send action: {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(
@@ -1300,7 +1304,7 @@ async def get_bot_status():
         }
 
     except Exception as e:
-        print(f"[ai-webhook] ERROR: Exception during status check: {e}")
+        print(f"[ai-webhook] ❌ ERROR: Exception during status check: {e}")
         import traceback
         traceback.print_exc()
         return {
