@@ -11,6 +11,7 @@ BACKEND_PID=$!
 # Start frontend
 cd ../frontend
 npm install --omit=dev --no-audit --prefer-offline
+npm ci --include=dev
 npm run build
 npm run start -p $PORT
 

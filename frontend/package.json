@@ -9,6 +9,10 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@tailwindcss/postcss": "^4.0.0",
+    "postcss": "^8.4.47",
+    "autoprefixer": "^10.4.20",
+    "tailwindcss": "^4.0.0",
     "firebase": "^12.5.0",
     "framer-motion": "^12.0.3",
     "lucide-react": "^0.548.0",
