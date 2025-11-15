@@ -32,6 +32,11 @@ copy_if_missing "$FRONTEND_DIR/.env.local.example" "$FRONTEND_DIR/.env.local"
 # ---------------------------------------------------------------------------
 # 2) Dual ngrok setup (two accounts => two unique tunnels)
 # ---------------------------------------------------------------------------
+if [[ -n "${DYNO:-}" ]]; then
+  info "[INFO] Running on Heroku — skipping local setup automation."
+  exit 0
+fi
+
 info "Starting dual ngrok tunnels for backend (8080) and frontend (3000)..."
 
 NGROK_LOG_DIR="$ROOT_DIR/.ngrok"

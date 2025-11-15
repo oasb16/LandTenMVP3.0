@@ -27,6 +27,14 @@ except Exception:
 
 app = FastAPI()
 
+def get_base_url():
+    import os
+    # If running on Heroku, prefer HEROKU_BACKEND_URL
+    if os.getenv("DYNO"):
+        return os.getenv("HEROKU_BACKEND_URL") or os.getenv("BACKEND_URL")
+    # Local fallback
+    return os.getenv("BACKEND_URL") or os.getenv("BACKEND_INTERNAL_URL") or "http://localhost:8080"
+
 # Startup event to register Stream webhook
 @app.on_event("startup")
 async def register_stream_webhook():
@@ -40,7 +48,7 @@ async def register_stream_webhook():
 
         api_key = os.getenv("STREAM_CHAT_API_KEY")
         api_secret = os.getenv("STREAM_CHAT_API_SECRET")
-        webhook_url = os.getenv("STREAM_WEBHOOK_URL")
+        webhook_url = os.getenv("STREAM_WEBHOOK_URL") or (get_base_url().rstrip("/") + "/ai/stream-webhook")
 
         if not api_key or not api_secret:
             logging.warning("[Stream Webhook] Stream Chat credentials not configured - skipping webhook registration")
