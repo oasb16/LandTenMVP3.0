@@ -4,7 +4,6 @@ import { useEffect, useState, useCallback } from "react";
 import { Loader2, WifiOff, Bot, BotOff } from "lucide-react";
 import { useStreamChat } from "@/hooks/chat/StreamChatContext";
 import { Chat, Channel, ChannelHeader, MessageList, MessageInput, Window, Thread, useChannelActionContext } from "stream-chat-react";
-import { HybridMessage } from "./ai/HybridMessage";
 import "stream-chat-react/dist/css/v2/index.css";
 
 type Props = {
@@ -145,7 +144,7 @@ export default function StreamChatPane({ className }: Props) {
         <Channel channel={activeChannel}>
           <Window>
             <ChannelHeader />
-            <MessageList MessageUIComponent={HybridMessage} />
+            <MessageList />
 
             {/* Agent Toggle and Message Input Container */}
             <div className="flex flex-col border-t border-slate-800/70 bg-slate-950/80">
