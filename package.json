@@ -5,4 +5,7 @@
     "postinstall": "npm install --prefix frontend && npm run build --prefix frontend",
     "start": "npm run start --prefix frontend"
   }
+  ,"engines": {
+    "node": ">=20.x"
+  }
 }
