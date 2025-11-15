@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { Loader2, WifiOff, Bot, BotOff } from "lucide-react";
 import { useStreamChat } from "@/hooks/chat/StreamChatContext";
-import { Chat, Channel, ChannelHeader, MessageList, MessageInput, Window, Thread, useChannelActionContext } from "stream-chat-react";
+import { Chat, Channel, ChannelHeader, MessageList, MessageInput, Window, Thread } from "stream-chat-react";
 import "stream-chat-react/dist/css/v2/index.css";
 
 type Props = {
