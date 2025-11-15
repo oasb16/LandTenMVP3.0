@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ -n "${DYNO:-}" ]]; then
+  echo "[INFO] Running on Heroku — skipping local_setup automation."
+  exit 0
+fi
+
 # Local bootstrap for LandTenMVP3.0
 # - Uses dual ngrok accounts for distinct backend/frontend tunnels
 # - Auto-injects live URLs into .env.local
