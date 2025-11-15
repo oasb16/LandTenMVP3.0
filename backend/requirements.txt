@@ -28,3 +28,7 @@ python-dotenv==1.0.1
 stream-chat==4.26.0
 openai>=1.42.0
 stripe>=7.0.0
+
+uvicorn
+fastapi
+boto3
