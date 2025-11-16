@@ -5,6 +5,9 @@
   "scripts": {
     "start": "bash scripts/heroku_start.sh",
     "build": "cd frontend && npm ci && npm run build",
-    "heroku-postbuild": "cd frontend && npm run build"
+    "heroku-postbuild": "cd frontend && npm ci --omit=dev && npm run build"
+  }
+  ,"engines": {
+    "node": "22.x"
   }
 }
