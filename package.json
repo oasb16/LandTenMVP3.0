@@ -1,7 +1,10 @@
 {
-  "name": "landten-root",
+  "name": "landtenmvp3",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
-    "start": "bash scripts/heroku_start.sh"
+    "start": "bash scripts/heroku_start.sh",
+    "build": "cd frontend && npm ci && npm run build",
+    "heroku-postbuild": "cd frontend && npm run build"
   }
 }
