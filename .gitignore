@@ -11,6 +11,7 @@ backend/.env
 backend/.env.local
 backend/.env.example
 
+
 # OS
 .DS_Store
 Thumbs.db
