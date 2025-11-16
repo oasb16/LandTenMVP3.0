@@ -24,12 +24,12 @@ fi
 # Frontend (Next.js)
 # ------------------------------
 if [ -d "frontend" ]; then
-  cd frontend
-  echo "[INFO] Installing frontend dependencies..."
-  npm ci --omit=dev
+#   cd frontend
+#   echo "[INFO] Installing frontend dependencies..."
+#   npm ci --omit=dev
 
-  echo "[INFO] Building frontend..."
-  NODE_OPTIONS="--max-old-space-size=256" npm run build
+#   echo "[INFO] Building frontend..."
+#   NODE_OPTIONS="--max-old-space-size=256" npm run build
 
   echo "[INFO] Starting frontend on port ${PORT:-3000}..."
   exec npx next start -p "${PORT:-3000}"
