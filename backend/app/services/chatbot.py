@@ -1,7 +1,7 @@
 import os
 from typing import List, Dict, Any, Optional
 
-from app.services.ai_service import get_ai_response
+from ..services.ai_service import get_ai_response
 
 try:  # pragma: no cover
     from stream_chat import StreamChat
@@ -65,7 +65,7 @@ def post_agent_message(client: Any, channel_id: str, text: str, msg_type: str = 
         msg_type = "regular"
     # If text is JSON-like with message + next_steps, use bot helper to render card
     try:
-        from app.services.stream_bot import get_bot
+        from ..services.stream_bot import get_bot
 
         bot = get_bot()
         # Use send_ai_message which will detect JSON and render cards

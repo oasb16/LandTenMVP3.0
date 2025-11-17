@@ -1,5 +1,5 @@
 from typing import Dict, Any, List
-from app.deps.dynamo import get_dynamo_resource, table_name
+from ..deps.dynamo import get_dynamo_resource, table_name
 
 
 class JobRepo:

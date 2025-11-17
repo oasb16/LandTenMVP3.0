@@ -10,13 +10,13 @@ import logging
 from datetime import datetime
 from typing import Dict, Any, Optional
 from fastapi import APIRouter, Request, HTTPException, Header
-from app.services.stream_bot import get_bot
-from app.services.context_manager import get_context_manager
-from app.services.ai_reasoning import get_ai_reasoning, Intent
-from app.services.policy_validator import get_policy_validator
-from app.services.card_builder import CardBuilder, send_card_message
-from app.services.flow_engine import process_transition
-from app.services.incident_flow import (
+from ..services.stream_bot import get_bot
+from ..services.context_manager import get_context_manager
+from ..services.ai_reasoning import get_ai_reasoning, Intent
+from ..services.policy_validator import get_policy_validator
+from ..services.card_builder import CardBuilder, send_card_message
+from ..services.flow_engine import process_transition
+from ..services.incident_flow import (
     classify_issue,
     create_incident_record,
     diy_suggestions,
@@ -998,7 +998,7 @@ async def handle_general_assistance(
 
     # Get AI response
     try:
-        from app.services.ai_service import get_ai_response
+        from ..services.ai_service import get_ai_response
 
         # Build conversation context
         conversation_history = context.get("conversation_history", [])

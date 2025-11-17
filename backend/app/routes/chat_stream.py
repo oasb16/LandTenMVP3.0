@@ -13,19 +13,19 @@ import math
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from app.deps.auth import verify_firebase_token
-from app.deps.stream_signing import verify_stream_signature
-from app.services.ai_service import get_ai_response
-from app.services.chatbot import (
+from ..deps.auth import verify_firebase_token
+from ..deps.stream_signing import verify_stream_signature
+from ..services.ai_service import get_ai_response
+from ..services.chatbot import (
     ensure_agent_user as bot_ensure_agent_user,
     build_context,
     agent_reply,
     post_agent_message,
 )
-from app.services.context_manager import get_context_manager
-from app.services.dynamo_service import save_channel_snapshot
-from app.services.dynamo_service import IncidentDB
-from app.services.incident_flow import (
+from ..services.context_manager import get_context_manager
+from ..services.dynamo_service import save_channel_snapshot
+from ..services.dynamo_service import IncidentDB
+from ..services.incident_flow import (
     classify_issue,
     diy_suggestions,
     create_incident_record,
@@ -33,9 +33,9 @@ from app.services.incident_flow import (
     threshold_decision,
     generate_contractor_bids,
 )
-from app.services.ai_reasoning import get_ai_reasoning
-from app.services.dynamo_service import record_mttr_event, record_ai_feedback, get_aggregated_metrics
-from app.services.incident_flow import create_work_order
+from ..services.ai_reasoning import get_ai_reasoning
+from ..services.dynamo_service import record_mttr_event, record_ai_feedback, get_aggregated_metrics
+from ..services.incident_flow import create_work_order
 
 try:
     from stream_chat import StreamChat
@@ -752,7 +752,7 @@ def post_agent_reply(req: AgentMessageRequest, token: str = Depends(verify_fireb
     # Trigger PropertyAIBot incident detection
     # This handles incident detection, card creation, and DynamoDB persistence
     try:
-        from app.services.stream_bot import get_bot
+        from ..services.stream_bot import get_bot
 
         print(f"[agent_reply] Triggering PropertyAIBot incident detection...")
 
@@ -810,7 +810,7 @@ def _handle_intelligent_message(
     3. Generate contextually appropriate responses
     4. Dynamically switch modes (general → incident → discovery → job)
     """
-    from app.services.ai_reasoning import AIReasoning
+    from ..services.ai_reasoning import AIReasoning
 
     channel_id = _channel_identifier(channel, channel_state)
     channel_data = channel_state.get("channel", {}).get("data", {}) or {}
@@ -871,8 +871,8 @@ def _handle_intelligent_message(
         channel_state.setdefault("incident_candidate", preliminary_incident)
         # Before starting discovery, create a preliminary incident record and persist it
         try:
-            from app.services.incident_flow import create_incident_record
-            from app.services.stream_bot import get_bot
+            from ..services.incident_flow import create_incident_record
+            from ..services.stream_bot import get_bot
 
             tenant_email = (message.get("user") or {}).get("email") or (message.get("user") or {}).get("id") or "unknown"
             user_id = (message.get("user") or {}).get("id") or tenant_email
@@ -1018,8 +1018,8 @@ def smart_incident_context_analyzer(user_id: str, channel_id: str, message_text:
     Semantic analyzer to decide whether to reuse, close, or create an incident.
     Uses embeddings for meaning-based comparison and lexical ratio as fallback.
     """
-    from app.services.context_manager import get_context_manager
-    from app.services.dynamo_service import IncidentDB
+    from ..services.context_manager import get_context_manager
+    from ..services.dynamo_service import IncidentDB
 
     cm = get_context_manager()
     context = cm.get_context(user_id, channel_id, create_if_missing=True) or {}

@@ -6,7 +6,7 @@ Determines next stage based on context, intent, persona, and policies.
 import logging
 from typing import Dict, Any
 
-from app.services.policy_validator import validate_action, PolicyValidationResult
+from ..services.policy_validator import validate_action, PolicyValidationResult
 
 logger = logging.getLogger(__name__)
 

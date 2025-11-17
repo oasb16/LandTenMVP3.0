@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from app.deps.auth import verify_firebase_token
+from ..deps.auth import verify_firebase_token
 import os
 import boto3
 

@@ -14,22 +14,22 @@ except ImportError:
     StreamChat = None
     StreamAPIException = Exception
 
-from app.services.ai_service import get_ai_response
-from app.services.card_builder import CardBuilder, send_card_message
-from app.services.incident_flow import (
+from .ai_service import get_ai_response
+from .card_builder import CardBuilder, send_card_message
+from .incident_flow import (
     classify_issue,
     diy_suggestions,
     create_incident_record,
     generate_contractor_bids
 )
-from app.services.dynamo_service import (
+from .dynamo_service import (
     IncidentDB,
     JobDB,
     BidDB,
     UserDB,
     PropertyDB
 )
-from app.services.context_manager import get_context_manager
+from .context_manager import get_context_manager
 import json
 import re
 

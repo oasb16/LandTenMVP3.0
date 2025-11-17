@@ -3,11 +3,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 
-from app.deps.auth import verify_firebase_token
-from app.repos.contractor_repo import ContractorRepo
-from app.repos.job_bid_repo import JobBidRepo
-from app.repos.schedule_repo import ScheduleRepo
-from app.services.stripe_service import StripeService
+from ..deps.auth import verify_firebase_token
+from ..repos.contractor_repo import ContractorRepo
+from ..repos.job_bid_repo import JobBidRepo
+from ..repos.schedule_repo import ScheduleRepo
+from ..services.stripe_service import StripeService
 
 router = APIRouter()
 

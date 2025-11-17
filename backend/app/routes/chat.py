@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
-from app.deps.auth import verify_firebase_token
-from app.deps.pusher_client import get_pusher_client
 from datetime import datetime, timezone
-from app.repos.chat_repo import ChatRepo
+from ..deps.auth import verify_firebase_token
+from ..deps.pusher_client import get_pusher_client
+from ..repos.chat_repo import ChatRepo
 
 router = APIRouter()
 

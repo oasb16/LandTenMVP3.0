@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict
 from datetime import datetime, timezone
-from app.deps.auth import verify_firebase_token
-from app.repos.task_repo import TaskRepo
+from ..deps.auth import verify_firebase_token
+from ..repos.task_repo import TaskRepo
 
 
 router = APIRouter()

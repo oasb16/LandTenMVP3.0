@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
-from app.deps.auth import verify_firebase_token
-from app.repos.chat_repo import ChatRepo
+from ..deps.auth import verify_firebase_token
+from ..repos.chat_repo import ChatRepo
 from typing import List, Dict
 
 

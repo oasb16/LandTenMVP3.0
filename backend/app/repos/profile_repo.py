@@ -1,5 +1,5 @@
 from typing import Optional, Dict
-from app.deps.dynamo import get_dynamo_resource, table_name
+from ..deps.dynamo import get_dynamo_resource, table_name
 
 
 class ProfileRepo:

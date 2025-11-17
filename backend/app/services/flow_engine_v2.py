@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 from enum import Enum
 
-from app.services.policy_validator import validate_action, PolicyValidationResult
+from ..services.policy_validator import validate_action, PolicyValidationResult
 
 logger = logging.getLogger(__name__)
 

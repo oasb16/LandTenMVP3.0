@@ -2,10 +2,10 @@ import os
 from datetime import datetime, timezone
 from typing import Dict, Any, Tuple, List, Optional
 
-from app.repos.incident_repo import IncidentRepo
-from app.services.chatbot import agent_reply
-from app.services.dynamo_service import JobDB, save_channel_snapshot
-from app.services.context_manager import get_context_manager
+from ..repos.incident_repo import IncidentRepo
+from .chatbot import agent_reply
+from .dynamo_service import JobDB, save_channel_snapshot
+from .context_manager import get_context_manager
 import time
 
 

@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import List
 from datetime import datetime, timezone
-from app.deps.auth import verify_firebase_token
-from app.repos.thread_repo import ThreadRepo
+from ..deps.auth import verify_firebase_token
+from ..repos.thread_repo import ThreadRepo
 
 
 router = APIRouter()

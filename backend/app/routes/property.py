@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from typing import List, Optional
-from app.deps.auth import verify_firebase_token
+from ..deps.auth import verify_firebase_token
 from datetime import datetime, timezone
 
 router = APIRouter()

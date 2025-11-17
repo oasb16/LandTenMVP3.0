@@ -17,8 +17,8 @@ from .routes import (
 )
 from starlette.middleware.base import BaseHTTPMiddleware
 import time, uuid, logging
-from app.utils.rate_limit import SimpleRateLimiter
-from app.utils.startup_checks import validate_env
+from .utils.rate_limit import SimpleRateLimiter
+from .utils.startup_checks import validate_env
 try:
     from dotenv import load_dotenv
     load_dotenv()

@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional, Dict
-from app.deps.auth import verify_firebase_token
-from app.repos.profile_repo import ProfileRepo
+from ..deps.auth import verify_firebase_token
+from ..repos.profile_repo import ProfileRepo
 
 
 router = APIRouter()

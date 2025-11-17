@@ -236,7 +236,7 @@ function MessageInputWithWebhook({ agentEnabled }: { agentEnabled: boolean }) {
         mentioned_users: [],
         metadata: {
           agentEnabled,
-          persona: user?.role || 'tenant',
+          persona: (user as any)?.role || 'tenant',
         },
       });
 
@@ -258,6 +258,11 @@ function MessageInputWithWebhook({ agentEnabled }: { agentEnabled: boolean }) {
         // ✅ Step 2: Forward to AI webhook if enabled
         console.log("[MessageInputWithWebhook] Forwarding to AI webhook...");
         if (agentEnabled) {
+          if (!activeChannel) {
+            console.warn('[MessageInputWithWebhook] No activeChannel - aborting webhook');
+            return;
+          }
+
           const payload = {
             type: 'message.new',
             message: {
@@ -269,7 +274,7 @@ function MessageInputWithWebhook({ agentEnabled }: { agentEnabled: boolean }) {
               },
               metadata: {
                 agentEnabled: true,
-                persona: user?.role || 'tenant',
+                persona: (user as any)?.role || 'tenant',
               },
             },
             user: {
@@ -277,7 +282,7 @@ function MessageInputWithWebhook({ agentEnabled }: { agentEnabled: boolean }) {
               name: user?.name,
               is_bot: false,
             },
-            channel_id: activeChannel.cid || 'landten-default',
+            channel_id: activeChannel!.cid || 'landten-default',
             channel_type: 'messaging',
           };
 
@@ -296,7 +301,9 @@ function MessageInputWithWebhook({ agentEnabled }: { agentEnabled: boolean }) {
         }
 
         // ✅ Step 3: Rehydrate channel so message list updates
-        await activeChannel.watch();
+        if (activeChannel?.watch) {
+          await activeChannel.watch();
+        }
         console.log('[MessageInputWithWebhook] ✅ Channel rehydrated');
       } catch (err) {
         console.error('[MessageInputWithWebhook] ❌ Send failed:', err);
