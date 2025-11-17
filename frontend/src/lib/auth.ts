@@ -1,13 +1,10 @@
-import NextAuth, { type NextAuthConfig } from "next-auth";
+import NextAuth from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
 
-export const authConfig: NextAuthConfig = {
+export const authConfig = {
   secret: process.env.NEXTAUTH_SECRET,
-
-  // IMPORTANT: force NextAuth to trust Vercel domain
   trustHost: true,
 
-  // Critical for preventing CSRF issues in production
   pages: {
     signIn: "/auth/signin",
     error: "/auth/error",
@@ -15,8 +12,8 @@ export const authConfig: NextAuthConfig = {
 
   providers: [
     GoogleProvider({
-      clientId: process.env.GOOGLE_CLIENT_ID || "",
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
+      clientId: process.env.GOOGLE_CLIENT_ID ?? "",
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
       authorization: {
         params: {
           prompt: "consent",
@@ -28,14 +25,11 @@ export const authConfig: NextAuthConfig = {
   ],
 
   callbacks: {
-    // Ensure redirects ALWAYS stay on your deployed domain
-    async redirect({ url, baseUrl }) {
-      // Always force callback URLs to use the host from NEXTAUTH_URL
-      return `${process.env.NEXTAUTH_URL}`;
+    async redirect() {
+      return process.env.NEXTAUTH_URL!;
     },
   },
 
-  // Fix Vercel production cookies
   cookies: {
     sessionToken: {
       name: "__Host-next-auth.session-token",
@@ -43,7 +37,7 @@ export const authConfig: NextAuthConfig = {
         httpOnly: true,
         sameSite: "lax",
         path: "/",
-        secure: true,                // REQUIRED on Vercel
+        secure: true,
       },
     },
     callbackUrl: {
@@ -60,17 +54,11 @@ export const authConfig: NextAuthConfig = {
         httpOnly: false,
         sameSite: "lax",
         path: "/",
-        secure: true,        // REQUIRED — this is your fix
+        secure: true,
       },
-    },
-  },
-
-  logger: {
-    error(error) {
-      console.error("[nextauth-error]", error);
     },
   },
 };
 
-// Export NextAuth handlers
-export const { handlers: { GET, POST } } = NextAuth(authConfig);
+// NEXTAUTH v5 — This is the correct way
+export const { handlers, auth, signIn, signOut } = NextAuth(authConfig);
