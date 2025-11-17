@@ -1,16 +1,22 @@
 import NextAuth, { type NextAuthConfig } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
 
-const backendBase = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || "";
+export const authConfig: NextAuthConfig = {
+  secret: process.env.NEXTAUTH_SECRET,
 
-const authSecret = process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET || "dev-secret";
+  // IMPORTANT: force NextAuth to trust Vercel domain
+  trustHost: true,
 
-const authConfig: NextAuthConfig = {
-  secret: authSecret,
+  // Critical for preventing CSRF issues in production
+  pages: {
+    signIn: "/auth/signin",
+    error: "/auth/error",
+  },
+
   providers: [
     GoogleProvider({
-      clientId: process.env.GOOGLE_CLIENT_ID ?? "",
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
+      clientId: process.env.GOOGLE_CLIENT_ID || "",
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
       authorization: {
         params: {
           prompt: "consent",
@@ -20,81 +26,51 @@ const authConfig: NextAuthConfig = {
       },
     }),
   ],
-  // Trust host and global error redirect safeguard
-  trustHost: true,
-  pages: {
-    error: "/auth/error",
-  },
-  // Provide a logger to capture NextAuth internal errors in a typed way
-  logger: {
-    error: (error: Error) => {
-      try {
-        console.error("[auth][critical-error]", error?.message || error, error);
-      } catch (e) {
-        // swallow
-      }
-    },
-    warn: (message: string) => {
-      try {
-        console.warn("[auth][warn]", message);
-      } catch (e) {
-        // swallow
-      }
-    },
-    debug: (message: string) => {
-      if (process.env.NODE_ENV !== "production") {
-        try {
-          console.debug("[auth][debug]", message);
-        } catch (e) {
-          // swallow
-        }
-      }
+
+  callbacks: {
+    // Ensure redirects ALWAYS stay on your deployed domain
+    async redirect({ url, baseUrl }) {
+      // Always force callback URLs to use the host from NEXTAUTH_URL
+      return `${process.env.NEXTAUTH_URL}`;
     },
   },
+
+  // Fix Vercel production cookies
   cookies: {
-    pkceCodeVerifier: {
-      name: "next-auth.pkce.code_verifier",
+    sessionToken: {
+      name: "__Host-next-auth.session-token",
       options: {
         httpOnly: true,
         sameSite: "lax",
         path: "/",
-        secure: process.env.NODE_ENV === "production",
+        secure: true,                // REQUIRED on Vercel
+      },
+    },
+    callbackUrl: {
+      name: "__Host-next-auth.callback-url",
+      options: {
+        sameSite: "lax",
+        path: "/",
+        secure: true,
+      },
+    },
+    csrfToken: {
+      name: "__Host-next-auth.csrf-token",
+      options: {
+        httpOnly: false,
+        sameSite: "lax",
+        path: "/",
+        secure: true,        // REQUIRED — this is your fix
       },
     },
   },
-  debug: process.env.NODE_ENV !== "production",
-  callbacks: {
-    async jwt({ token, trigger, session, account, profile }) {
-      if (account?.provider === "google" && profile?.email) {
-        token.email = profile.email;
-      }
-      if (trigger === "update" && session?.persona) {
-        token.persona = session.persona;
-      }
-      if (!token.persona && token.email && backendBase) {
-        try {
-          const res = await fetch(`${backendBase}/profile/${encodeURIComponent(token.email)}`);
-          if (res.ok) {
-            const data = await res.json();
-            token.persona = data?.persona || null;
-          }
-        } catch {
-          // ignore
-        }
-      }
-      return token;
-    },
-    async session({ session, token }) {
-      if (token.email) {
-        session.user.email = token.email as string;
-        session.user.id = token.email as string;
-      }
-      session.user.persona = (token.persona as string | undefined) || null;
-      return session;
+
+  logger: {
+    error(error) {
+      console.error("[nextauth-error]", error);
     },
   },
 };
 
-export const { handlers, auth, signIn, signOut } = NextAuth(authConfig);
-
-export const authOptions = authConfig;
+// Export NextAuth handlers
+export const { handlers: { GET, POST } } = NextAuth(authConfig);

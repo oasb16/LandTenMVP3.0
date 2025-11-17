@@ -61,7 +61,7 @@ export function SessionRecovery() {
             clearInterval(interval);
             // perform sign out and redirect to sign-in page
             // callbackUrl keeps user on signin route after signOut
-            signOut({ callbackUrl: "/auth/signin" });
+            signOut({ callbackUrl: process.env.NEXTAUTH_URL + "/auth/signin" });
             return null;
           }
           return (c ?? 0) - 1;
@@ -111,7 +111,7 @@ export function SessionRecovery() {
 
         <div style={{ display: "flex", gap: 8 }}>
           <button
-            onClick={() => signOut({ callbackUrl: "/auth/signin" })}
+            onClick={() => signOut({ callbackUrl: process.env.NEXTAUTH_URL + "/auth/signin"})}
             style={{
               background: "#0f172a",
               color: "white",
