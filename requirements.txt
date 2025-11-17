@@ -2,7 +2,7 @@ aiodns==3.5.0
 aiofile==3.9.0
 aiohappyeyeballs==2.6.1
 aiohttp==3.13.1
-dotenv>=17.2.3
+python-dotenv>=1.0.1
 aiosignal==1.4.0
 annotated-types==0.7.0
 anyio==4.11.0
