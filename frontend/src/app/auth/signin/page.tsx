@@ -1,24 +1,13 @@
-"use client";
+'use client';
 
-import { signIn } from "@/lib/auth";
+import { signIn } from "next-auth/react";
 
 export default function SignInPage() {
   return (
-    <div style={{
-      height: "100vh",
-      display: "flex",
-      justifyContent: "center",
-      alignItems: "center",
-      background: "#000"
-    }}>
+    <div className="h-screen flex items-center justify-center">
       <button
+        className="px-4 py-2 bg-white text-black rounded"
         onClick={() => signIn("google")}
-        style={{
-          padding: "12px 24px",
-          background: "white",
-          borderRadius: 6,
-          cursor: "pointer",
-        }}
       >
         Sign in with Google
       </button>
