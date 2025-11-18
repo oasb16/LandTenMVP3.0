@@ -26,14 +26,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   },
 
   callbacks: {
-    async authorized({ auth }) {
-      // If session exists → allow SSR pages
-      return !!auth?.user;
-    },
-
-    async redirect({ baseUrl }) {
-      // ALWAYS return base URL — prevents redirect loop
-      return baseUrl;
+    async redirect({ url, baseUrl }) {
+      // Allow relative URLs
+      if (url.startsWith("/")) return url
+      
+      // Allow callback URLs on same domain
+      if (new URL(url).origin === baseUrl) return url
+      
+      // Default fallback
+      return baseUrl
     },
   },
 });
