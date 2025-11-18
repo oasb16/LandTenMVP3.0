@@ -1,17 +1,15 @@
 "use client";
 
-import { AuthProvider } from "@/components/AuthProvider";
+import { SessionProvider } from "next-auth/react";
+import AuthProvider from "@/components/auth/AuthProvider";
 import { StreamChatProvider } from "@/hooks/chat/StreamChatContext";
 
-/**
- * Client-side providers wrapper.
- * This must be a separate "use client" component to avoid hydration issues
- * when used in a server component layout that exports metadata.
- */
 export function ClientProviders({ children }: { children: React.ReactNode }) {
   return (
-    <AuthProvider>
-      <StreamChatProvider>{children}</StreamChatProvider>
-    </AuthProvider>
+    <SessionProvider refetchInterval={300} refetchOnWindowFocus={false}>
+      <AuthProvider>
+        <StreamChatProvider>{children}</StreamChatProvider>
+      </AuthProvider>
+    </SessionProvider>
   );
 }
