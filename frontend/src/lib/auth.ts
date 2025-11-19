@@ -39,15 +39,22 @@ export const authConfig = {
      * 🔵 JWT CALLBACK
      * Runs on every login. Auto-creates profile on the backend.
      */
-    async jwt({ token, user }) {
-      // Only run on first login OR if token doesn’t have persona yet
+    async jwt({ token, user, trigger, session }) {
+      const base = BACKEND_BASE.replace(/\/$/, "");
+
+      // Handle persona update from client (via update() call)
+      if (trigger === "update" && session?.persona) {
+        console.log("[auth] Persona updated from client:", session.persona);
+        token.persona = session.persona;
+        return token;
+      }
+
+      // Only run on first login OR if token doesn't have persona yet
       if (user?.email && !token.persona) {
         console.log("[auth] Persona sync starting…");
 
         const email = user.email;
         const name = user.name ?? "";
-
-        const base = BACKEND_BASE.replace(/\/$/, "");
 
         try {
           // 1. Try to read existing profile
@@ -92,12 +99,17 @@ export const authConfig = {
 
     /**
      * 🔵 REDIRECT CALLBACK
-     * Prevent infinite loops
+     * After sign in, redirect to dashboard
      */
     async redirect({ url, baseUrl }) {
+      // If callback URL is provided and is relative, use it
       if (url.startsWith("/")) return url;
-      if (new URL(url).origin === baseUrl) return url;
-      return baseUrl;
+
+      // If callback URL has same origin as base, use it
+      if (url.startsWith(baseUrl)) return url;
+
+      // Default redirect after sign in
+      return `${baseUrl}/dashboard`;
     },
   },
 
