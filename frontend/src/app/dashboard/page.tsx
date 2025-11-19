@@ -17,58 +17,86 @@ export default function PersonaSelectorPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  //
+  // 1. If session already has persona, skip selector
+  //
   useEffect(() => {
     if (session?.user?.persona) {
       router.replace(`/dashboard/${session.user.persona}`);
     }
   }, [session?.user?.persona, router]);
 
+  //
+  // 2. Try to fetch existing persona from backend
+  //
   useEffect(() => {
-    const fetchPersona = async () => {
+    async function fetchPersona() {
       try {
         const res = await fetch("/api/profile");
         if (res.ok) {
           const data = await res.json();
           if (data?.persona) {
             await update({ persona: data.persona });
+            router.replace(`/dashboard/${data.persona}`);
           }
         }
       } catch {
         /* ignore */
       }
-    };
+    }
+
     if (status === "authenticated" && !session?.user?.persona) {
       fetchPersona();
     }
-  }, [status, session?.user?.persona, update]);
+  }, [status, session?.user?.persona, update, router]);
 
+  //
+  // 3. Handle persona creation
+  //
   const handleSave = async () => {
     if (!persona) {
       setError("Please select a persona.");
       return;
     }
+
     setLoading(true);
     setError(null);
+
     try {
       const res = await fetch("/api/profile", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ persona }),
       });
-      if (!res.ok) throw new Error("Failed to store persona");
+
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(txt || "Failed to store persona");
+      }
+
       await update({ persona });
       router.replace(`/dashboard/${persona}`);
-    } catch (err) {
-      setError((err as Error).message);
+    } catch (err: any) {
+      setError(err.message || "Failed to store persona");
     } finally {
       setLoading(false);
     }
   };
 
+  //
+  // 4. Loading states
+  //
   if (status === "loading") {
-    return <div className="min-h-screen flex items-center justify-center bg-slate-900 text-slate-100">Loading…</div>;
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-900 text-slate-100">
+        Loading…
+      </div>
+    );
   }
 
+  //
+  // 5. Not logged in
+  //
   if (status !== "authenticated") {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-slate-900 text-slate-100">
@@ -83,6 +111,9 @@ export default function PersonaSelectorPage() {
     );
   }
 
+  //
+  // 6. UI
+  //
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center py-12 px-6">
       <div className="w-full max-w-xl space-y-6">
