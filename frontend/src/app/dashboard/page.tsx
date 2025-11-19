@@ -76,6 +76,7 @@ export default function PersonaSelectorPage() {
     setError(null);
 
     try {
+      // Step 1: Save to database
       const res = await fetch("/api/profile", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -87,10 +88,13 @@ export default function PersonaSelectorPage() {
         throw new Error(txt || `Backend error ${res.status}`);
       }
 
-      // Update session with selected persona
+      // Step 2: Force session refresh from backend
+      await fetch("/api/auth/session?update");
+
+      // Step 3: Update client-side session
       await update({ persona });
 
-      // Navigate to dashboard
+      // Step 4: Navigate to dashboard
       router.replace(`/dashboard/${persona}`);
     } catch (err: any) {
       console.error("[persona-save] error:", err);
