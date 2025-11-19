@@ -39,19 +39,24 @@ export default function PersonaDashboardPage() {
   const [activeTab, setActiveTab] = useState<MobileTab>("chat");
 
   useEffect(() => {
-    if (status === "loading") return;
-    if (!session?.user) {
-      router.replace("/dashboard");
-      return;
+    if (status !== "authenticated") return;
+
+    async function loadProfile() {
+      try {
+        const res = await fetch("/api/profile");
+        if (!res.ok) throw new Error("Profile load failed");
+
+        const data = await res.json();
+        if (data?.persona) {
+          router.replace(`/dashboard/${data.persona}`);
+        }
+      } catch (e: any) {
+        console.error("Profile load error:", e);
+      }
     }
-    if (!session.user.persona) {
-      router.replace("/dashboard");
-      return;
-    }
-    if (session.user.persona !== personaParam) {
-      router.replace(`/dashboard/${session.user.persona}`);
-    }
-  }, [status, session, personaParam, router]);
+
+    loadProfile();
+  }, [status, router]);
 
   const personaLabel = useMemo(() => {
     if (!personaParam) return "Operations";
