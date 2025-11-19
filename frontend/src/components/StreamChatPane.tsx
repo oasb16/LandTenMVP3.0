@@ -86,6 +86,22 @@ export default function StreamChatPane({ className }: Props) {
     }
   }, [activeChannel, activeChannel?.state?.messages?.length]);
 
+  // Auto-scroll to bottom when channel or messages change
+  useEffect(() => {
+    if (!activeChannel) return;
+
+    // Small delay to ensure DOM is ready
+    const timer = setTimeout(() => {
+      const messageList = document.querySelector('.str-chat__list');
+      if (messageList) {
+        // Scroll to bottom (top in reverse layout)
+        messageList.scrollTop = 0;
+      }
+    }, 100);
+
+    return () => clearTimeout(timer);
+  }, [activeChannel, activeChannel?.state?.messages?.length]);
+
   const showEmptyState = !loading && !activeChannel;
 
   // Loading state
@@ -138,13 +154,28 @@ export default function StreamChatPane({ className }: Props) {
 
   return (
     <div
-      className={`str-chat str-chat__theme-dark flex h-full min-h-[360px] flex-col overflow-hidden rounded-2xl bg-slate-950/70 backdrop-blur ${className ?? ""}`.trim()}
+      className={`str-chat str-chat__theme-dark flex h-full flex-col overflow-hidden ${className ?? ""}`.trim()}
+      style={{
+        // Force Stream components to use full height
+        minHeight: 0,
+      }}
     >
       <Chat client={client} theme="str-chat__theme-dark">
         <Channel channel={activeChannel}>
           <Window>
             <ChannelHeader />
-            <MessageList />
+
+            {/* MessageList with proper height constraints */}
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <MessageList
+                // Auto-scroll to newest messages
+                disableDateSeparator={false}
+                // Performance optimization
+                messageLimit={50}
+                // Hide typing indicator if needed
+                hideTypingIndicator={false}
+              />
+            </div>
 
             {/* Agent Toggle and Message Input Container */}
             <div className="flex flex-col border-t border-slate-800/70 bg-slate-950/80">

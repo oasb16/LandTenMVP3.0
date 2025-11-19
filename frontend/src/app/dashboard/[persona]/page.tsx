@@ -139,8 +139,8 @@ export default function PersonaDashboardPage() {
   ].join(" ");
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100">
-      <div className="mx-auto flex min-h-screen max-w-7xl flex-col px-4 pb-6 pt-6 sm:px-6 lg:px-10">
+    <div className="h-screen overflow-hidden bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100">
+      <div className="mx-auto flex h-full max-w-7xl flex-col px-4 pb-6 pt-6 sm:px-6 lg:px-10">
         <header className="mb-4 flex flex-col gap-4 rounded-3xl border border-slate-800/60 bg-slate-950/80 p-6 backdrop-blur-xl lg:flex-row lg:items-center lg:justify-between">
           <div>
             <p className="text-xs uppercase tracking-[0.35em] text-emerald-300">Command Center</p>
@@ -182,7 +182,7 @@ export default function PersonaDashboardPage() {
           </div>
         ) : null}
 
-        <main className="grid flex-1 grid-cols-12 gap-5">
+        <main className="grid flex-1 grid-cols-12 gap-5 min-h-0">
           <aside className={conversationPanelClasses}>
             <ConversationList />
           </aside>
@@ -194,13 +194,8 @@ export default function PersonaDashboardPage() {
               reasoningLabel={reasoningLabel}
               reasoningStage={reasoningStage}
             />
-            <div className="flex flex-1 flex-col gap-4 p-4">
-              <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-800/60 bg-slate-950/80 shadow-lg shadow-slate-950/40">
-                <StreamChatPane className="flex-1" />
-              </div>
-              {loading ? (
-                <p className="text-xs text-slate-400">Connecting to Stream…</p>
-              ) : null}
+            <div className="flex flex-1 flex-col min-h-0">
+              <StreamChatPane className="h-full" />
             </div>
           </section>
 
