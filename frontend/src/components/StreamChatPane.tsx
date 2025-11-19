@@ -165,8 +165,8 @@ export default function StreamChatPane({ className }: Props) {
           <Window>
             <ChannelHeader />
 
-            {/* MessageList with proper height constraints */}
-            <div className="flex-1 min-h-0 overflow-hidden">
+            {/* MessageList with proper height constraints and scrolling */}
+            <div className="flex-1 min-h-0 overflow-y-auto">
               <MessageList
                 // Auto-scroll to newest messages
                 disableDateSeparator={false}
