@@ -37,26 +37,42 @@ export default function PersonaDashboardPage() {
   const { flowState, reasoningState, activeChannel, loading, error } = useStreamChat();
 
   const [activeTab, setActiveTab] = useState<MobileTab>("chat");
+  const [hasRedirected, setHasRedirected] = useState(false);
 
+  // Handle authentication and persona routing
   useEffect(() => {
-    if (status !== "authenticated") return;
+    // Don't redirect while session is loading
+    if (status === "loading") return;
 
-    async function loadProfile() {
-      try {
-        const res = await fetch("/api/profile");
-        if (!res.ok) throw new Error("Profile load failed");
+    // Prevent multiple redirects
+    if (hasRedirected) return;
 
-        const data = await res.json();
-        if (data?.persona) {
-          router.replace(`/dashboard/${data.persona}`);
-        }
-      } catch (e: any) {
-        console.error("Profile load error:", e);
-      }
+    // Redirect unauthenticated users to sign in
+    if (status === "unauthenticated") {
+      setHasRedirected(true);
+      router.replace("/auth/signin");
+      return;
     }
 
-    loadProfile();
-  }, [status, router]);
+    // If authenticated, check persona matches
+    if (status === "authenticated") {
+      const sessionPersona = session?.user?.persona;
+
+      // No persona selected, go to selector
+      if (!sessionPersona) {
+        setHasRedirected(true);
+        router.replace("/dashboard");
+        return;
+      }
+
+      // Wrong persona, redirect to correct dashboard
+      if (sessionPersona !== personaParam) {
+        setHasRedirected(true);
+        router.replace(`/dashboard/${sessionPersona}`);
+        return;
+      }
+    }
+  }, [status, session?.user?.persona, personaParam, router, hasRedirected]);
 
   const personaLabel = useMemo(() => {
     if (!personaParam) return "Operations";
@@ -73,10 +89,20 @@ export default function PersonaDashboardPage() {
     return flowState?.persona ?? session?.user?.persona ?? personaParam;
   }, [flowState?.persona, session?.user?.persona, personaParam]);
 
-  if (status === "loading" || !session?.user?.persona || session.user.persona !== personaParam) {
+  // Show loading during session load or redirect
+  if (status === "loading") {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-100">
         Loading workspace…
+      </div>
+    );
+  }
+
+  // Show loading while redirecting (persona mismatch or missing)
+  if (status === "unauthenticated" || !session?.user?.persona || session.user.persona !== personaParam) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-100">
+        Redirecting…
       </div>
     );
   }
