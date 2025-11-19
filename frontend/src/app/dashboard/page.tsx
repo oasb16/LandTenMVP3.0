@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useSession, signIn, signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
 
@@ -13,12 +13,16 @@ const personas = [
 export default function PersonaSelectorPage() {
   const { data: session, status, update } = useSession();
   const router = useRouter();
+
   const [persona, setPersona] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Prevent endless profile polling
+  const fetchedOnce = useRef(false);
+
   //
-  // 1. If session already has persona, skip selector
+  // 1. If session already has persona → go directly to dashboard
   //
   useEffect(() => {
     if (session?.user?.persona) {
@@ -27,31 +31,40 @@ export default function PersonaSelectorPage() {
   }, [session?.user?.persona, router]);
 
   //
-  // 2. Try to fetch existing persona from backend
+  // 2. Fetch persona only ONCE per page load, only if missing
   //
   useEffect(() => {
-    async function fetchPersona() {
+    if (status !== "authenticated") return;
+    if (session?.user?.persona) return;
+    if (fetchedOnce.current) return;
+
+    fetchedOnce.current = true;
+
+    async function fetchPersonaOnce() {
       try {
-        const res = await fetch("/api/profile");
-        if (res.ok) {
-          const data = await res.json();
-          if (data?.persona) {
-            await update({ persona: data.persona });
-            router.replace(`/dashboard/${data.persona}`);
-          }
+        const res = await fetch("/api/profile", { method: "GET" });
+
+        if (!res.ok) {
+          console.warn("[persona] backend returned", res.status);
+          return; // Do not retry automatically
         }
-      } catch {
-        /* ignore */
+
+        const data = await res.json();
+        if (data?.persona) {
+          // Update session with persona
+          await update({ persona: data.persona });
+          router.replace(`/dashboard/${data.persona}`);
+        }
+      } catch (err) {
+        console.warn("[persona] fetch failed:", err);
       }
     }
 
-    if (status === "authenticated" && !session?.user?.persona) {
-      fetchPersona();
-    }
+    fetchPersonaOnce();
   }, [status, session?.user?.persona, update, router]);
 
   //
-  // 3. Handle persona creation
+  // 3. Save persona to backend
   //
   const handleSave = async () => {
     if (!persona) {
@@ -69,22 +82,26 @@ export default function PersonaSelectorPage() {
         body: JSON.stringify({ persona }),
       });
 
+      const txt = await res.text();
       if (!res.ok) {
-        const txt = await res.text();
-        throw new Error(txt || "Failed to store persona");
+        throw new Error(txt || `Backend error ${res.status}`);
       }
 
+      // Update session with selected persona
       await update({ persona });
+
+      // Navigate to dashboard
       router.replace(`/dashboard/${persona}`);
     } catch (err: any) {
-      setError(err.message || "Failed to store persona");
+      console.error("[persona-save] error:", err);
+      setError(`Failed to store persona: ${err.message}`);
     } finally {
       setLoading(false);
     }
   };
 
   //
-  // 4. Loading states
+  // 4. Loading UI
   //
   if (status === "loading") {
     return (
@@ -95,7 +112,7 @@ export default function PersonaSelectorPage() {
   }
 
   //
-  // 5. Not logged in
+  // 5. Not logged in → require login
   //
   if (status !== "authenticated") {
     return (
@@ -112,7 +129,7 @@ export default function PersonaSelectorPage() {
   }
 
   //
-  // 6. UI
+  // 6. UI: Persona selection
   //
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center py-12 px-6">
@@ -122,6 +139,7 @@ export default function PersonaSelectorPage() {
             <h1 className="text-3xl font-bold">Choose your workspace</h1>
             <p className="text-slate-400">Signed in as {session.user?.email}</p>
           </div>
+
           <button
             onClick={() => signOut({ callbackUrl: "/" })}
             className="rounded-md border border-slate-600 px-4 py-2 text-sm hover:bg-slate-800"
@@ -142,7 +160,9 @@ export default function PersonaSelectorPage() {
               }`}
             >
               <h2 className="text-xl font-semibold">{p.label}</h2>
-              <p className="mt-2 text-sm text-slate-400">Access {p.label.toLowerCase()} tools.</p>
+              <p className="mt-2 text-sm text-slate-400">
+                Access {p.label.toLowerCase()} tools.
+              </p>
             </button>
           ))}
         </div>
