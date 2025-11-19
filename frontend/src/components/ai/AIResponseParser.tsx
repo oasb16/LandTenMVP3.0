@@ -17,10 +17,12 @@ import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/ca
 type NextAction = {
   action: string;
   details?: string;
+  responsible_party?: string;
 };
 
 type AnalysisPayload = {
   summary?: string;
+  full_response?: string;
   next_actions?: NextAction[];
 };
 
@@ -55,7 +57,18 @@ const normaliseStage = (stage?: string | null) => stage?.toLowerCase() ?? null;
 const AIResponseParserComponent = ({ data, stage, incidentId, persona, onActionClick }: Props) => {
   const analysis: AnalysisPayload | null = data?.analysis ?? null;
 
-  const actions = useMemo(() => analysis?.next_actions ?? [], [analysis?.next_actions]);
+  // Filter actions based on user persona (role)
+  const actions = useMemo(() => {
+    const allActions = analysis?.next_actions ?? [];
+    if (!persona) return allActions;
+
+    // Filter actions by responsible_party
+    return allActions.filter(action => {
+      const party = action.responsible_party?.toLowerCase();
+      return !party || party === 'both' || party === persona.toLowerCase();
+    });
+  }, [analysis?.next_actions, persona]);
+
   const normalizedStage = normaliseStage(stage);
 
   // Handler for action button clicks

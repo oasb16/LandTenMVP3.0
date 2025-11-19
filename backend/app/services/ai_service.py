@@ -56,7 +56,15 @@ Previous answer: {answer or "None"}.
 
 Analyze the chat below. Decide whether it relates to property
 management or maintenance, and if it contains incident-worthy
-information. If so, summarize and propose next actions.
+information.
+
+Respond in JSON format with:
+- summary: A concise 1-2 sentence summary of your analysis
+- full_response: A complete detailed explanation with all relevant information
+- next_actions: Array of actionable items, each with:
+  - action: Brief action title
+  - details: Description of the action
+  - responsible_party: Who should take action ("tenant", "landlord", or "both")
 
 Chat:
 {message}
@@ -97,31 +105,61 @@ Chat:
             data = json.loads(raw_content)
             reasoning = data.get("reasoning", reasoning)
 
-            # 🧠 Select best field, supporting lists/dicts
-            answer = (
-                data.get("answer")
-                or data.get("reply")
-                or data.get("summary")
-                or data.get("next_actions")
-                or data.get("response")
-                or data
-                or answer
-            )
+            # 🧠 Build structured response with summary, full_response, and next_actions
+            if data.get("summary") and data.get("full_response"):
+                # New structured format
+                answer = data
+            else:
+                # Legacy fallback: try to extract fields
+                summary = data.get("summary") or data.get("answer") or data.get("reply") or ""
+                full_response = data.get("full_response") or data.get("answer") or data.get("reasoning") or ""
+                next_actions = data.get("next_actions") or []
 
-            # 🔄 Normalize lists/dicts to string for display
-            if isinstance(answer, (list, dict)):
-                answer = json.dumps(answer, indent=2)
+                # Normalize next_actions to have responsible_party
+                normalized_actions = []
+                for action in next_actions:
+                    if isinstance(action, str):
+                        normalized_actions.append({
+                            "action": action,
+                            "details": "",
+                            "responsible_party": "both"
+                        })
+                    elif isinstance(action, dict):
+                        normalized_actions.append({
+                            "action": action.get("action", ""),
+                            "details": action.get("details", ""),
+                            "responsible_party": action.get("responsible_party", "both")
+                        })
+
+                answer = {
+                    "summary": summary,
+                    "full_response": full_response,
+                    "next_actions": normalized_actions
+                }
 
         except Exception as e:
             print(f"[agent-debug] JSON parse error: {e}")
             reasoning += "\n" + str(raw_content)
-            answer = str(raw_content).strip()
+            answer = {
+                "summary": str(raw_content).strip(),
+                "full_response": str(raw_content).strip(),
+                "next_actions": []
+            }
 
-    # ✅ Safe text fallback
-    if not isinstance(answer, str):
-        answer = json.dumps(answer, indent=2)
-    if not answer.strip():
-        answer = "(Agent found no actionable reply.)"
-
-    return answer.strip()
+    # ✅ Return structured JSON string
+    if isinstance(answer, dict):
+        return json.dumps(answer)
+    elif isinstance(answer, str):
+        # Legacy string response - wrap in structure
+        return json.dumps({
+            "summary": answer,
+            "full_response": answer,
+            "next_actions": []
+        })
+    else:
+        return json.dumps({
+            "summary": "(Agent found no actionable reply.)",
+            "full_response": "(Agent found no actionable reply.)",
+            "next_actions": []
+        })
 

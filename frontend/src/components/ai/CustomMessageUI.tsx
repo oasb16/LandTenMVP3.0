@@ -51,11 +51,17 @@ const STAGE_PULSE_DURATION = 2200;
  * Returns parsed data if valid and matches expected structure, null otherwise.
  *
  * Handles multiple JSON structures:
- * 1. { analysis: { summary, next_actions } }
- * 2. { summary, next_actions } (top-level)
+ * 1. { analysis: { summary, full_response, next_actions } }
+ * 2. { summary, full_response, next_actions } (top-level)
  * 3. { reasoning, answer, next_actions }
  */
-function tryParseStructuredReasoning(text: string): { analysis?: { summary?: string; next_actions?: Array<{ action: string; details?: string }> } } | null {
+function tryParseStructuredReasoning(text: string): {
+  analysis?: {
+    summary?: string;
+    full_response?: string;
+    next_actions?: Array<{ action: string; details?: string; responsible_party?: string }>
+  }
+} | null {
   const trimmed = text.trim();
 
   // Quick check: does it look like JSON?
@@ -75,11 +81,12 @@ function tryParseStructuredReasoning(text: string): { analysis?: { summary?: str
       return parsed;
     }
 
-    // Case 2: Top-level summary/next_actions - normalize to expected structure
-    if (parsed.summary || parsed.next_actions) {
+    // Case 2: Top-level summary/full_response/next_actions - normalize to expected structure
+    if (parsed.summary || parsed.full_response || parsed.next_actions) {
       return {
         analysis: {
           summary: parsed.summary || parsed.answer || parsed.reply || parsed.reasoning,
+          full_response: parsed.full_response || parsed.answer || parsed.reply || parsed.reasoning,
           next_actions: parsed.next_actions,
         },
       };
@@ -96,6 +103,7 @@ function tryParseStructuredReasoning(text: string): { analysis?: { summary?: str
       return {
         analysis: {
           summary,
+          full_response: parsed.reasoning || summary,
           next_actions: actions,
         },
       };
@@ -232,26 +240,31 @@ export const CustomMessageUI = memo(function CustomMessageUI({
             onActionClick={onActionClick}
           />
 
-          {/* Show Details toggle */}
-          <button
-            onClick={() => setShowRawJSON(!showRawJSON)}
-            className="flex items-center gap-1 self-start text-xs text-slate-400 hover:text-emerald-300 transition-colors"
-          >
-            <ChevronDown
-              className={`h-3 w-3 transition-transform ${showRawJSON ? "rotate-180" : ""}`}
-            />
-            {showRawJSON ? "Hide" : "Show"} Details
-          </button>
+          {/* Show Full Details toggle - only if full_response exists and differs from summary */}
+          {parsedReasoning.analysis?.full_response &&
+           parsedReasoning.analysis.full_response !== parsedReasoning.analysis.summary && (
+            <>
+              <button
+                onClick={() => setShowRawJSON(!showRawJSON)}
+                className="flex items-center gap-1 self-start text-xs text-slate-400 hover:text-emerald-300 transition-colors"
+              >
+                <ChevronDown
+                  className={`h-3 w-3 transition-transform ${showRawJSON ? "rotate-180" : ""}`}
+                />
+                {showRawJSON ? "Hide" : "See"} Full Details
+              </button>
 
-          {showRawJSON && (
-            <motion.pre
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              className="overflow-x-auto rounded-lg bg-slate-950/80 border border-slate-700 p-3 text-xs text-slate-300 font-mono"
-            >
-              {JSON.stringify(parsedReasoning, null, 2)}
-            </motion.pre>
+              {showRawJSON && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="rounded-lg bg-slate-900/60 border border-emerald-500/20 p-4 text-sm text-slate-200 leading-relaxed"
+                >
+                  {parsedReasoning.analysis.full_response}
+                </motion.div>
+              )}
+            </>
           )}
         </div>
       ) : messageText ? (
