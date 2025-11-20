@@ -117,6 +117,7 @@ export default function PersonaDashboardPage() {
     activeTab === "conversations" ? "flex" : "hidden",
     "lg:flex",
     "flex-col",
+    "h-full",
     "gap-4",
     "col-span-12 lg:col-span-4 xl:col-span-3",
   ].join(" ");
@@ -126,6 +127,7 @@ export default function PersonaDashboardPage() {
     activeTab === "chat" ? "flex" : "hidden",
     "lg:flex",
     "flex-col",
+    "h-full",
     "col-span-12 lg:col-span-8 xl:col-span-6",
   ].join(" ");
 
@@ -134,6 +136,7 @@ export default function PersonaDashboardPage() {
     activeTab === "insights" ? "flex" : "hidden",
     "xl:flex",
     "flex-col",
+    "h-full",
     "gap-4",
     "col-span-12 xl:col-span-3",
   ].join(" ");

@@ -154,7 +154,7 @@ export default function StreamChatPane({ className }: Props) {
 
   return (
     <div
-      className={`str-chat str-chat__theme-dark flex h-full flex-col overflow-hidden ${className ?? ""}`.trim()}
+      className={`str-chat str-chat__theme-dark flex h-full flex-col ${className ?? ""}`.trim()}
       style={{
         // Force Stream components to use full height
         minHeight: 0,
@@ -165,17 +165,15 @@ export default function StreamChatPane({ className }: Props) {
           <Window>
             <ChannelHeader />
 
-            {/* MessageList with proper height constraints and scrolling */}
-            <div className="flex-1 min-h-0 overflow-y-auto">
-              <MessageList
-                // Auto-scroll to newest messages
-                disableDateSeparator={false}
-                // Performance optimization
-                messageLimit={50}
-                // Hide typing indicator if needed
-                hideTypingIndicator={false}
-              />
-            </div>
+            {/* MessageList handles its own scrolling - no wrapper needed */}
+            <MessageList
+              // Auto-scroll to newest messages
+              disableDateSeparator={false}
+              // Performance optimization
+              messageLimit={50}
+              // Hide typing indicator if needed
+              hideTypingIndicator={false}
+            />
 
             {/* Agent Toggle and Message Input Container */}
             <div className="flex flex-col border-t border-slate-800/70 bg-slate-950/80">
