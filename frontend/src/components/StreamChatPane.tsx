@@ -108,9 +108,10 @@ export default function StreamChatPane({ className }: Props) {
   if (loading) {
     return (
       <div
-        className={`flex h-full min-h-[360px] flex-col overflow-hidden rounded-2xl bg-slate-950/70 backdrop-blur ${className ?? ""}`.trim()}
+        className={`flex h-full flex-col overflow-hidden rounded-2xl bg-slate-950/70 backdrop-blur ${className ?? ""}`.trim()}
+        style={{ minHeight: 0 }}
       >
-        <div className="flex h-full items-center justify-center text-slate-400">
+        <div className="flex flex-1 items-center justify-center text-slate-400">
           <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Connecting to chat…
         </div>
       </div>
@@ -121,9 +122,10 @@ export default function StreamChatPane({ className }: Props) {
   if (error) {
     return (
       <div
-        className={`flex h-full min-h-[360px] flex-col overflow-hidden rounded-2xl bg-slate-950/70 backdrop-blur ${className ?? ""}`.trim()}
+        className={`flex h-full flex-col overflow-hidden rounded-2xl bg-slate-950/70 backdrop-blur ${className ?? ""}`.trim()}
+        style={{ minHeight: 0 }}
       >
-        <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-rose-300">
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 text-sm text-rose-300">
           <WifiOff className="h-5 w-5" />
           <p className="max-w-sm text-center">{error}</p>
         </div>
@@ -135,9 +137,10 @@ export default function StreamChatPane({ className }: Props) {
   if (showEmptyState) {
     return (
       <div
-        className={`flex h-full min-h-[360px] flex-col overflow-hidden rounded-2xl bg-slate-950/70 backdrop-blur ${className ?? ""}`.trim()}
+        className={`flex h-full flex-col overflow-hidden rounded-2xl bg-slate-950/70 backdrop-blur ${className ?? ""}`.trim()}
+        style={{ minHeight: 0 }}
       >
-        <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-slate-300">
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 text-sm text-slate-300">
           <WifiOff className="h-5 w-5" />
           <p className="max-w-sm text-center">
             Select a conversation to view messages or start a new thread from the sidebar.
