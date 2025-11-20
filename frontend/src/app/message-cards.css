@@ -4,12 +4,12 @@
   margin: 0.5rem 0;
 }
 
-/* Base Card Styles */
+/* Base Card Styles - Silver and Blue Theme */
 .card {
-  background: #ffffff;
+  background: #f8fafc;
   border-radius: 12px;
-  border-left: 4px solid #6b7280;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border-left: 4px solid #3b82f6;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.1);
   overflow: hidden;
   margin: 0.5rem 0;
   max-width: 100%;
@@ -17,7 +17,7 @@
 }
 
 .card:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);
 }
 
 /* Card Header */
@@ -28,7 +28,7 @@
 .card-title {
   font-size: 1rem;
   font-weight: 600;
-  color: #111827;
+  color: #1e293b;
   margin: 0;
 }
 
@@ -51,7 +51,7 @@
 }
 
 .card-text {
-  color: #4b5563;
+  color: #475569;
   font-size: 0.875rem;
   line-height: 1.5;
   margin: 0 0 0.75rem 0;
@@ -67,7 +67,7 @@
 
 .card-field {
   padding: 0.5rem;
-  background: #f9fafb;
+  background: #e2e8f0;
   border-radius: 6px;
 }
 
@@ -82,7 +82,7 @@
 .field-title {
   font-size: 0.75rem;
   font-weight: 600;
-  color: #6b7280;
+  color: #64748b;
   text-transform: uppercase;
   letter-spacing: 0.025em;
   margin-bottom: 0.25rem;
@@ -90,7 +90,7 @@
 
 .field-value {
   font-size: 0.875rem;
-  color: #111827;
+  color: #1e293b;
   font-weight: 500;
   white-space: pre-line;
 }
@@ -103,7 +103,7 @@
 .progress-bar {
   width: 100%;
   height: 8px;
-  background: #e5e7eb;
+  background: #cbd5e1;
   border-radius: 4px;
   overflow: hidden;
   margin-bottom: 0.5rem;
@@ -111,14 +111,14 @@
 
 .progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #3b82f6, #60a5fa);
+  background: linear-gradient(90deg, #2563eb, #3b82f6);
   transition: width 0.3s ease;
   border-radius: 4px;
 }
 
 .progress-text {
   font-size: 0.75rem;
-  color: #6b7280;
+  color: #64748b;
   font-weight: 600;
 }
 
@@ -132,21 +132,21 @@
 
 .bid-item {
   padding: 0.75rem;
-  background: #f9fafb;
+  background: #e2e8f0;
   border-radius: 8px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid #cbd5e1;
 }
 
 .bid-contractor {
   font-size: 0.875rem;
   font-weight: 600;
-  color: #111827;
+  color: #1e293b;
   margin-bottom: 0.25rem;
 }
 
 .bid-details {
   font-size: 0.8125rem;
-  color: #6b7280;
+  color: #475569;
   white-space: pre-line;
 }
 
@@ -191,14 +191,14 @@
 }
 
 .card-button-default {
-  background: #f3f4f6;
-  color: #374151;
-  border: 1px solid #d1d5db;
+  background: #e2e8f0;
+  color: #1e293b;
+  border: 1px solid #cbd5e1;
 }
 
 .card-button-default:hover {
-  background: #e5e7eb;
-  border-color: #9ca3af;
+  background: #cbd5e1;
+  border-color: #94a3b8;
 }
 
 .card-button-danger {
@@ -224,13 +224,13 @@
 /* Card Footer */
 .card-footer {
   padding: 0.75rem 1rem;
-  background: #f9fafb;
-  border-top: 1px solid #e5e7eb;
+  background: #e2e8f0;
+  border-top: 1px solid #cbd5e1;
   font-size: 0.75rem;
-  color: #6b7280;
+  color: #64748b;
 }
 
-/* Card Type Specific Styles */
+/* Card Type Specific Styles - Silver and Blue Theme */
 .incident-card {
   border-left-width: 4px;
 }
@@ -240,75 +240,89 @@
 }
 
 .job-card {
-  border-left-color: #8b5cf6;
+  border-left-color: #60a5fa;
 }
 
 .bids-card {
-  border-left-color: #059669;
+  border-left-color: #2563eb;
 }
 
 .approval-card {
-  border-left-color: #f59e0b;
+  border-left-color: #1e40af;
 }
 
 .completion-card {
-  border-left-color: #10b981;
+  border-left-color: #0ea5e9;
 }
 
-/* Dark Mode Adjustments (for Stream Chat dark theme) */
+/* Dark Mode Adjustments - Silver and Blue Theme */
 .str-chat__theme-dark .card {
-  background: #1f2937;
-  border-color: #374151;
+  background: #334155;
+  border-color: #3b82f6;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.2);
+}
+
+.str-chat__theme-dark .card:hover {
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
 }
 
 .str-chat__theme-dark .card-title {
-  color: #f9fafb;
+  color: #e2e8f0;
 }
 
 .str-chat__theme-dark .card-text {
-  color: #d1d5db;
+  color: #cbd5e1;
 }
 
 .str-chat__theme-dark .card-field {
-  background: #111827;
+  background: #1e293b;
+  border: 1px solid #475569;
 }
 
 .str-chat__theme-dark .field-title {
-  color: #9ca3af;
+  color: #94a3b8;
 }
 
 .str-chat__theme-dark .field-value {
-  color: #f3f4f6;
+  color: #e2e8f0;
 }
 
 .str-chat__theme-dark .bid-item {
-  background: #111827;
-  border-color: #374151;
+  background: #1e293b;
+  border-color: #475569;
 }
 
 .str-chat__theme-dark .bid-contractor {
-  color: #f9fafb;
+  color: #e2e8f0;
 }
 
 .str-chat__theme-dark .bid-details {
-  color: #9ca3af;
+  color: #94a3b8;
 }
 
 .str-chat__theme-dark .card-footer {
-  background: #111827;
-  border-top-color: #374151;
-  color: #9ca3af;
+  background: #1e293b;
+  border-top-color: #475569;
+  color: #94a3b8;
 }
 
 .str-chat__theme-dark .card-button-default {
-  background: #374151;
-  color: #f3f4f6;
-  border-color: #4b5563;
+  background: #475569;
+  color: #e2e8f0;
+  border-color: #64748b;
 }
 
 .str-chat__theme-dark .card-button-default:hover {
-  background: #4b5563;
-  border-color: #6b7280;
+  background: #64748b;
+  border-color: #94a3b8;
+}
+
+.str-chat__theme-dark .progress-bar {
+  background: #475569;
+}
+
+.str-chat__theme-dark .progress-fill {
+  background: linear-gradient(90deg, #3b82f6, #60a5fa);
 }
 
 /* Mobile Responsive */
@@ -358,21 +372,21 @@
 }
 
 .status-badge-pending {
-  background: #fef3c7;
-  color: #92400e;
+  background: #dbeafe;
+  color: #1e40af;
 }
 
 .status-badge-approved {
-  background: #d1fae5;
-  color: #065f46;
+  background: #bfdbfe;
+  color: #1e3a8a;
 }
 
 .status-badge-completed {
-  background: #d1fae5;
-  color: #065f46;
+  background: #93c5fd;
+  color: #1e3a8a;
 }
 
 .status-badge-rejected {
-  background: #fee2e2;
-  color: #991b1b;
+  background: #cbd5e1;
+  color: #475569;
 }

@@ -12,9 +12,9 @@ export const Badge = React.forwardRef<HTMLSpanElement, BadgeProps>(function Badg
   ref,
 ) {
   const variants: Record<NonNullable<BadgeProps["variant"]>, string> = {
-    default: "bg-emerald-600/80 text-emerald-50",
-    secondary: "bg-slate-800/80 text-slate-200",
-    outline: "border border-slate-700 text-slate-300",
+    default: "bg-blue-600/90 text-blue-50 shadow-sm shadow-blue-500/30",
+    secondary: "bg-slate-600/90 text-slate-100 shadow-sm shadow-slate-500/20",
+    outline: "border border-blue-400 text-blue-300",
   };
 
   return (
