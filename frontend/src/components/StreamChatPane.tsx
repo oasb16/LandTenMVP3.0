@@ -108,7 +108,7 @@ export default function StreamChatPane({ className }: Props) {
   if (loading) {
     return (
       <div
-        className={`flex h-full flex-col overflow-hidden rounded-2xl bg-slate-950/70 backdrop-blur ${className ?? ""}`.trim()}
+        className={`flex h-full flex-col rounded-2xl bg-slate-950/70 backdrop-blur ${className ?? ""}`.trim()}
         style={{ minHeight: 0 }}
       >
         <div className="flex flex-1 items-center justify-center text-slate-400">
@@ -122,7 +122,7 @@ export default function StreamChatPane({ className }: Props) {
   if (error) {
     return (
       <div
-        className={`flex h-full flex-col overflow-hidden rounded-2xl bg-slate-950/70 backdrop-blur ${className ?? ""}`.trim()}
+        className={`flex h-full flex-col rounded-2xl bg-slate-950/70 backdrop-blur ${className ?? ""}`.trim()}
         style={{ minHeight: 0 }}
       >
         <div className="flex flex-1 flex-col items-center justify-center gap-2 text-sm text-rose-300">
@@ -137,7 +137,7 @@ export default function StreamChatPane({ className }: Props) {
   if (showEmptyState) {
     return (
       <div
-        className={`flex h-full flex-col overflow-hidden rounded-2xl bg-slate-950/70 backdrop-blur ${className ?? ""}`.trim()}
+        className={`flex h-full flex-col rounded-2xl bg-slate-950/70 backdrop-blur ${className ?? ""}`.trim()}
         style={{ minHeight: 0 }}
       >
         <div className="flex flex-1 flex-col items-center justify-center gap-2 text-sm text-slate-300">
