@@ -13,7 +13,7 @@ export const Card = React.forwardRef<HTMLDivElement, CardProps>(function Card(
     <div
       ref={ref}
       className={cn(
-        "rounded-2xl border border-slate-800 bg-slate-900/80 text-slate-50 shadow-sm backdrop-blur-md",
+        "rounded-2xl border border-blue-500/50 bg-slate-700/90 text-slate-50 shadow-lg shadow-blue-500/20 backdrop-blur-md",
         className,
       )}
       {...props}
@@ -51,7 +51,7 @@ export const CardDescription = React.forwardRef<HTMLParagraphElement, React.HTML
     return (
       <p
         ref={ref}
-        className={cn("text-sm text-slate-300", className)}
+        className={cn("text-sm text-slate-200", className)}
         {...props}
       />
     );

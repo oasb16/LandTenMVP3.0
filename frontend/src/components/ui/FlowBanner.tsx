@@ -9,12 +9,12 @@ type Props = {
 };
 
 const STAGE_STYLES: Record<string, string> = {
-  incident: "from-rose-900/90 via-rose-800/70 to-rose-950/95 text-rose-100",
-  discovery: "from-amber-900/90 via-amber-800/70 to-amber-950/95 text-amber-100",
-  job: "from-indigo-900/90 via-indigo-800/70 to-slate-950/95 text-indigo-100",
-  approval: "from-emerald-900/90 via-emerald-800/70 to-emerald-950/95 text-emerald-100",
-  completion: "from-emerald-800/90 via-teal-700/70 to-slate-950/95 text-emerald-50",
-  policy_violation: "from-red-950 via-rose-900 to-rose-950 text-rose-100",
+  incident: "from-slate-700/90 via-slate-600/70 to-slate-800/95 text-slate-100",
+  discovery: "from-blue-900/90 via-blue-800/70 to-slate-900/95 text-blue-100",
+  job: "from-blue-800/90 via-blue-700/70 to-slate-800/95 text-blue-100",
+  approval: "from-blue-700/90 via-blue-600/70 to-slate-700/95 text-blue-50",
+  completion: "from-blue-600/90 via-cyan-600/70 to-slate-700/95 text-blue-50",
+  policy_violation: "from-slate-800 via-slate-700 to-slate-900 text-slate-100",
 };
 
 const getTone = (persona?: string) => {
@@ -34,7 +34,7 @@ const normaliseStage = (stage?: string) => stage?.split(".")[0] ?? undefined;
 
 export default function FlowBanner({ stage, persona, reasoningLabel, reasoningStage }: Props) {
   const normalizedStage = normaliseStage(stage);
-  const gradient = normalizedStage ? STAGE_STYLES[normalizedStage] : "from-slate-900 via-slate-900 to-slate-950 text-slate-100";
+  const gradient = normalizedStage ? STAGE_STYLES[normalizedStage] : "from-slate-700 via-slate-600 to-slate-800 text-slate-100";
   const tone = getTone(persona);
 
   const displayText =

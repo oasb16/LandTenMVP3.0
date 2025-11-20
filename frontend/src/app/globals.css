@@ -1,8 +1,14 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f5f7fa;
+  --foreground: #1e293b;
+  --silver-light: #e2e8f0;
+  --silver-medium: #cbd5e1;
+  --silver-dark: #94a3b8;
+  --blue-primary: #3b82f6;
+  --blue-secondary: #2563eb;
+  --blue-dark: #1e40af;
 }
 
 @theme inline {
@@ -14,8 +20,14 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #1e293b;
+    --foreground: #e2e8f0;
+    --silver-light: #334155;
+    --silver-medium: #475569;
+    --silver-dark: #64748b;
+    --blue-primary: #60a5fa;
+    --blue-secondary: #3b82f6;
+    --blue-dark: #2563eb;
   }
 }
 
@@ -130,27 +142,27 @@ body {
   }
 
   .str-chat__list::-webkit-scrollbar-thumb {
-    background-color: rgba(148, 163, 184, 0.3);
+    background-color: rgba(59, 130, 246, 0.4);
     border-radius: 2px;
   }
 }
 
-/* Desktop scrollbar styling */
+/* Desktop scrollbar styling - Silver and Blue theme */
 @media (min-width: 769px) {
   .str-chat__list::-webkit-scrollbar {
     width: 8px;
   }
 
   .str-chat__list::-webkit-scrollbar-track {
-    background: rgba(15, 23, 42, 0.5);
+    background: rgba(203, 213, 225, 0.3);
   }
 
   .str-chat__list::-webkit-scrollbar-thumb {
-    background-color: rgba(148, 163, 184, 0.5);
+    background-color: rgba(59, 130, 246, 0.6);
     border-radius: 4px;
   }
 
   .str-chat__list::-webkit-scrollbar-thumb:hover {
-    background-color: rgba(148, 163, 184, 0.7);
+    background-color: rgba(37, 99, 235, 0.8);
   }
 }

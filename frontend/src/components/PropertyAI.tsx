@@ -52,7 +52,7 @@ export default function PropertyAIApp() {
 
   if (status === 'loading') {
     return (
-      <div className="flex flex-col h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 max-w-md mx-auto items-center justify-center">
+      <div className="flex flex-col h-screen bg-gradient-to-br from-slate-100 via-blue-50 to-slate-200 max-w-md mx-auto items-center justify-center">
         <Loader2 className="w-12 h-12 text-blue-600 animate-spin" />
         <p className="mt-4 text-gray-600">Loading...</p>
       </div>
@@ -61,8 +61,8 @@ export default function PropertyAIApp() {
 
   if (!session) {
     return (
-      <div className="flex flex-col h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 max-w-md mx-auto items-center justify-center">
-        <div className="w-20 h-20 bg-gradient-to-br from-blue-600 to-purple-600 rounded-3xl flex items-center justify-center mb-6">
+      <div className="flex flex-col h-screen bg-gradient-to-br from-slate-100 via-blue-50 to-slate-200 max-w-md mx-auto items-center justify-center">
+        <div className="w-20 h-20 bg-gradient-to-br from-blue-600 to-blue-800 rounded-3xl flex items-center justify-center mb-6 shadow-lg shadow-blue-500/30">
           <Bot className="w-12 h-12 text-white" />
         </div>
         <h1 className="text-3xl font-bold text-gray-900 mb-2">PropertyAI</h1>
@@ -81,7 +81,7 @@ export default function PropertyAIApp() {
     return (
       <div className="flex flex-col h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 max-w-md mx-auto">
         <div className="flex-1 flex flex-col items-center justify-center p-6">
-          <div className="w-20 h-20 bg-gradient-to-br from-blue-600 to-purple-600 rounded-3xl flex items-center justify-center mb-6">
+          <div className="w-20 h-20 bg-gradient-to-br from-blue-600 to-blue-800 rounded-3xl flex items-center justify-center mb-6 shadow-lg shadow-blue-500/30">
             <Bot className="w-12 h-12 text-white" />
           </div>
           <h1 className="text-3xl font-bold text-gray-900 mb-2">PropertyAI</h1>
@@ -94,8 +94,8 @@ export default function PropertyAIApp() {
               className="w-full bg-white rounded-2xl p-6 shadow-lg hover:shadow-xl transition-all border-2 border-transparent hover:border-blue-500"
             >
               <div className="flex items-center gap-4">
-                <div className="w-14 h-14 bg-blue-100 rounded-xl flex items-center justify-center">
-                  <Building2 className="w-8 h-8 text-blue-600" />
+                <div className="w-14 h-14 bg-blue-100 rounded-xl flex items-center justify-center shadow-sm shadow-blue-200">
+                  <Building2 className="w-8 h-8 text-blue-700" />
                 </div>
                 <div className="flex-1 text-left">
                   <div className="font-bold text-gray-900 text-lg">Landlord</div>
@@ -107,11 +107,11 @@ export default function PropertyAIApp() {
 
             <button
               onClick={() => handleRoleSelect('tenant')}
-              className="w-full bg-white rounded-2xl p-6 shadow-lg hover:shadow-xl transition-all border-2 border-transparent hover:border-green-500"
+              className="w-full bg-white rounded-2xl p-6 shadow-lg hover:shadow-xl transition-all border-2 border-transparent hover:border-blue-400"
             >
               <div className="flex items-center gap-4">
-                <div className="w-14 h-14 bg-green-100 rounded-xl flex items-center justify-center">
-                  <Home className="w-8 h-8 text-green-600" />
+                <div className="w-14 h-14 bg-slate-200 rounded-xl flex items-center justify-center shadow-sm shadow-slate-300">
+                  <Home className="w-8 h-8 text-slate-700" />
                 </div>
                 <div className="flex-1 text-left">
                   <div className="font-bold text-gray-900 text-lg">Tenant</div>
@@ -123,11 +123,11 @@ export default function PropertyAIApp() {
 
             <button
               onClick={() => handleRoleSelect('contractor')}
-              className="w-full bg-white rounded-2xl p-6 shadow-lg hover:shadow-xl transition-all border-2 border-transparent hover:border-purple-500"
+              className="w-full bg-white rounded-2xl p-6 shadow-lg hover:shadow-xl transition-all border-2 border-transparent hover:border-blue-600"
             >
               <div className="flex items-center gap-4">
-                <div className="w-14 h-14 bg-purple-100 rounded-xl flex items-center justify-center">
-                  <Wrench className="w-8 h-8 text-purple-600" />
+                <div className="w-14 h-14 bg-blue-200 rounded-xl flex items-center justify-center shadow-sm shadow-blue-300">
+                  <Wrench className="w-8 h-8 text-blue-800" />
                 </div>
                 <div className="flex-1 text-left">
                   <div className="font-bold text-gray-900 text-lg">Contractor</div>
@@ -389,7 +389,7 @@ function LandlordDashboard({ session }: { session: any }) {
     return (
       <>
         <div className="flex flex-col h-screen bg-gray-50 max-w-md mx-auto">
-          <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-6 py-4">
+          <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-4">
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h1 className="text-2xl font-bold">My Properties</h1>
@@ -423,7 +423,7 @@ function LandlordDashboard({ session }: { session: any }) {
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
             <button
               onClick={() => setShowAddProperty(true)}
-              className="w-full bg-gradient-to-r from-blue-500 to-indigo-500 text-white rounded-xl p-4 font-medium hover:shadow-lg transition-all flex items-center justify-center gap-2"
+              className="w-full bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl p-4 font-medium hover:shadow-lg transition-all flex items-center justify-center gap-2"
             >
               <Plus className="w-5 h-5" />
               Add New Property
@@ -453,7 +453,7 @@ function LandlordDashboard({ session }: { session: any }) {
                       <div className="text-sm text-gray-600">{property.address}</div>
                       <div className="text-xs text-gray-500 mt-1">{property.tenants?.length || 0} tenant(s)</div>
                     </div>
-                    <span className="px-2 py-1 bg-green-100 text-green-700 text-xs font-medium rounded-full">
+                    <span className="px-2 py-1 bg-blue-100 text-blue-700 text-xs font-medium rounded-full">
                       {property.status}
                     </span>
                   </div>
@@ -499,7 +499,7 @@ function LandlordDashboard({ session }: { session: any }) {
     return (
       <>
         <div className="flex flex-col h-screen bg-gray-50 max-w-md mx-auto">
-          <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-6 py-4">
+          <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-4">
             <div className="flex items-center justify-between mb-4">
               <h1 className="text-2xl font-bold">Incidents</h1>
               <button className="bg-white/20 p-2 rounded-lg">
@@ -562,7 +562,7 @@ function LandlordDashboard({ session }: { session: any }) {
                   <div className="mt-3 flex gap-2">
                     <button
                       onClick={() => handleApproveIncident(incident.id)}
-                      className="flex-1 bg-green-500 text-white px-3 py-2 rounded-lg text-sm font-medium hover:bg-green-600"
+                      className="flex-1 bg-blue-600 text-white px-3 py-2 rounded-lg text-sm font-medium hover:bg-blue-700"
                     >
                       Approve & Create Job
                     </button>
@@ -598,7 +598,7 @@ function LandlordDashboard({ session }: { session: any }) {
     return (
       <>
         <div className="flex flex-col h-[100dvh] bg-gray-50 max-w-md mx-auto">
-          <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-6 py-4">
+          <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-4">
             <div className="flex items-center justify-between mb-4">
               <h1 className="text-2xl font-bold">Chat</h1>
             </div>
@@ -707,7 +707,7 @@ function TenantDashboard({ session }: { session: any }) {
     return (
       <>
         <div className="flex flex-col h-screen bg-gray-50 max-w-md mx-auto">
-          <div className="bg-gradient-to-r from-green-600 to-teal-600 text-white px-6 py-4">
+          <div className="bg-gradient-to-r from-blue-700 to-blue-800 text-white px-6 py-4">
             <div className="flex items-center justify-between mb-3">
               <div>
                 <h1 className="text-2xl font-bold">My Home</h1>
@@ -719,7 +719,7 @@ function TenantDashboard({ session }: { session: any }) {
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
             <button
               onClick={() => setCurrentView('report-issue')}
-              className="w-full bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-xl p-4 font-medium hover:shadow-lg transition-all flex items-center justify-center gap-2"
+              className="w-full bg-gradient-to-r from-slate-600 to-slate-700 text-white rounded-xl p-4 font-medium hover:shadow-lg transition-all flex items-center justify-center gap-2"
             >
               <Plus className="w-5 h-5" />
               Report New Issue
@@ -730,13 +730,13 @@ function TenantDashboard({ session }: { session: any }) {
               <div className="grid grid-cols-2 gap-3">
                 <button
                   onClick={() => setCurrentView('chat')}
-                  className="bg-blue-50 p-3 rounded-lg text-center hover:bg-blue-100 transition-colors"
+                  className="bg-blue-50 p-3 rounded-lg text-center hover:bg-blue-100 transition-colors shadow-sm"
                 >
                   <MessageSquare className="w-6 h-6 text-blue-600 mx-auto mb-1" />
                   <div className="text-sm font-medium text-gray-900">Chat</div>
                 </button>
-                <button className="bg-purple-50 p-3 rounded-lg text-center hover:bg-purple-100 transition-colors">
-                  <FileText className="w-6 h-6 text-purple-600 mx-auto mb-1" />
+                <button className="bg-slate-100 p-3 rounded-lg text-center hover:bg-slate-200 transition-colors shadow-sm">
+                  <FileText className="w-6 h-6 text-slate-600 mx-auto mb-1" />
                   <div className="text-sm font-medium text-gray-900">Documents</div>
                 </button>
               </div>
@@ -768,7 +768,7 @@ function TenantDashboard({ session }: { session: any }) {
                         <div className="text-sm text-gray-600">{incident.created || 'Recently'}</div>
                       </div>
                       <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-                        incident.status === 'In Progress' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'
+                        incident.status === 'In Progress' ? 'bg-blue-100 text-blue-700' : 'bg-blue-200 text-blue-800'
                       }`}>
                         {incident.status}
                       </span>
@@ -839,7 +839,7 @@ function TenantDashboard({ session }: { session: any }) {
           <button
             onClick={handleReportIssue}
             disabled={isSubmitting || !issueDescription.trim()}
-            className="w-full bg-gradient-to-r from-green-600 to-teal-600 text-white px-4 py-3 rounded-xl font-medium hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            className="w-full bg-gradient-to-r from-blue-700 to-blue-800 text-white px-4 py-3 rounded-xl font-medium hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             {isSubmitting ? (
               <>
@@ -862,7 +862,7 @@ function TenantDashboard({ session }: { session: any }) {
     return (
       <>
         <div className="flex flex-col h-[100dvh] bg-gray-50 max-w-md mx-auto">
-          <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-6 py-4">
+          <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-4">
             <div className="flex items-center justify-between mb-4">
               <h1 className="text-2xl font-bold">Chat</h1>
             </div>
@@ -930,7 +930,7 @@ function ContractorDashboard({ session }: { session: any }) {
   return (
     <>
       <div className="flex flex-col h-screen bg-gray-50 max-w-md mx-auto">
-        <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-6 py-4">
+        <div className="bg-gradient-to-r from-blue-600 to-blue-800 text-white px-6 py-4">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h1 className="text-2xl font-bold">Available Jobs</h1>
@@ -976,11 +976,11 @@ function ContractorDashboard({ session }: { session: any }) {
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-1">
                     <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${
-                      job.urgency === 'High' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'
+                      job.urgency === 'High' ? 'bg-blue-200 text-blue-900' : 'bg-slate-200 text-slate-700'
                     }`}>
                       {job.urgency || 'Medium'}
                     </span>
-                    <span className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs font-medium rounded-full">
+                    <span className="px-2 py-0.5 bg-slate-200 text-slate-700 text-xs font-medium rounded-full">
                       {job.matchScore || 85}% Match
                     </span>
                   </div>
@@ -1000,7 +1000,7 @@ function ContractorDashboard({ session }: { session: any }) {
                 </div>
               </div>
 
-              <button className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-4 py-2 rounded-lg font-medium hover:shadow-lg transition-all">
+              <button className="w-full bg-gradient-to-r from-blue-600 to-blue-800 text-white px-4 py-2 rounded-lg font-medium hover:shadow-lg transition-all">
                 View Details & Accept
               </button>
             </div>
