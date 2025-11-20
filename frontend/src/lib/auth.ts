@@ -115,19 +115,24 @@ export const authConfig = {
 
   /**
    * 🔵 COOKIE CONFIG
-   * Required for Vercel domain + secure
+   * Use __Host- prefix only in production (requires HTTPS)
+   * In development or non-HTTPS environments, use standard cookie name
    */
-  cookies: {
-    sessionToken: {
-      name: "__Host-next-auth.session-token",
-      options: {
-        httpOnly: true,
-        sameSite: "lax",
-        secure: true,
-        path: "/",
-      },
-    },
-  },
+  cookies:
+    process.env.NODE_ENV === "production" &&
+    process.env.NEXTAUTH_URL?.startsWith("https://")
+      ? {
+          sessionToken: {
+            name: "__Host-next-auth.session-token",
+            options: {
+              httpOnly: true,
+              sameSite: "lax",
+              secure: true,
+              path: "/",
+            },
+          },
+        }
+      : undefined, // Use NextAuth defaults for non-HTTPS
 };
 
 // Export NextAuth helpers
