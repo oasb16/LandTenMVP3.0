@@ -7,9 +7,11 @@ import os
 import hashlib
 import hmac
 import logging
+import time
 from datetime import datetime
 from typing import Dict, Any, Optional
 from fastapi import APIRouter, Request, HTTPException, Header
+from ..config.settings import settings, debug_logger
 from ..services.stream_bot import get_bot
 from ..services.context_manager import get_context_manager
 from ..services.ai_reasoning import get_ai_reasoning, Intent
@@ -92,35 +94,37 @@ async def handle_stream_webhook(
     - message.updated: Message edited by user
     - health.check: Stream Chat health check
     """
-    print("[ai-webhook] ========== Incoming webhook request ==========")
+    start_time = time.time()
+    debug_logger.log("[ai-webhook] ========== Incoming webhook request ==========")
 
     # Get raw body for signature verification
     try:
         body = await request.body()
-        print(f"[ai-webhook] Received {len(body)} bytes of payload")
+        debug_logger.log("[ai-webhook] Received %d bytes of payload", len(body))
     except Exception as e:
-        print(f"[ai-webhook] ❌ ERROR: Failed to read request body: {e}")
+        logger.error("[ai-webhook] Failed to read request body: %s", e)
         raise HTTPException(status_code=400, detail=f"Failed to read request body: {e}")
 
     # Verify webhook signature
     if x_signature:
-        print(f"[ai-webhook] Verifying webhook signature (x-signature header present)")
+        debug_logger.log("[ai-webhook] Verifying webhook signature (x-signature header present)")
         if not verify_webhook_signature(body, x_signature):
-            print("[ai-webhook] ❌ ERROR: Webhook signature verification FAILED")
+            logger.error("[ai-webhook] Webhook signature verification FAILED")
             raise HTTPException(
                 status_code=401,
                 detail={"error": "Invalid webhook signature", "hint": "Check STREAM_WEBHOOK_SECRET configuration"}
             )
+        debug_logger.log("[ai-webhook] Signature verified successfully")
     else:
-        print("[ai-webhook] WARNING: No x-signature header present - skipping verification")
+        logger.warning("[ai-webhook] No x-signature header present - skipping verification")
 
     # Parse JSON payload
     try:
         payload = await request.json()
         event_type = payload.get("type")
-        print(f"[ai-webhook] Event type: {event_type}")
+        debug_logger.log("[ai-webhook] Event type: %s", event_type)
     except Exception as e:
-        print(f"[ai-webhook] ❌ ERROR: Failed to parse JSON payload: {e}")
+        logger.error("[ai-webhook] Failed to parse JSON payload: %s", e)
         raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
 
     # Handle different event types
@@ -153,6 +157,7 @@ async def handle_stream_webhook(
 async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Context-aware handler for Stream message.new events."""
     try:
+        message_start_time = time.time()
         message = payload.get("message", {})
         metadata = message.get("metadata", {}) or {}
         user = payload.get("user", {})
@@ -164,42 +169,52 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
         logger.info("[ai-webhook] Channel: %s", channel_id)
         logger.info("[ai-webhook] User: %s (%s)", user_id, user.get("name", "unknown"))
         logger.info("[ai-webhook] Text: %s", message_text[:120])
+        debug_logger.log("[ai-webhook] Full message metadata: %s", metadata)
 
         # Ignore bot/system authored messages
         if user.get("is_bot") or str(user_id).startswith("ai-"):
-            logger.info("[ai-webhook] Ignoring bot message")
+            debug_logger.log("[ai-webhook] Ignoring bot message from: %s", user_id)
             return {"status": "ignored", "reason": "bot_message"}
 
         agent_enabled = metadata.get("agentEnabled", True)
         if agent_enabled is False:
-            logger.info("[ai-webhook] Agent disabled for this message")
+            debug_logger.log("[ai-webhook] Agent disabled via metadata for this message")
             return {"status": "ignored", "reason": "agent_disabled"}
 
         bot = get_bot()
         context_manager = get_context_manager()
         ai_reasoning = get_ai_reasoning()
 
+        debug_logger.log("[context-fetch] Fetching context for user=%s channel=%s", user_id, channel_id)
         context = context_manager.get_context(user_id, channel_id, create_if_missing=True)
         if context is None:
-            logger.error("[ai-webhook] Failed to create context for %s", user_id)
+            logger.error("[context-fetch] Failed to create context for user=%s", user_id)
             return {"status": "error", "error": "context_creation_failed"}
+        debug_logger.log("[context-fetch] Context retrieved successfully, active_intent=%s", context.get("active_intent"))
 
         previous_intent = context.get("active_intent")
 
         persona_hint = metadata.get("persona")
         persona = persona_hint or context.get("persona") or await _detect_persona(channel_id, context, bot)
+        debug_logger.log("[persona-detection] Detected persona=%s (hint=%s)", persona, persona_hint)
 
         if persona and context.get("persona") != persona:
+            debug_logger.log("[persona-update] Updating persona in context: %s → %s", context.get("persona"), persona)
             context_manager.set_persona(user_id, channel_id, persona)
 
         context_manager.append_message(user_id, channel_id, "user", message_text)
         context = context_manager.get_context(user_id, channel_id, create_if_missing=True) or context
 
+        debug_logger.log("[ai-reasoning] Calling post_process_reasoning for intent detection")
+        reasoning_start = time.time()
         reasoning = ai_reasoning.post_process_reasoning(message_text, context, persona)
+        reasoning_duration = (time.time() - reasoning_start) * 1000
         intent = reasoning["intent"]
         entities = reasoning.get("entities", {})
 
-        print(f"[ai-webhook] Detected intent: {intent} (previous: {previous_intent}) for persona: {persona} entities: {entities.keys()} and reasoning: {reasoning.get('reasoning','N/A')[:100]}...")
+        debug_logger.log("[ai-reasoning] Completed in %.2fms: intent=%s entities=%s", reasoning_duration, intent, list(entities.keys()))
+        logger.info("[ai-webhook] Detected intent: %s (previous: %s) for persona: %s", intent, previous_intent, persona)
+        debug_logger.log("[ai-reasoning] Full reasoning: %s", reasoning.get('reasoning', 'N/A')[:200])
 
         allowed_intent, violation_message = policy_validator.validate_intent(intent, persona)
         if not allowed_intent:
@@ -265,23 +280,31 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
             # INCIDENT CLASSIFICATION & REGISTRATION PIPELINE
             # ============================================================================
             logger.info("[incident-flow] 🔍 Classifying issue")
+            debug_logger.log("[incident-flow] Starting incident classification for message: %s", message_text[:100])
 
             # Step 1: Classify the issue using AI-based classification
+            classify_start = time.time()
             category, severity, urgency = classify_issue(message_text)
+            classify_duration = (time.time() - classify_start) * 1000
             logger.info(f"[incident-flow] ✅ Classified as: {category} | Severity: {severity} | Urgency: {urgency}")
+            debug_logger.log("[incident-flow] Classification took %.2fms", classify_duration)
 
             # Step 2: Check if this is maintenance-related (actionable incident)
             maintenance_categories = {"plumbing", "electrical", "hvac", "appliance", "structural"}
             is_maintenance = category in maintenance_categories
+            debug_logger.log("[incident-flow] Maintenance check: is_maintenance=%s (category=%s)", is_maintenance, category)
 
             # Step 3: Threshold decision - determine if actionable based on severity
             # Low severity issues get conversational response instead of formal incident
             is_actionable = severity in {"medium", "high", "emergency"} and is_maintenance
+            debug_logger.log("[incident-flow] Actionability check: is_actionable=%s (severity=%s, is_maintenance=%s)",
+                           is_actionable, severity, is_maintenance)
 
             if is_maintenance and not is_actionable:
                 # Low severity maintenance - acknowledge but don't create formal incident
                 logger.info(f"[incident-flow] ⚖️  Threshold decision: actionable=False (severity too low)")
                 logger.info(f"[incident-flow] ⏭️  Responding conversationally to low-severity {category} issue")
+                debug_logger.log("[incident-flow] Skipping formal incident creation for low severity")
 
                 low_severity_response = (
                     f"I understand you're experiencing a minor {category} issue. "
@@ -335,6 +358,8 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
                 # Step 6: Persist incident to DynamoDB
                 incident_record = None
                 try:
+                    debug_logger.log("[incident-engine] Persisting incident to DynamoDB: incident_id=%s", incident_id)
+                    persist_start = time.time()
                     incident_record = create_incident_record(
                         thread_id=channel_id,
                         tenant_email=user_id,
@@ -351,10 +376,13 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
                             "approval_threshold": approval_threshold,
                         },
                     )
+                    persist_duration = (time.time() - persist_start) * 1000
                     logger.info(f"[incident-flow] 💾 Incident persisted to DynamoDB: {incident_record['incident_id']}")
+                    debug_logger.log("[incident-engine] DynamoDB persistence took %.2fms", persist_duration)
                 except Exception as e:
                     logger.error(f"[incident-flow] ❌ Failed to persist incident to DynamoDB: {e}")
                     logger.warning(f"[incident-flow] ⚠️  Continuing without persistence - incident may not be durable")
+                    debug_logger.log("[incident-engine] DynamoDB error details: %s", str(e))
 
                 # Step 7: Update context manager for session continuity
                 context_update_success = False
@@ -491,6 +519,11 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
         logger.info("[ai-webhook] Flow advanced: %s → %s", previous_intent or "none", next_stage)
         logger.info("[ai-webhook] Flow state: %s", updated_context.get("flow_state"))
 
+        # Log total processing time
+        total_duration = (time.time() - message_start_time) * 1000
+        debug_logger.log("[ai-webhook] Total message processing time: %.2fms", total_duration)
+        logger.info("[ai-webhook] Message processed successfully in %.2fms", total_duration)
+
         return {
             "status": "processed",
             "intent": next_stage,
@@ -498,10 +531,12 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
             "card_sent": card_sent,
             "incident_id": updated_context.get("active_incident"),
             "flow_state": updated_context.get("flow_state"),
+            "processing_time_ms": round(total_duration, 2),
         }
 
     except Exception as exc:  # pragma: no cover - defensive
         logger.error(f"[ai-webhook] ❌ ERROR while handling message: {exc}")
+        debug_logger.error("[ai-webhook] Exception details: %s", exc)
         import traceback
 
         traceback.print_exc()
