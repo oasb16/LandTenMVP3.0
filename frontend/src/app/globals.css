@@ -26,71 +26,101 @@ body {
 }
 
 /* ============================================
-   Stream Chat Custom Overrides
+   Stream Chat Custom Overrides - ENHANCED
+   ============================================
+
+   CRITICAL FIX: Stream Chat SDK creates hidden wrapper divs with
+   its own CSS that overrides our styles. We must use !important
+   and higher specificity to force our layout rules.
+
+   Key changes from previous version:
+   1. Added !important to all declarations
+   2. Changed height: 100% to flex: 1 for wrapper elements
+   3. Added overflow: visible to prevent blocking scroll context
+   4. Doubled selectors for higher specificity
    ============================================ */
 
-/* Ensure Stream Chat containers use flex layout properly */
-.str-chat {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
+/* Root chat container - force full height flex */
+.str-chat.str-chat__theme-dark {
+  height: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  min-height: 0 !important;
+  overflow: visible !important;
 }
 
-.str-chat__container {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
+/* Stream's main container wrapper - use doubled selector for specificity */
+.str-chat__container,
+.str-chat .str-chat__container {
+  height: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: visible !important;
+  min-height: 0 !important;
 }
 
-.str-chat__main-panel {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
+/* Stream's main panel wrapper - CRITICAL: flex: 1 instead of height: 100% */
+.str-chat__main-panel,
+.str-chat .str-chat__main-panel {
+  flex: 1 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  min-height: 0 !important;
+  overflow: visible !important;
 }
 
-.str-chat-channel {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
+/* Channel wrapper - also flex: 1 for proper flex chain */
+.str-chat-channel,
+.str-chat .str-chat-channel {
+  flex: 1 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  min-height: 0 !important;
+  overflow: visible !important;
 }
 
-/* Message list should fill available space and scroll */
-.str-chat__list {
-  flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
-  display: flex;
-  flex-direction: column-reverse; /* Latest messages at bottom */
-  min-height: 0;
-  scroll-behavior: smooth;
+/* THE ACTUAL SCROLL CONTAINER - this is the only element that should scroll */
+.str-chat__list,
+.str-chat .str-chat__list {
+  flex: 1 !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  display: flex !important;
+  flex-direction: column-reverse !important; /* Latest messages at bottom */
+  min-height: 0 !important;
+  scroll-behavior: smooth !important;
 }
 
-/* Ensure message list wrapper fills space */
-.str-chat__list-wrapper {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
+/* Message list wrapper - must also be flexible */
+.str-chat__list-wrapper,
+.str-chat .str-chat__list-wrapper {
+  flex: 1 !important;
+  min-height: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: visible !important;
 }
 
 /* Virtual message list container */
-.str-chat__virtual-list {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
+.str-chat__virtual-list,
+.str-chat .str-chat__virtual-list {
+  flex: 1 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  min-height: 0 !important;
+  overflow: visible !important;
 }
 
-/* Message input stays at bottom */
-.str-chat__input-flat {
-  flex-shrink: 0;
+/* Message input stays at bottom - don't let it shrink */
+.str-chat__input-flat,
+.str-chat .str-chat__input-flat {
+  flex-shrink: 0 !important;
 }
 
-/* Channel header stays at top */
-.str-chat__header-livestream {
-  flex-shrink: 0;
+/* Channel header stays at top - don't let it shrink */
+.str-chat__header-livestream,
+.str-chat .str-chat__header-livestream {
+  flex-shrink: 0 !important;
 }
 
 /* Hide scrollbar on mobile for cleaner look (optional) */
