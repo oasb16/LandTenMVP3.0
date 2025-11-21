@@ -1,0 +1,26 @@
+{
+  "type": "message.new",
+  "message": {
+    "id": "test-msg-123",
+    "text": "There's water leaking in my kitchen",
+    "user": {
+      "id": "tenant-test-456",
+      "name": "Test Tenant User",
+      "is_bot": false
+    },
+    "metadata": {
+      "persona": "tenant",
+      "agentEnabled": true
+    },
+    "created_at": "2025-11-21T12:00:00.000Z"
+  },
+  "channel_id": "test-channel-789",
+  "channel_type": "messaging",
+  "user": {
+    "id": "tenant-test-456",
+    "name": "Test Tenant User",
+    "is_bot": false,
+    "role": "user"
+  },
+  "cid": "messaging:test-channel-789"
+}
