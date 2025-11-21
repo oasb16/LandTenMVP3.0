@@ -14,7 +14,7 @@ from fastapi import APIRouter, Request, HTTPException, Header
 from ..config.settings import settings, debug_logger
 from ..services.stream_bot import get_bot
 from ..services.context_manager import get_context_manager
-from ..services.ai_reasoning import get_ai_reasoning, Intent
+from ..services.ai_reasoning_v2 import get_ai_reasoning_v2 as get_ai_reasoning, Intent
 from ..services.policy_validator import get_policy_validator
 from ..services.card_builder import CardBuilder, send_card_message
 from ..services.flow_engine import process_transition

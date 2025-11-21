@@ -327,6 +327,17 @@ class AIReasoningV2:
                 "reasoning": full reasoning metadata
             }
         """
+        # Explicit V2 logging for confirmation
+        logger.info(
+            "[ai-reasoning-v2] ========== START V2 PIPELINE ==========\n"
+            "  Message: %s\n"
+            "  Persona: %s\n"
+            "  Flow Stage: %s",
+            message[:100],
+            persona,
+            context.get("flow_state", {}).get("stage", "idle")
+        )
+
         # STEP 1: Infer intent with flow awareness
         intent_result = self.infer_intent_with_flow_awareness(message, context, persona)
 
