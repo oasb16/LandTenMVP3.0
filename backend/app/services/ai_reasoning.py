@@ -139,8 +139,7 @@ class AIReasoning:
                 response_format={"type": "json_object"},
             )
 
-            response_choices = json.loads(response.choices)
-            print(f"response_choices : {response_choices}")  # Debug print
+            # FIX: response.choices is already a list, don't parse as JSON
             result = json.loads(response.choices[0].message.content)
             normalized_result = self._normalize_intent_result(result)
 
@@ -198,8 +197,7 @@ class AIReasoning:
                 ],
                 response_format={"type": "json_object"},
             )
-            response_choices = json.loads(response.choices)
-            print(f"response_choices : {response_choices}")  # Debug print
+            # FIX: response.choices is already a list, don't parse as JSON
             result = json.loads(response.choices[0].message.content)
             return self._normalize_response_plan(result)
 
@@ -257,8 +255,7 @@ class AIReasoning:
                 response_format={"type": "json_object"},
             )
 
-            response_choices = json.loads(response.choices)
-            print(f"response_choices : {response_choices}")  # Debug print
+            # FIX: response.choices is already a list, don't parse as JSON
             entities = json.loads(response.choices[0].message.content)
             logger.debug(f"[ai-reasoning] Extracted entities: {entities}")
             return entities
@@ -442,8 +439,7 @@ class AIReasoning:
                     ],
                     response_format={"type": "json_object"},
                 )
-                response_choices = json.loads(response.choices)
-                print(f"response_choices : {response_choices}")  # Debug print
+                # FIX: response.choices is already a list, don't parse as JSON
                 payload = json.loads(response.choices[0].message.content)
                 normalized = self._normalize_reasoning_output(payload, message, persona)
                 if suggested_intent and suggested_intent != Intent.GENERAL_CHAT.value:
