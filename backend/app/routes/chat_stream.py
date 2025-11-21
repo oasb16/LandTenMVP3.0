@@ -33,7 +33,7 @@ from ..services.incident_flow import (
     threshold_decision,
     generate_contractor_bids,
 )
-from ..services.ai_reasoning import get_ai_reasoning
+from ..services.ai_reasoning_v2 import get_ai_reasoning_v2 as get_ai_reasoning
 from ..services.dynamo_service import record_mttr_event, record_ai_feedback, get_aggregated_metrics
 from ..services.incident_flow import create_work_order
 
@@ -810,7 +810,7 @@ def _handle_intelligent_message(
     3. Generate contextually appropriate responses
     4. Dynamically switch modes (general → incident → discovery → job)
     """
-    from ..services.ai_reasoning import AIReasoning
+    from ..services.ai_reasoning_v2 import AIReasoningV2 as AIReasoning
 
     channel_id = _channel_identifier(channel, channel_state)
     channel_data = channel_state.get("channel", {}).get("data", {}) or {}
