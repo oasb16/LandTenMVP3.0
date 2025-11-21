@@ -128,6 +128,7 @@ export default function PersonaDashboardPage() {
     "lg:flex",
     "flex-col",
     "h-full",
+    "min-h-0",
     "col-span-12 lg:col-span-8 xl:col-span-6",
   ].join(" ");
 
