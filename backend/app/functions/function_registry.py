@@ -4,6 +4,7 @@ Contains all callable functions with schemas and implementations.
 """
 from typing import Dict, Any, List, Optional
 import uuid
+import logging
 from datetime import datetime
 from ..models.orchestrator_schemas import (
     FunctionDefinition,
@@ -22,9 +23,8 @@ from ..services.card_builder import (
     completion_card,
 )
 from ..services.incident_flow import generate_contractor_bids
-from ..utils.logging import get_logger
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 # ==================== DISCOVERY QUESTIONS ====================
 

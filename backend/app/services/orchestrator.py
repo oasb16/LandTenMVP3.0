@@ -5,6 +5,7 @@ Handles all LLM interactions for intent classification, function selection, and 
 from typing import Dict, Any, List, Optional
 import json
 import os
+import logging
 from pathlib import Path
 import anthropic
 from ..models.orchestrator_schemas import (
@@ -16,9 +17,8 @@ from ..models.orchestrator_schemas import (
     FunctionCall,
 )
 from ..config.settings import settings
-from ..utils.logging import get_logger
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class LLMOrchestrator:

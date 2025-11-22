@@ -7,11 +7,11 @@ import boto3
 from datetime import datetime, timedelta
 from decimal import Decimal
 import json
+import logging
 from ..config.settings import settings
 from ..models.orchestrator_schemas import MetaContext, DiscoveryState, ConversationMessage
-from ..utils.logging import get_logger
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class MetaContextManager:

@@ -6,6 +6,7 @@ All intelligence flows through the LLM orchestrator.
 import os
 import hashlib
 import hmac
+import logging
 import time
 from typing import Dict, Any
 from fastapi import APIRouter, Request, HTTPException, Header
@@ -20,10 +21,9 @@ from ..functions.function_registry import (
     DEFAULT_DISCOVERY_QUESTIONS,
 )
 from ..models.orchestrator_schemas import MetaContext, FunctionResult
-from ..utils.logging import get_logger
 
-logger = get_logger(__name__)
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def verify_webhook_signature(payload: bytes, signature: str) -> bool:
