@@ -16,6 +16,17 @@ from ..models.orchestrator_schemas import (
 from ..services.dynamo_service import get_dynamo_service
 from ..services.stream_bot import get_bot
 from ..services.incident_flow import generate_contractor_bids
+from ..utils.message_cards import (
+    format_incident_card,
+    format_work_order_card,
+    format_discovery_progress,
+    collapse_long_text,
+)
+from ..utils.discovery_questions import (
+    get_discovery_questions,
+    get_first_discovery_question,
+    should_ask_discovery_questions,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -69,13 +80,49 @@ async def create_incident(
         # Save to DynamoDB
         dynamo.create_incident(incident_data)
 
-        # Send incident card to Stream Chat (using simplified message instead of non-existent card)
+        # Send beautifully formatted incident card
+        incident_card_text = format_incident_card({
+            "incident_id": incident_id,
+            "title": title,
+            "category": category,
+            "severity": severity,
+            "urgency": urgency,
+            "description": description,
+        })
+
         bot.send_ai_message(
             channel_id=channel_id,
             persona="tenant",
-            text=f"✅ Incident Reported: {title}\n\nCategory: {category}\nSeverity: {severity}\nUrgency: {urgency}\n\nWe'll gather more details and get this resolved quickly.",
-            metadata={"incident_id": incident_id, "type": "incident_created"},
+            text=incident_card_text,
+            metadata={
+                "incident_id": incident_id,
+                "type": "incident_created",
+                "category": category,
+                "severity": severity,
+                "urgency": urgency,
+                "title": title,
+                "success": True,
+            },
         )
+
+        # Automatically send first discovery question if appropriate
+        if should_ask_discovery_questions(category, severity):
+            first_question = get_first_discovery_question(category, severity, description)
+            discovery_text = format_discovery_progress(
+                question_index=0,
+                total_questions=5,  # Default to 5 questions
+                current_question=first_question,
+            )
+            bot.send_ai_message(
+                channel_id=channel_id,
+                persona="tenant",
+                text=discovery_text,
+                metadata={
+                    "incident_id": incident_id,
+                    "type": "discovery_question",
+                    "question_index": 0,
+                },
+            )
 
         logger.info(f"Created incident {incident_id} for user {user_id}")
 
@@ -207,23 +254,59 @@ async def close_incident(
 async def start_discovery(
     incident_id: str,
     channel_id: str,
+    category: Optional[str] = None,
+    severity: Optional[str] = None,
+    user_message: Optional[str] = None,
     questions: Optional[List[str]] = None,
 ) -> FunctionResult:
-    """Start discovery question flow"""
+    """Start discovery question flow with category-specific questions"""
     try:
         bot = get_bot()
+        dynamo = get_dynamo_service()
 
-        discovery_questions = questions or DEFAULT_DISCOVERY_QUESTIONS
+        # Get incident details if category/severity not provided
+        if not category or not severity:
+            incident = dynamo.get_incident(incident_id, None)
+            if incident:
+                category = category or incident.get("category", "general")
+                severity = severity or incident.get("severity", "medium")
+                user_message = user_message or incident.get("description", "")
+            else:
+                category = category or "general"
+                severity = severity or "medium"
+                user_message = user_message or ""
 
-        # Send discovery question to user
+        # Get adaptive questions based on category and severity
+        discovery_questions = questions or get_discovery_questions(
+            category=category,
+            severity=severity,
+            user_message=user_message or "",
+            max_questions=5,
+        )
+
+        if not discovery_questions:
+            discovery_questions = DEFAULT_DISCOVERY_QUESTIONS
+
+        # Send first discovery question with beautiful formatting
+        discovery_text = format_discovery_progress(
+            question_index=0,
+            total_questions=len(discovery_questions),
+            current_question=discovery_questions[0],
+        )
+
         bot.send_ai_message(
             channel_id=channel_id,
             persona="tenant",
-            text=f"📋 Discovery Question 1/{len(discovery_questions)}: {discovery_questions[0]}",
-            metadata={"incident_id": incident_id, "question_index": 0},
+            text=discovery_text,
+            metadata={
+                "incident_id": incident_id,
+                "type": "discovery_question",
+                "question_index": 0,
+                "total_questions": len(discovery_questions),
+            },
         )
 
-        logger.info(f"Started discovery for incident {incident_id}")
+        logger.info(f"Started discovery for incident {incident_id} with {len(discovery_questions)} questions")
 
         return FunctionResult(
             success=True,
@@ -378,12 +461,26 @@ async def create_work_order(
             user_id=user_id,
         )
 
-        # Send work order notification
+        # Send beautifully formatted work order card
+        work_order_text = format_work_order_card({
+            "job_id": job_id,
+            "title": title,
+            "category": incident.get("category"),
+            "estimated_cost": estimated_cost,
+            "urgency": urgency or incident.get("urgency"),
+        })
+
         bot.send_ai_message(
             channel_id=channel_id,
             persona="tenant",
-            text=f"🔧 Work Order Created\n\n**Title:** {title}\n**Category:** {incident.get('category')}\n**Estimated Cost:** ${estimated_cost}\n**Urgency:** {urgency or incident.get('urgency')}\n**Job ID:** {job_id}",
-            metadata={"job_id": job_id, "incident_id": incident_id, "type": "work_order"},
+            text=work_order_text,
+            metadata={
+                "job_id": job_id,
+                "incident_id": incident_id,
+                "type": "work_order",
+                "title": title,
+                "category": incident.get("category"),
+            },
         )
 
         logger.info(f"Created work order {job_id} for incident {incident_id}")
