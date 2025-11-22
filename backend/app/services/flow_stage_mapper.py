@@ -123,7 +123,11 @@ class FlowStageMapper:
         # Try direct mapping first
         if stage_lower in cls.STAGE_MAP:
             normalized = cls.STAGE_MAP[stage_lower]
-            logger.info("[flow-stage-mapper] Normalized '%s' → %s", stage_str, normalized.value)
+            # Only log at INFO if the stage is actually changing (normalization occurred)
+            if stage_lower != normalized.value:
+                logger.info("[flow-stage-mapper] Normalized '%s' → %s", stage_str, normalized.value)
+            else:
+                logger.debug("[flow-stage-mapper] Stage '%s' already normalized", stage_str)
             return normalized
 
         # Try to match as FlowStage value directly

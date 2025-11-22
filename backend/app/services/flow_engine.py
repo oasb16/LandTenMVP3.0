@@ -34,6 +34,21 @@ def determine_next_stage(context: Dict[str, Any], intent: str, message: str, per
     """
     lowered = message.lower()
 
+    # SPECIAL CASE: meta.info_request and general.chat during active flows
+    # These should preserve the current stage, not force to idle
+    current_stage = context.get("flow_state", {}).get("stage", "idle")
+
+    if intent == "meta.info_request":
+        # Meta questions during active flows should NOT change the stage
+        logger.info("[flow-engine] Intent 'meta.info_request' → Preserving current stage '%s'", current_stage)
+        return current_stage
+
+    if intent == "general.chat" and current_stage not in ["idle", "general.chat"]:
+        # General chat during active flows should preserve the flow
+        # (This is now classified correctly by intent_classifier, but we add safety here)
+        logger.info("[flow-engine] Intent 'general.chat' in active flow → Preserving current stage '%s'", current_stage)
+        return current_stage
+
     # Intent to stage mapping (aligned with ai_reasoning_v2 and intent_classifier)
     intent_to_stage_map = {
         # Incident starts discovery
@@ -57,7 +72,7 @@ def determine_next_stage(context: Dict[str, Any], intent: str, message: str, per
         "approval.request": "approval_pending",
         "approval.decision": "job",  # After approval, go to job
 
-        # General
+        # General - go to idle only if not in active flow
         "general.chat": "idle",
         "greeting": "idle",
         "help": "idle",

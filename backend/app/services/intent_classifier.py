@@ -52,32 +52,32 @@ class IntentClassifier:
     # Flow state rules
     FLOW_STATE_RULES = {
         FlowStage.DISCOVERY: {
-            "allowed_intents": ["discovery.response", "discovery.continue"],
-            "blocked_intents": ["incident.report", "general.chat", "greeting"],
-            "default_override": "discovery.response",
-            "description": "In discovery - all messages are answers"
+            "allowed_intents": ["discovery.response", "discovery.continue", "general.chat", "meta.info_request"],
+            "blocked_intents": ["incident.report", "greeting"],
+            "default_override": "general.chat",
+            "description": "In discovery - user answers or asks clarifying questions"
         },
         FlowStage.JOB_READY: {
-            "allowed_intents": ["job.request", "discovery.response", "general.chat"],
+            "allowed_intents": ["job.request", "discovery.response", "general.chat", "meta.info_request"],
             "blocked_intents": ["incident.report"],
             "affirmative_override": "job.request",
             "description": "Ready for job creation"
         },
         FlowStage.APPROVAL_PENDING: {
-            "allowed_intents": ["approval.decision"],
+            "allowed_intents": ["approval.decision", "meta.info_request"],
             "blocked_intents": ["incident.report", "job.request", "general.chat"],
             "affirmative_override": "approval.decision",
             "negative_override": "approval.decision",
             "description": "Waiting for approval decision"
         },
         FlowStage.JOB: {
-            "allowed_intents": ["job.status", "job.inquiry", "general.chat"],
+            "allowed_intents": ["job.status", "job.inquiry", "general.chat", "meta.info_request"],
             "blocked_intents": ["incident.report"],
             "description": "Job in progress"
         },
         FlowStage.IDLE: {
-            "allowed_intents": ["incident.report", "greeting", "help", "general.chat"],
-            "blocked_intents": [],
+            "allowed_intents": ["incident.report", "greeting", "help", "general.chat", "meta.info_request"],
+            "blocked_intents": ["discovery.response", "discovery.continue", "job.request", "approval.decision"],
             "description": "No active flow"
         }
     }
@@ -207,24 +207,25 @@ class IntentClassifier:
             default = stage_rules.get("default_override", "general.chat")
             return default, {
                 "layer": "flow_state_override",
-                "override_reason": f"Intent '{raw_intent}' blocked in stage '{stage}', using default '{default}'",
+                "override_reason": f"Intent '{raw_intent}' BLOCKED in stage '{stage}', forcing to '{default}'",
                 "applied": True
             }
 
         # Check if intent is not allowed
         allowed = stage_rules.get("allowed_intents", [])
         if allowed and raw_intent not in allowed:
-            default = stage_rules.get("default_override", raw_intent)
+            # CRITICAL FIX: Always default to general.chat, never allow the disallowed intent through
+            default = stage_rules.get("default_override", "general.chat")
             return default, {
                 "layer": "flow_state_override",
-                "override_reason": f"Intent '{raw_intent}' not allowed in stage '{stage}', using default '{default}'",
+                "override_reason": f"Intent '{raw_intent}' NOT ALLOWED in stage '{stage}', forcing to '{default}'",
                 "applied": True
             }
 
         # No override needed
         return raw_intent, {
             "layer": "flow_state_override",
-            "override_reason": "No override needed",
+            "override_reason": "Intent allowed in current stage",
             "applied": False
         }
 
