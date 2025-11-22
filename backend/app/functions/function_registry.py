@@ -15,13 +15,6 @@ from ..models.orchestrator_schemas import (
 )
 from ..services.dynamo_service import get_dynamo_service
 from ..services.stream_bot import get_bot
-from ..services.card_builder import (
-    incident_card,
-    discovery_card,
-    work_order_card,
-    bids_card,
-    completion_card,
-)
 from ..services.incident_flow import generate_contractor_bids
 
 logger = logging.getLogger(__name__)
@@ -225,13 +218,12 @@ async def start_discovery(
 
         discovery_questions = questions or DEFAULT_DISCOVERY_QUESTIONS
 
-        # Send discovery card with first question
-        await bot.send_discovery_card(
+        # Send discovery question to user
+        await bot.send_ai_message(
             channel_id=channel_id,
-            incident_id=incident_id,
-            question=discovery_questions[0],
-            question_index=0,
-            total_questions=len(discovery_questions),
+            persona="tenant",
+            text=f"📋 Discovery Question 1/{len(discovery_questions)}: {discovery_questions[0]}",
+            metadata={"incident_id": incident_id, "question_index": 0},
         )
 
         logger.info(f"Started discovery for incident {incident_id}")
@@ -269,12 +261,15 @@ async def record_discovery_answer(
         bot = get_bot()
         next_index = question_index + 1
 
-        # Update discovery card with answer
-        await bot.update_discovery_progress(
+        # Acknowledge answer progress
+        progress_msg = f"✅ Answer recorded ({next_index}/{total_questions})"
+        if next_index < total_questions:
+            progress_msg += f"\n\nNext question coming..."
+        await bot.send_ai_message(
             channel_id=channel_id,
-            incident_id=incident_id,
-            answered=next_index,
-            total=total_questions,
+            persona="tenant",
+            text=progress_msg,
+            metadata={"incident_id": incident_id, "question_index": next_index},
         )
 
         # Check if discovery is complete
@@ -386,15 +381,12 @@ async def create_work_order(
             user_id=user_id,
         )
 
-        # Send work order card
-        await bot.send_work_order_card(
+        # Send work order notification
+        await bot.send_ai_message(
             channel_id=channel_id,
-            job_id=job_id,
-            incident_id=incident_id,
-            title=title,
-            category=incident.get("category"),
-            estimated_cost=estimated_cost,
-            urgency=urgency or incident.get("urgency"),
+            persona="tenant",
+            text=f"🔧 Work Order Created\n\n**Title:** {title}\n**Category:** {incident.get('category')}\n**Estimated Cost:** ${estimated_cost}\n**Urgency:** {urgency or incident.get('urgency')}\n**Job ID:** {job_id}",
+            metadata={"job_id": job_id, "incident_id": incident_id, "type": "work_order"},
         )
 
         logger.info(f"Created work order {job_id} for incident {incident_id}")
@@ -522,11 +514,18 @@ async def generate_bids(job_id: str, category: str, channel_id: str) -> Function
         # Generate mock bids (in production, this would query real contractors)
         bids = generate_contractor_bids(category)
 
-        # Send bids card
-        await bot.send_bids_card(
+        # Send bids notification
+        bids_summary = f"📊 Received {len(bids)} Contractor Bids\n\n"
+        for i, bid in enumerate(bids[:3], 1):  # Show top 3
+            bids_summary += f"{i}. {bid.get('contractor_name', 'Unknown')} - ${bid.get('quote', 0)} (⭐ {bid.get('rating', 0)})\n"
+        if len(bids) > 3:
+            bids_summary += f"\n+{len(bids) - 3} more bids available"
+
+        await bot.send_ai_message(
             channel_id=channel_id,
-            job_id=job_id,
-            bids=bids,
+            persona="landlord",
+            text=bids_summary,
+            metadata={"job_id": job_id, "bid_count": len(bids), "type": "bids"},
         )
 
         logger.info(f"Generated {len(bids)} bids for job {job_id}")
@@ -620,14 +619,13 @@ async def request_landlord_approval(
         incident = await dynamo.get_incident(incident_id, job.get("landlord_id", ""))
 
         # Send approval request to landlord
-        await bot.send_approval_request(
+        approval_msg = f"📋 **Approval Required**\n\n**Job:** {job.get('title')}\n**Category:** {job.get('category')}\n**Estimated Cost:** ${job.get('estimated_cost')}\n**Urgency:** {job.get('urgency')}\n\nPlease review and approve or reject this work order."
+
+        await bot.send_ai_message(
             channel_id=channel_id,
-            job_id=job_id,
-            incident_id=incident_id,
-            title=job.get("title"),
-            category=job.get("category"),
-            estimated_cost=job.get("estimated_cost"),
-            urgency=job.get("urgency"),
+            persona="landlord",
+            text=approval_msg,
+            metadata={"job_id": job_id, "incident_id": incident_id, "type": "approval_request"},
         )
 
         logger.info(f"Requested landlord approval for job {job_id}")
