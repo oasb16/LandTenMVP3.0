@@ -7,7 +7,7 @@ import json
 import os
 import logging
 from pathlib import Path
-import anthropic
+from openai import OpenAI
 from ..models.orchestrator_schemas import (
     MetaContext,
     OrchestratorOutput,
@@ -28,18 +28,18 @@ class LLMOrchestrator:
     """
 
     def __init__(self):
-        self.anthropic_client = None
+        self.openai_client = None
         self.system_prompt = self._load_system_prompt()
-        self.model = getattr(settings, "ORCHESTRATOR_MODEL", "claude-3-5-sonnet-20241022")
+        self.model = getattr(settings, "ORCHESTRATOR_MODEL", "gpt-4o")
         self.temperature = getattr(settings, "ORCHESTRATOR_TEMPERATURE", 0.3)
         self.max_tokens = 4096
 
-    def _get_anthropic_client(self) -> anthropic.Anthropic:
-        """Lazy Anthropic client initialization"""
-        if self.anthropic_client is None:
-            api_key = os.getenv("ANTHROPIC_API_KEY") or settings.OPENAI_API_KEY
-            self.anthropic_client = anthropic.Anthropic(api_key=api_key)
-        return self.anthropic_client
+    def _get_openai_client(self) -> OpenAI:
+        """Lazy OpenAI client initialization"""
+        if self.openai_client is None:
+            api_key = os.getenv("OPENAI_API_KEY") or settings.OPENAI_API_KEY
+            self.openai_client = OpenAI(api_key=api_key)
+        return self.openai_client
 
     def _load_system_prompt(self) -> str:
         """Load the universal orchestrator system prompt"""
@@ -72,15 +72,18 @@ and manage conversation context. Always respond with valid JSON in this format:
 }
 """
 
-    def _build_tools_for_anthropic(self, functions: List[FunctionDefinition]) -> List[Dict[str, Any]]:
-        """Convert function definitions to Anthropic tool format"""
+    def _build_tools_for_openai(self, functions: List[FunctionDefinition]) -> List[Dict[str, Any]]:
+        """Convert function definitions to OpenAI tool format"""
         tools = []
 
         for func_def in functions:
             tool = {
-                "name": func_def.name,
-                "description": func_def.description,
-                "input_schema": func_def.parameters,
+                "type": "function",
+                "function": {
+                    "name": func_def.name,
+                    "description": func_def.description,
+                    "parameters": func_def.parameters,
+                },
             }
             tools.append(tool)
 
@@ -189,7 +192,7 @@ and manage conversation context. Always respond with valid JSON in this format:
         Sends user message + context to LLM, receives structured output.
         """
         try:
-            client = self._get_anthropic_client()
+            client = self._get_openai_client()
 
             # Build user message content
             user_content_parts = []
@@ -212,9 +215,9 @@ and manage conversation context. Always respond with valid JSON in this format:
             user_content = "\n".join(user_content_parts)
 
             # Build tools
-            tools = self._build_tools_for_anthropic(available_functions)
+            tools = self._build_tools_for_openai(available_functions)
 
-            # Call Anthropic API
+            # Call OpenAI API
             logger.info(f"Calling orchestrator LLM for intent: {meta_context.last_intent or 'initial'}")
 
             # Create messages
@@ -231,50 +234,50 @@ and manage conversation context. Always respond with valid JSON in this format:
             if messages and messages[0]["role"] != "user":
                 messages = messages[1:]
 
-            # Call Claude with tool use
-            response = client.messages.create(
+            # Insert system prompt as first message
+            messages.insert(0, {"role": "system", "content": self.system_prompt})
+
+            # Call OpenAI with tool use
+            response = client.chat.completions.create(
                 model=self.model,
                 max_tokens=self.max_tokens,
                 temperature=self.temperature,
-                system=self.system_prompt,
-                messages=[messages[-1]],  # Use only the latest message with full context
+                messages=messages,
                 tools=tools,
             )
 
             # Extract response
-            if response.content:
-                # Check if response contains tool use
-                tool_use = None
-                text_content = ""
+            message = response.choices[0].message
 
-                for block in response.content:
-                    if block.type == "tool_use":
-                        tool_use = block
-                    elif block.type == "text":
-                        text_content += block.text
+            # Check if response contains tool calls
+            if message.tool_calls:
+                tool_call = message.tool_calls[0]
+                logger.info(f"LLM selected tool: {tool_call.function.name}")
 
-                # If tool use detected, build function call
-                if tool_use:
-                    logger.info(f"LLM selected tool: {tool_use.name}")
+                # Parse function arguments
+                try:
+                    arguments = json.loads(tool_call.function.arguments)
+                except json.JSONDecodeError:
+                    arguments = {}
 
-                    output = OrchestratorOutput(
-                        intent=meta_context.last_intent or "unknown",
-                        reasoning=text_content or f"Selected function {tool_use.name}",
-                        context_updates=ContextUpdates(),
-                        function_call=FunctionCall(
-                            name=tool_use.name,
-                            arguments=tool_use.input,
-                        ),
-                        response_to_user=None,
-                    )
+                output = OrchestratorOutput(
+                    intent=meta_context.last_intent or "unknown",
+                    reasoning=message.content or f"Selected function {tool_call.function.name}",
+                    context_updates=ContextUpdates(),
+                    function_call=FunctionCall(
+                        name=tool_call.function.name,
+                        arguments=arguments,
+                    ),
+                    response_to_user=None,
+                )
 
-                    return output
+                return output
 
-                # Otherwise, try to parse text content as JSON
-                else:
-                    output = self._parse_orchestrator_output(text_content)
-                    logger.info(f"LLM intent: {output.intent}, function: {output.function_call.name or 'none'}")
-                    return output
+            # Otherwise, try to parse text content as JSON
+            elif message.content:
+                output = self._parse_orchestrator_output(message.content)
+                logger.info(f"LLM intent: {output.intent}, function: {output.function_call.name or 'none'}")
+                return output
 
             else:
                 logger.warning("Empty response from LLM")
@@ -285,26 +288,6 @@ and manage conversation context. Always respond with valid JSON in this format:
                     function_call=FunctionCall(name=None, arguments={}),
                     response_to_user="I didn't quite catch that. Could you please try again?",
                 )
-
-        except anthropic.RateLimitError as e:
-            logger.error(f"Anthropic rate limit exceeded: {e}")
-            return OrchestratorOutput(
-                intent="error",
-                reasoning="Rate limit exceeded",
-                context_updates=ContextUpdates(),
-                function_call=FunctionCall(name=None, arguments={}),
-                response_to_user="I'm experiencing high demand right now. Please try again in a moment.",
-            )
-
-        except anthropic.APIError as e:
-            logger.error(f"Anthropic API error: {e}", exc_info=True)
-            return OrchestratorOutput(
-                intent="error",
-                reasoning=f"API error: {str(e)}",
-                context_updates=ContextUpdates(),
-                function_call=FunctionCall(name=None, arguments={}),
-                response_to_user="I'm having trouble connecting to my intelligence system. Please try again.",
-            )
 
         except Exception as e:
             logger.error(f"Orchestrator error: {e}", exc_info=True)
@@ -326,9 +309,11 @@ and manage conversation context. Always respond with valid JSON in this format:
         Used for meta-questions or general chat.
         """
         try:
-            client = self._get_anthropic_client()
+            client = self._get_openai_client()
 
-            messages = []
+            messages = [
+                {"role": "system", "content": "You are a helpful property maintenance assistant. Provide clear, concise responses."}
+            ]
 
             if context_summary:
                 messages.append({
@@ -338,16 +323,15 @@ and manage conversation context. Always respond with valid JSON in this format:
             else:
                 messages.append({"role": "user", "content": user_message})
 
-            response = client.messages.create(
+            response = client.chat.completions.create(
                 model=self.model,
                 max_tokens=1024,
                 temperature=self.temperature,
-                system="You are a helpful property maintenance assistant. Provide clear, concise responses.",
                 messages=messages,
             )
 
-            if response.content and len(response.content) > 0:
-                return response.content[0].text
+            if response.choices and response.choices[0].message.content:
+                return response.choices[0].message.content
 
             return "I'm not sure how to respond to that."
 
