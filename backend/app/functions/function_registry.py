@@ -984,6 +984,10 @@ async def execute_function(
     context: Dict[str, Any],
 ) -> FunctionResult:
     """Execute a function by name with given arguments"""
+    # Strip "functions." prefix if LLM added it
+    if function_name and function_name.startswith("functions."):
+        function_name = function_name.replace("functions.", "", 1)
+
     if function_name not in FUNCTION_IMPLEMENTATIONS:
         return FunctionResult(
             success=False,

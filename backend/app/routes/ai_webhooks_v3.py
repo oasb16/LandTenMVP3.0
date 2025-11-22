@@ -333,7 +333,7 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "stage": meta_context.stage,
             }
 
-            await bot.send_ai_message(
+            bot.send_ai_message(
                 channel_id=channel_id,
                 persona=meta_context.persona,
                 text=orchestrator_output.response_to_user,
@@ -365,7 +365,7 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
         # Send error message to user
         try:
             bot = get_bot()
-            await bot.send_ai_message(
+            bot.send_ai_message(
                 channel_id=channel_id,
                 persona="tenant",
                 text="I encountered an error processing your request. Please try again or contact support.",
@@ -444,7 +444,7 @@ async def init_channel(request: Request):
 
         welcome_text = welcome_messages.get(persona, welcome_messages["tenant"])
 
-        await bot.send_ai_message(
+        bot.send_ai_message(
             channel_id=channel_id,
             persona=persona,
             text=welcome_text,
