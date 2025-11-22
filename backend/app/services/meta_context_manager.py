@@ -7,9 +7,9 @@ import boto3
 from datetime import datetime, timedelta
 from decimal import Decimal
 import json
-from app.config.settings import settings
-from app.models.orchestrator_schemas import MetaContext, DiscoveryState, ConversationMessage
-from app.utils.logging import get_logger
+from ..config.settings import settings
+from ..models.orchestrator_schemas import MetaContext, DiscoveryState, ConversationMessage
+from ..utils.logging import get_logger
 
 logger = get_logger(__name__)
 

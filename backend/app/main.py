@@ -1,6 +1,6 @@
 """
 LandTen MVP3 Backend - Main Application Entry Point
-V3 Architecture: LLM-Driven Orchestrator Only
+V3 Architecture with V2 Fallback
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,7 +17,8 @@ from .routes import (
     task,
     chat_stream,
     property,
-    ai_webhooks_v3,  # ✅ V3 ONLY
+    ai_webhooks,     # ✅ V2 FALLBACK
+    ai_webhooks_v3,  # ✅ V3 ORCHESTRATOR
 )
 from starlette.middleware.base import BaseHTTPMiddleware
 import time, uuid, logging
@@ -33,7 +34,7 @@ except Exception:
 
 app = FastAPI(
     title="LandTen MVP3 Backend",
-    description="V3 LLM-Driven Orchestrator Architecture",
+    description="V3 LLM-Driven Orchestrator with V2 Fallback",
     version="3.0.0",
 )
 
@@ -64,15 +65,16 @@ async def startup_tasks():
         prompt_path = Path(__file__).parent.parent / "system_prompts" / "orchestrator_prompt.txt"
 
         if not prompt_path.exists():
-            logging.error(f"[STARTUP] ❌ Orchestrator prompt not found at: {prompt_path}")
-            logging.error("[STARTUP] V3 cannot function without system prompt!")
+            logging.warning(f"[STARTUP] ⚠️ Orchestrator prompt not found at: {prompt_path}")
+            logging.warning("[STARTUP] V3 will not be available, falling back to V2")
         else:
             with open(prompt_path, "r") as f:
                 prompt_content = f.read()
             logging.info(f"[STARTUP] ✅ Loaded orchestrator prompt ({len(prompt_content)} chars)")
 
     except Exception as e:
-        logging.error(f"[STARTUP] ❌ Failed to load orchestrator prompt: {e}")
+        logging.warning(f"[STARTUP] ⚠️ Failed to load orchestrator prompt: {e}")
+        logging.warning("[STARTUP] Continuing with V2 fallback")
 
     # ✅ Task 2: Register Stream Webhook
     await register_stream_webhook()
@@ -82,7 +84,7 @@ async def startup_tasks():
     for w in warnings:
         logging.warning(f"[STARTUP] {w}")
 
-    logging.info("[STARTUP] ✅ V3 Orchestrator Backend Ready")
+    logging.info("[STARTUP] ✅ Backend Ready (V2 + V3)")
 
 
 async def register_stream_webhook():
@@ -225,7 +227,7 @@ async def rate_limit_middleware(request, call_next):
     return await call_next(request)
 
 
-# ✅ REGISTER ROUTES (V3 ONLY)
+# ✅ REGISTER ROUTES (V2 + V3)
 app.include_router(chat.router)
 app.include_router(incident.router)
 app.include_router(job.router)
@@ -237,7 +239,17 @@ app.include_router(profile.router)
 app.include_router(task.router)
 app.include_router(chat_stream.router)
 app.include_router(property.router)
-app.include_router(ai_webhooks_v3.router, tags=["ai-v3"])  # ✅ V3 ONLY
+
+# Register both V2 (fallback) and V3 (orchestrator)
+app.include_router(ai_webhooks.router, tags=["ai-v2"])
+
+# Try to register V3, fallback gracefully if it fails
+try:
+    app.include_router(ai_webhooks_v3.router, tags=["ai-v3"])
+    logging.info("[STARTUP] ✅ V3 Orchestrator routes registered")
+except Exception as e:
+    logging.warning(f"[STARTUP] ⚠️ Could not register V3 routes: {e}")
+    logging.warning("[STARTUP] Using V2 fallback only")
 
 
 # Health Check Endpoints
@@ -245,9 +257,11 @@ app.include_router(ai_webhooks_v3.router, tags=["ai-v3"])  # ✅ V3 ONLY
 def root():
     return {
         "status": "ok",
-        "message": "LandTen MVP3 Backend V3 (LLM-Driven Orchestrator)",
+        "message": "LandTen MVP3 Backend (V2 + V3)",
         "version": "3.0.0",
-        "architecture": "orchestrator-v3",
+        "architecture": "hybrid",
+        "v2_fallback": True,
+        "v3_orchestrator": True,
     }
 
 
@@ -256,7 +270,8 @@ def health():
     return {
         "status": "healthy",
         "version": "3.0.0",
-        "architecture": "orchestrator-v3",
+        "architecture": "hybrid",
+        "endpoints": ["v2", "v3"],
     }
 
 
