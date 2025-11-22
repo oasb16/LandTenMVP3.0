@@ -7,6 +7,9 @@ import type { Attachment, MessageResponse } from "stream-chat";
 import { Sparkles, ChevronDown } from "lucide-react";
 import { MessageCards } from "./MessageCards";
 import { AIResponseParser } from "./AIResponseParser";
+import { TextExpander } from "./TextExpander";
+import { IncidentCardEnhanced } from "./IncidentCardEnhanced";
+import { DiscoveryQuestions } from "./DiscoveryQuestions";
 
 type StreamMessage = MessageResponse;
 
@@ -255,14 +258,34 @@ export const CustomMessageUI = memo(function CustomMessageUI({
           )}
         </div>
       ) : messageText ? (
-        // Regular text message
-        <motion.div
-          layout
-          className={`${bubbleClasses} ${bubbleAlignment}`}
-          transition={{ type: "spring", stiffness: 260, damping: 24 }}
-        >
-          {messageText}
-        </motion.div>
+        // Check if this is an incident notification
+        (metadata.type === 'incident_created' || metadata.incident_id) && isAIMessage ? (
+          <IncidentCardEnhanced
+            metadata={{
+              incident_id: metadata.incident_id as string | undefined,
+              category: metadata.category as string | undefined,
+              severity: metadata.severity as string | undefined,
+              urgency: metadata.urgency as string | undefined,
+              title: metadata.title as string | undefined,
+              summary: messageText,
+              type: metadata.type as string | undefined,
+              success: metadata.success !== false,
+            }}
+            text={messageText}
+          />
+        ) : // Check if this contains numbered questions (discovery session)
+        containsNumberedQuestions(messageText) && isAIMessage ? (
+          <DiscoveryQuestions text={messageText} />
+        ) : (
+          // Regular text message with optional expansion
+          <motion.div
+            layout
+            className={`${bubbleClasses} ${bubbleAlignment}`}
+            transition={{ type: "spring", stiffness: 260, damping: 24 }}
+          >
+            <TextExpander text={messageText} maxLength={300} isBot={isAIMessage} />
+          </motion.div>
+        )
       ) : null}
 
       {contextType && (
@@ -315,3 +338,22 @@ export const CustomMessageUI = memo(function CustomMessageUI({
     </motion.div>
   );
 });
+
+/**
+ * Helper function to detect if text contains numbered questions
+ */
+function containsNumberedQuestions(text: string): boolean {
+  const lines = text.split('\n');
+  let numberedCount = 0;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    // Match patterns like "1.", "1)", "Q1:", etc.
+    if (trimmed.match(/^(\d+[\.):]|Q\d+:)\s*.+/i)) {
+      numberedCount++;
+    }
+  }
+
+  // Consider it a question list if there are 3+ numbered items
+  return numberedCount >= 3;
+}
