@@ -11,7 +11,7 @@ from typing import Dict, Any
 from fastapi import APIRouter, Request, HTTPException, Header
 
 from ..config.settings import settings
-from ..services.stream_bot import get_stream_bot
+from ..services.stream_bot import get_bot
 from ..services.meta_context_manager import get_meta_context_manager
 from ..services.orchestrator import get_orchestrator
 from ..functions.function_registry import (
@@ -158,7 +158,7 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
             return {"status": "ignored", "reason": "agent_disabled"}
 
         # Initialize services
-        bot = get_stream_bot()
+        bot = get_bot()
         context_manager = get_meta_context_manager()
         orchestrator = get_orchestrator()
 
@@ -336,7 +336,7 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
             await bot.send_ai_message(
                 channel_id=channel_id,
                 persona=meta_context.persona,
-                message_text=orchestrator_output.response_to_user,
+                text=orchestrator_output.response_to_user,
                 metadata=response_metadata,
             )
 
@@ -364,11 +364,11 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
 
         # Send error message to user
         try:
-            bot = get_stream_bot()
+            bot = get_bot()
             await bot.send_ai_message(
                 channel_id=channel_id,
                 persona="tenant",
-                message_text="I encountered an error processing your request. Please try again or contact support.",
+                text="I encountered an error processing your request. Please try again or contact support.",
                 metadata={"error": True},
             )
         except:
@@ -402,26 +402,11 @@ async def handle_reaction(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 async def _detect_persona(channel_id: str, bot) -> str:
     """
-    Detect user persona from channel metadata.
+    Detect user persona from channel using Stream Bot service.
     Fallback to 'tenant' if detection fails.
     """
     try:
-        channel_data = await bot.get_channel_info(channel_id)
-
-        # Check channel metadata for persona hints
-        if channel_data and "persona" in channel_data:
-            return channel_data["persona"]
-
-        # Check channel type or name for hints
-        channel_type = channel_data.get("type", "")
-        if "landlord" in channel_type.lower():
-            return "landlord"
-        elif "contractor" in channel_type.lower():
-            return "contractor"
-
-        # Default to tenant
-        return "tenant"
-
+        return bot.get_channel_persona(channel_id) or "tenant"
     except Exception as e:
         logger.error(f"Error detecting persona: {e}", exc_info=True)
         return "tenant"
@@ -442,7 +427,7 @@ async def init_channel(request: Request):
         if not channel_id or not user_id:
             raise HTTPException(status_code=400, detail="channel_id and user_id required")
 
-        bot = get_stream_bot()
+        bot = get_bot()
         context_manager = get_meta_context_manager()
 
         # Create initial context
@@ -462,7 +447,7 @@ async def init_channel(request: Request):
         await bot.send_ai_message(
             channel_id=channel_id,
             persona=persona,
-            message_text=welcome_text,
+            text=welcome_text,
             metadata={"type": "welcome"},
         )
 
