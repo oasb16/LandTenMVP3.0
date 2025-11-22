@@ -218,12 +218,14 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
 
         # Safe reasoning logging - convert dict to JSON string before slicing
         raw_reasoning = reasoning.get("reasoning", {})
-        if isinstance(raw_reasoning, dict):
-            safe_reasoning_str = json.dumps(raw_reasoning)[:200]
-        else:
-            safe_reasoning_str = str(raw_reasoning)[:200]
+        try:
+            if isinstance(raw_reasoning, dict):
+                safe_reasoning_str = json.dumps(raw_reasoning)[:200]
+            else:
+                safe_reasoning_str = str(raw_reasoning)[:200]
+        except Exception as e:
+            safe_reasoning_str = f"[unserializable reasoning: {e}]"
         debug_logger.log("[ai-reasoning] Full reasoning: %s", safe_reasoning_str)
-        debug_logger.log("[ai-webhook] Safe reasoning logging enabled")
 
         allowed_intent, violation_message = policy_validator.validate_intent(intent, persona)
         if not allowed_intent:
