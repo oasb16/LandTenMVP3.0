@@ -1,3 +1,7 @@
+"""
+LandTen MVP3 Backend - Main Application Entry Point
+V3 Architecture: LLM-Driven Orchestrator Only
+"""
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from mangum import Mangum
@@ -13,19 +17,25 @@ from .routes import (
     task,
     chat_stream,
     property,
-    ai_webhooks,
+    ai_webhooks_v3,  # ✅ V3 ONLY
 )
 from starlette.middleware.base import BaseHTTPMiddleware
 import time, uuid, logging
 from .utils.rate_limit import SimpleRateLimiter
 from .utils.startup_checks import validate_env
+
+# Load environment variables
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except Exception:
     pass
 
-app = FastAPI()
+app = FastAPI(
+    title="LandTen MVP3 Backend",
+    description="V3 LLM-Driven Orchestrator Architecture",
+    version="3.0.0",
+)
 
 def get_base_url():
     import os
@@ -35,8 +45,46 @@ def get_base_url():
     # Local fallback
     return os.getenv("BACKEND_URL") or os.getenv("BACKEND_INTERNAL_URL") or "http://localhost:8080"
 
-# Startup event to register Stream webhook
+
+# Startup event: Load orchestrator prompt and register Stream webhook
 @app.on_event("startup")
+async def startup_tasks():
+    """
+    Startup tasks for V3 architecture:
+    1. Load and validate orchestrator system prompt
+    2. Register Stream Chat webhook
+    3. Validate environment variables
+    """
+    import os
+
+    # ✅ Task 1: Load Orchestrator Prompt
+    logging.info("[STARTUP] Loading Orchestrator V3 system prompt...")
+    try:
+        from pathlib import Path
+        prompt_path = Path(__file__).parent.parent / "system_prompts" / "orchestrator_prompt.txt"
+
+        if not prompt_path.exists():
+            logging.error(f"[STARTUP] ❌ Orchestrator prompt not found at: {prompt_path}")
+            logging.error("[STARTUP] V3 cannot function without system prompt!")
+        else:
+            with open(prompt_path, "r") as f:
+                prompt_content = f.read()
+            logging.info(f"[STARTUP] ✅ Loaded orchestrator prompt ({len(prompt_content)} chars)")
+
+    except Exception as e:
+        logging.error(f"[STARTUP] ❌ Failed to load orchestrator prompt: {e}")
+
+    # ✅ Task 2: Register Stream Webhook
+    await register_stream_webhook()
+
+    # ✅ Task 3: Validate Environment
+    warnings = validate_env()
+    for w in warnings:
+        logging.warning(f"[STARTUP] {w}")
+
+    logging.info("[STARTUP] ✅ V3 Orchestrator Backend Ready")
+
+
 async def register_stream_webhook():
     """
     Register webhook with Stream Chat on startup.
@@ -84,10 +132,10 @@ async def register_stream_webhook():
 
             # Prepare the webhook configuration (Stream Chat v2 format)
             new_hook = {
-                "name": "LandTen AI Webhook",
+                "name": "LandTen AI Webhook V3",
                 "url": webhook_url,
                 "events": ["message.new", "reaction.new", "typing.start"],
-                "description": "Auto-registered webhook for PropertyAI conversational backend",
+                "description": "V3 LLM-Driven Orchestrator Webhook",
                 "enabled": True,
             }
 
@@ -125,7 +173,8 @@ async def register_stream_webhook():
     except Exception as e:
         logging.error(f"[Stream Webhook] ❌ Error during webhook registration: {e}")
 
-# Minimal CORS for local dev and Next.js frontend
+
+# CORS Configuration
 import os
 cors_origins_env = os.getenv("BACKEND_CORS_ORIGINS", "*")
 origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
@@ -137,6 +186,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# Logging Middleware
 class LoggingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         rid = str(uuid.uuid4())
@@ -157,8 +208,11 @@ class LoggingMiddleware(BaseHTTPMiddleware):
                 }
             )
 
+
 app.add_middleware(LoggingMiddleware)
 
+
+# Rate Limiting Middleware
 limiter = SimpleRateLimiter(max_requests=120, window_seconds=60)
 
 @app.middleware("http")
@@ -170,6 +224,8 @@ async def rate_limit_middleware(request, call_next):
         return Response(status_code=429, content="Too Many Requests")
     return await call_next(request)
 
+
+# ✅ REGISTER ROUTES (V3 ONLY)
 app.include_router(chat.router)
 app.include_router(incident.router)
 app.include_router(job.router)
@@ -181,17 +237,28 @@ app.include_router(profile.router)
 app.include_router(task.router)
 app.include_router(chat_stream.router)
 app.include_router(property.router)
-app.include_router(ai_webhooks.router)
+app.include_router(ai_webhooks_v3.router, tags=["ai-v3"])  # ✅ V3 ONLY
 
+
+# Health Check Endpoints
 @app.get("/")
 def root():
-    return {"status": "ok", "message": "LandTenMVP3 backend is running."}
+    return {
+        "status": "ok",
+        "message": "LandTen MVP3 Backend V3 (LLM-Driven Orchestrator)",
+        "version": "3.0.0",
+        "architecture": "orchestrator-v3",
+    }
+
 
 @app.get("/health")
 def health():
-    return {"status": "healthy"}
+    return {
+        "status": "healthy",
+        "version": "3.0.0",
+        "architecture": "orchestrator-v3",
+    }
 
+
+# Lambda Handler
 handler = Mangum(app)
-
-for w in validate_env():
-    logging.warning(w)
