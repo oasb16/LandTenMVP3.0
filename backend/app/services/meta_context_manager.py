@@ -98,6 +98,10 @@ class MetaContextManager:
                 raw_context = response["Item"]
                 context_data = self._deserialize_context(raw_context)
 
+                # Remove user_id and channel_id from context_data to avoid duplicate kwargs
+                context_data.pop("user_id", None)
+                context_data.pop("channel_id", None)
+
                 # Create Pydantic model
                 meta_context = MetaContext(
                     user_id=user_id,
