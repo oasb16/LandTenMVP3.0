@@ -27,6 +27,7 @@ from enum import Enum
 from openai import OpenAI
 
 from .intent_classifier import get_intent_classifier, FlowStage
+from .flow_stage_mapper import FlowStageMapper
 
 logger = logging.getLogger(__name__)
 
@@ -184,17 +185,19 @@ class AIReasoningV2:
 
         # STEP 3: Validate intent transition
         flow_state = context.get("flow_state", {})
-        stage = flow_state.get("stage", "idle")
+        stage_str = flow_state.get("stage", "idle")
+        stage = FlowStageMapper.normalize(stage_str)  # Normalize old stage names to new enum
         previous_intent = context.get("active_intent", "idle")
 
         logger.info(
             "[ai-reasoning-v2] Intent Transition:\n"
             "  Previous: %s\n"
             "  New: %s\n"
-            "  Stage: %s",
+            "  Stage: %s (normalized from '%s')",
             previous_intent,
             final_intent,
-            stage
+            stage.value,
+            stage_str
         )
 
         # STEP 4: Extract entities if needed
@@ -209,7 +212,7 @@ class AIReasoningV2:
             "confidence": confidence,
             "entities": entities,
             "metadata": classification_metadata,
-            "stage": stage,
+            "stage": stage.value,  # Store normalized stage as string value
             "reasoning": self._build_reasoning_summary(
                 message, raw_intent, final_intent, classification_metadata
             )
@@ -262,23 +265,25 @@ class AIReasoningV2:
             }
         """
         flow_state = context.get("flow_state", {})
-        stage = flow_state.get("stage", "idle")
+        stage_str = flow_state.get("stage", "idle")
+        stage = FlowStageMapper.normalize(stage_str)  # Normalize old stage names to new enum
         last_ai_prompt = flow_state.get("last_ai_prompt", "")
 
         logger.info(
             "[ai-reasoning-v2] Generating contextual response:\n"
             "  Intent: %s\n"
-            "  Stage: %s\n"
+            "  Stage: %s (normalized from '%s')\n"
             "  Last AI Prompt: %s",
             intent,
-            stage,
+            stage.value,
+            stage_str,
             last_ai_prompt[:50] if last_ai_prompt else "none"
         )
 
         # STAGE-SPECIFIC RESPONSE GENERATION
         response = self._generate_stage_specific_response(
             intent=intent,
-            stage=stage,
+            stage=stage,  # Pass normalized FlowStage enum
             entities=entities,
             context=context,
             persona=persona,
@@ -545,7 +550,7 @@ class AIReasoningV2:
     def _generate_stage_specific_response(
         self,
         intent: str,
-        stage: str,
+        stage: FlowStage,  # Now expects FlowStage enum, not string
         entities: Dict[str, Any],
         context: Dict[str, Any],
         persona: str,
@@ -558,23 +563,23 @@ class AIReasoningV2:
         This prevents generic fallback during active flows.
         """
         # DISCOVERY STAGE - Always acknowledge answers
-        if stage == FlowStage.DISCOVERY.value:
+        if stage == FlowStage.DISCOVERY:
             return {
                 "response_text": "Thanks for that information. I'm recording your response.",
                 "card_type": CardType.DISCOVERY.value,
                 "actions": ["continue_discovery"],
-                "metadata": {"stage": stage},
+                "metadata": {"stage": stage.value},
                 "context_updates": {}
             }
 
         # JOB-READY STAGE - Prompt for job creation
-        if stage == FlowStage.JOB_READY.value:
+        if stage == FlowStage.JOB_READY:
             if intent == Intent.JOB_REQUEST.value:
                 return {
                     "response_text": "Perfect. I'll move ahead with creating a work order.",
                     "card_type": CardType.JOB.value,
                     "actions": ["create_job"],
-                    "metadata": {"stage": stage},
+                    "metadata": {"stage": stage.value},
                     "context_updates": {}
                 }
             else:
@@ -582,19 +587,19 @@ class AIReasoningV2:
                     "response_text": "I've gathered the details. Would you like me to create a work order?",
                     "card_type": CardType.NONE.value,
                     "actions": ["prompt_job_creation"],
-                    "metadata": {"stage": stage},
+                    "metadata": {"stage": stage.value},
                     "context_updates": {}
                 }
 
         # APPROVAL_PENDING STAGE - Handle approval decision
-        if stage == FlowStage.APPROVAL_PENDING.value:
+        if stage == FlowStage.APPROVAL_PENDING:
             if intent == Intent.APPROVAL_DECISION.value:
                 if any(word in message.lower() for word in ["yes", "approve", "ok", "accept"]):
                     return {
                         "response_text": "Great! I've recorded your approval and will proceed with the work order.",
                         "card_type": CardType.APPROVAL.value,
                         "actions": ["process_approval"],
-                        "metadata": {"stage": stage, "decision": "approved"},
+                        "metadata": {"stage": stage.value, "decision": "approved"},
                         "context_updates": {"approval_status": "approved"}
                     }
                 else:
@@ -602,7 +607,7 @@ class AIReasoningV2:
                         "response_text": "I've recorded your decision. The work order will not proceed.",
                         "card_type": CardType.APPROVAL.value,
                         "actions": ["process_rejection"],
-                        "metadata": {"stage": stage, "decision": "rejected"},
+                        "metadata": {"stage": stage.value, "decision": "rejected"},
                         "context_updates": {"approval_status": "rejected"}
                     }
             else:
@@ -610,28 +615,28 @@ class AIReasoningV2:
                     "response_text": "I'm waiting for your approval decision. Would you like to approve or reject this work order?",
                     "card_type": CardType.NONE.value,
                     "actions": ["await_approval"],
-                    "metadata": {"stage": stage},
+                    "metadata": {"stage": stage.value},
                     "context_updates": {}
                 }
 
         # JOB STAGE - Job is in progress
-        if stage == FlowStage.JOB.value:
+        if stage == FlowStage.JOB:
             return {
                 "response_text": "Your work order is currently in progress. Let me know if you need an update.",
                 "card_type": CardType.JOB.value,
                 "actions": ["check_job_status"],
-                "metadata": {"stage": stage},
+                "metadata": {"stage": stage.value},
                 "context_updates": {}
             }
 
         # IDLE STAGE - Handle new intents
-        if stage == FlowStage.IDLE.value:
+        if stage == FlowStage.IDLE:
             if intent == Intent.INCIDENT_REPORT.value:
                 return {
                     "response_text": "I've detected an issue. Let me help you create an incident report.",
                     "card_type": CardType.INCIDENT.value,
                     "actions": ["create_incident"],
-                    "metadata": {"stage": stage},
+                    "metadata": {"stage": stage.value},
                     "context_updates": {}
                 }
             elif intent == Intent.GREETING.value:
@@ -644,7 +649,7 @@ class AIReasoningV2:
                     "response_text": greetings.get(persona, "Hello! How can I help you?"),
                     "card_type": CardType.NONE.value,
                     "actions": [],
-                    "metadata": {"stage": stage},
+                    "metadata": {"stage": stage.value},
                     "context_updates": {}
                 }
             else:
@@ -652,7 +657,7 @@ class AIReasoningV2:
                     "response_text": "I'm here to help! What can I assist you with?",
                     "card_type": CardType.NONE.value,
                     "actions": [],
-                    "metadata": {"stage": stage},
+                    "metadata": {"stage": stage.value},
                     "context_updates": {}
                 }
 
@@ -661,7 +666,7 @@ class AIReasoningV2:
             "response_text": "I understand. How else can I help you?",
             "card_type": CardType.NONE.value,
             "actions": [],
-            "metadata": {"stage": stage},
+            "metadata": {"stage": stage.value},
             "context_updates": {}
         }
 
@@ -721,9 +726,10 @@ class AIReasoningV2:
         parts = []
 
         flow_state = context.get("flow_state") or {}
-        stage = flow_state.get("stage", "idle")
-        if stage != "idle":
-            parts.append(f"Current stage: {stage}")
+        stage_str = flow_state.get("stage", "idle")
+        stage = FlowStageMapper.normalize(stage_str)  # Normalize old stage names to new enum
+        if stage != FlowStage.IDLE:
+            parts.append(f"Current stage: {stage.value}")
 
         if context.get("active_incident_id") or context.get("active_incident"):
             parts.append(f"Active incident: {context.get('active_incident_id') or context.get('active_incident')}")

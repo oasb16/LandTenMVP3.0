@@ -17,6 +17,8 @@ import logging
 from typing import Dict, Any, Optional, Tuple
 from enum import Enum
 
+from .flow_stage_mapper import FlowStageMapper
+
 logger = logging.getLogger(__name__)
 
 
@@ -194,8 +196,11 @@ class IntentClassifier:
     ) -> Tuple[str, Dict[str, Any]]:
         """Apply flow state rules to override intent."""
 
+        # Normalize stage string to FlowStage enum (handles old stage names like "general.chat")
+        normalized_stage = FlowStageMapper.normalize(stage)
+
         # Get stage rules
-        stage_rules = self.FLOW_STATE_RULES.get(FlowStage(stage), self.FLOW_STATE_RULES[FlowStage.IDLE])
+        stage_rules = self.FLOW_STATE_RULES.get(normalized_stage, self.FLOW_STATE_RULES[FlowStage.IDLE])
 
         # Check if intent is blocked
         if raw_intent in stage_rules.get("blocked_intents", []):
@@ -284,8 +289,11 @@ class IntentClassifier:
                 "applied": False
             }
 
+        # Normalize stage string to FlowStage enum (handles old stage names like "general.chat")
+        normalized_stage = FlowStageMapper.normalize(stage)
+
         # Get stage rules
-        stage_rules = self.FLOW_STATE_RULES.get(FlowStage(stage), {})
+        stage_rules = self.FLOW_STATE_RULES.get(normalized_stage, {})
 
         # AFFIRMATIVE RESOLUTION
         if is_affirmative:

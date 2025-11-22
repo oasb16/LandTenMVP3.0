@@ -18,6 +18,8 @@ import boto3
 from botocore.exceptions import ClientError, BotoCoreError
 from decimal import Decimal
 
+from .flow_stage_mapper import FlowStageMapper
+
 logger = logging.getLogger(__name__)
 
 
@@ -379,6 +381,19 @@ class ContextManager:
                 "last_user_reply": None,
             },
         )
+
+        # Normalize stage from old string format to new FlowStage enum value
+        flow_state = normalized.get("flow_state", {})
+        if flow_state and "stage" in flow_state:
+            old_stage = flow_state["stage"]
+            normalized_stage = FlowStageMapper.normalize(old_stage)
+            flow_state["stage"] = normalized_stage.value
+            logger.debug(
+                "[context-manager] Normalized stage '%s' → '%s' for context",
+                old_stage,
+                normalized_stage.value
+            )
+
         return normalized
 
     def advance_flow_state(
