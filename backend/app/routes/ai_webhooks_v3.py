@@ -10,17 +10,17 @@ import time
 from typing import Dict, Any
 from fastapi import APIRouter, Request, HTTPException, Header
 
-from app.config.settings import settings
-from app.services.stream_bot import get_stream_bot
-from app.services.meta_context_manager import get_meta_context_manager
-from app.services.orchestrator import get_orchestrator
-from app.functions.function_registry import (
+from ..config.settings import settings
+from ..services.stream_bot import get_stream_bot
+from ..services.meta_context_manager import get_meta_context_manager
+from ..services.orchestrator import get_orchestrator
+from ..functions.function_registry import (
     get_function_definitions,
     execute_function,
     DEFAULT_DISCOVERY_QUESTIONS,
 )
-from app.models.orchestrator_schemas import MetaContext, FunctionResult
-from app.utils.logging import get_logger
+from ..models.orchestrator_schemas import MetaContext, FunctionResult
+from ..utils.logging import get_logger
 
 logger = get_logger(__name__)
 router = APIRouter()

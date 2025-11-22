@@ -7,7 +7,7 @@ import json
 import os
 from pathlib import Path
 import anthropic
-from app.models.orchestrator_schemas import (
+from ..models.orchestrator_schemas import (
     MetaContext,
     OrchestratorOutput,
     FunctionDefinition,
@@ -15,8 +15,8 @@ from app.models.orchestrator_schemas import (
     ContextUpdates,
     FunctionCall,
 )
-from app.config.settings import settings
-from app.utils.logging import get_logger
+from ..config.settings import settings
+from ..utils.logging import get_logger
 
 logger = get_logger(__name__)
 
