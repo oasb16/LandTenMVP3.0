@@ -79,6 +79,10 @@ class Settings:
         self.AWS_SECRET_ACCESS_KEY: Optional[str] = os.getenv("AWS_SECRET_ACCESS_KEY")
         self.MEDIA_BUCKET: Optional[str] = os.getenv("MEDIA_BUCKET")
 
+        # DynamoDB Table Naming
+        self.TABLE_PREFIX: str = os.getenv("TABLE_PREFIX", "landten")
+        self.STAGE: str = os.getenv("STAGE", "dev")
+
         # Incident Thresholds
         self.INCIDENT_THRESHOLD_LOW: int = int(os.getenv("INCIDENT_THRESHOLD_LOW", "200"))
         self.INCIDENT_THRESHOLD_MEDIUM: int = int(os.getenv("INCIDENT_THRESHOLD_MEDIUM", "500"))
