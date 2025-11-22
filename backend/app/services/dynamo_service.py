@@ -565,3 +565,83 @@ def get_aggregated_metrics(entity_type: str, entity_id: str) -> Dict[str, Any]:
         "fill_rate": None,
         "engagement": None,
     }
+
+
+class DynamoService:
+    """Unified interface to all DynamoDB operations.
+
+    This wrapper provides a single object with all database methods
+    for easier dependency injection and testing.
+    """
+
+    # Incident operations
+    @staticmethod
+    def create_incident(incident_data: Dict[str, Any]) -> Dict[str, Any]:
+        return IncidentDB.create_incident(incident_data)
+
+    @staticmethod
+    def get_incident(incident_id: str, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        return IncidentDB.get_incident(incident_id, user_id)
+
+    @staticmethod
+    def update_incident_status(incident_id: str, status: str, user_id: Optional[str] = None, **kwargs) -> bool:
+        return IncidentDB.update_incident_status(incident_id, status, user_id, **kwargs)
+
+    @staticmethod
+    def list_incidents_by_tenant(tenant_id: str) -> List[Dict[str, Any]]:
+        return IncidentDB.list_incidents_by_tenant(tenant_id)
+
+    # Job operations
+    @staticmethod
+    def create_job(job_data: Dict[str, Any]) -> Dict[str, Any]:
+        return JobDB.create_job(job_data)
+
+    @staticmethod
+    def get_job(job_id: str) -> Optional[Dict[str, Any]]:
+        return JobDB.get_job(job_id)
+
+    @staticmethod
+    def update_job(job_id: str, **updates) -> bool:
+        return JobDB.update_job(job_id, **updates)
+
+    # Bid operations
+    @staticmethod
+    def create_bid(bid_data: Dict[str, Any]) -> Dict[str, Any]:
+        return BidDB.create_bid(bid_data)
+
+    @staticmethod
+    def list_bids_by_job(job_id: str) -> List[Dict[str, Any]]:
+        return BidDB.list_bids_by_job(job_id)
+
+    @staticmethod
+    def update_bid_status(bid_id: str, status: str) -> bool:
+        return BidDB.update_bid_status(bid_id, status)
+
+    # Property operations
+    @staticmethod
+    def get_property(property_id: str) -> Optional[Dict[str, Any]]:
+        return PropertyDB.get_property(property_id)
+
+    @staticmethod
+    def list_properties_by_landlord(landlord_id: str) -> List[Dict[str, Any]]:
+        return PropertyDB.list_properties_by_landlord(landlord_id)
+
+    # User operations
+    @staticmethod
+    def upsert_user(user_data: Dict[str, Any]) -> Dict[str, Any]:
+        return UserDB.upsert_user(user_data)
+
+    @staticmethod
+    def get_user(user_id: str) -> Optional[Dict[str, Any]]:
+        return UserDB.get_user(user_id)
+
+
+_dynamo_service = None
+
+
+def get_dynamo_service() -> DynamoService:
+    """Get singleton DynamoService instance"""
+    global _dynamo_service
+    if _dynamo_service is None:
+        _dynamo_service = DynamoService()
+    return _dynamo_service
