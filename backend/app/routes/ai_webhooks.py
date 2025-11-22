@@ -6,6 +6,7 @@ Handles Stream Chat webhooks with context-aware, policy-bounded AI interactions
 import os
 import hashlib
 import hmac
+import json
 import logging
 import time
 from datetime import datetime
@@ -214,7 +215,15 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
 
         debug_logger.log("[ai-reasoning] Completed in %.2fms: intent=%s entities=%s", reasoning_duration, intent, list(entities.keys()))
         logger.info("[ai-webhook] Detected intent: %s (previous: %s) for persona: %s", intent, previous_intent, persona)
-        debug_logger.log("[ai-reasoning] Full reasoning: %s", reasoning.get('reasoning', 'N/A')[:200])
+
+        # Safe reasoning logging - convert dict to JSON string before slicing
+        raw_reasoning = reasoning.get("reasoning", {})
+        if isinstance(raw_reasoning, dict):
+            safe_reasoning_str = json.dumps(raw_reasoning)[:200]
+        else:
+            safe_reasoning_str = str(raw_reasoning)[:200]
+        debug_logger.log("[ai-reasoning] Full reasoning: %s", safe_reasoning_str)
+        debug_logger.log("[ai-webhook] Safe reasoning logging enabled")
 
         allowed_intent, violation_message = policy_validator.validate_intent(intent, persona)
         if not allowed_intent:
