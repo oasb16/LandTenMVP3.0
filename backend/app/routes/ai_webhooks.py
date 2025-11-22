@@ -474,44 +474,68 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
                 bot.send_ai_message(channel_id, persona, general_response, metadata={"context_type": "general"})
                 context_manager.append_message(user_id, channel_id, "assistant", general_response)
 
-        elif next_stage == "discovery.response":
+        elif next_stage == "discovery.response" or next_stage == "discovery":
             incident_id = incident_id or context.get("active_incident")
             question_index = int(flow_state.get("question_index") or 0)
-            question_key = f"q{question_index}"
-            answers[question_key] = message_text
-            total_questions = len(DISCOVERY_QUESTIONS)
 
-            _send_discovery_progress(
-                bot,
-                channel_id,
-                persona,
-                incident_id,
-                min(question_index + 1, total_questions),
-                total_questions,
-                _get_discovery_question(question_index + 1),
-                answers,
-            )
-            context_manager.advance_flow_state(
-                user_id,
-                channel_id,
-                "discovery",
-                {"question_index": question_index + 1, "answers": answers},
-            )
-            card_sent = True
+            # Get current stage from flow_state to verify we're actually in discovery
+            current_stage = flow_state.get("stage", "idle")
+            is_in_discovery = current_stage in ["discovery", "incident.active"]
 
-            if question_index + 1 < total_questions:
-                next_question = _get_discovery_question(question_index + 1)
-                _ask_discovery_question(bot, context_manager, channel_id, persona, user_id, next_question, incident_id, question_index + 1)
+            # Check if the response was off-topic (meta or general chat during discovery)
+            # If intent is general.chat or meta.info_request while in discovery, it's off-topic
+            is_off_topic = is_in_discovery and intent in ["general.chat", "meta.info_request"]
+
+            # If off-topic, do NOT record answer and do NOT advance question index
+            if is_off_topic:
+                logger.info("[discovery-flow] Off-topic message detected during discovery (intent=%s) - NOT advancing question", intent)
+                # Re-ask the current question
+                current_question = _get_discovery_question(question_index)
+                if current_question:
+                    bot.send_ai_message(
+                        channel_id,
+                        persona,
+                        current_question,
+                        metadata={"context_type": "discovery", "incident_id": incident_id, "step": question_index},
+                    )
+                    context_manager.append_message(user_id, channel_id, "assistant", current_question)
             else:
-                followup_prompt = "This looks like a high-severity leak. Should I create a work order now?"
-                bot.send_ai_message(
+                # Valid discovery answer - record and advance
+                question_key = f"q{question_index}"
+                answers[question_key] = message_text
+                total_questions = len(DISCOVERY_QUESTIONS)
+
+                _send_discovery_progress(
+                    bot,
                     channel_id,
                     persona,
-                    followup_prompt,
-                    metadata={"context_type": "discovery", "incident_id": incident_id},
+                    incident_id,
+                    min(question_index + 1, total_questions),
+                    total_questions,
+                    _get_discovery_question(question_index + 1),
+                    answers,
                 )
-                context_manager.append_message(user_id, channel_id, "assistant", followup_prompt)
-                context_manager.advance_flow_state(user_id, channel_id, "job-ready", {"question_index": question_index + 1, "answers": answers})
+                context_manager.advance_flow_state(
+                    user_id,
+                    channel_id,
+                    "discovery",
+                    {"question_index": question_index + 1, "answers": answers},
+                )
+                card_sent = True
+
+                if question_index + 1 < total_questions:
+                    next_question = _get_discovery_question(question_index + 1)
+                    _ask_discovery_question(bot, context_manager, channel_id, persona, user_id, next_question, incident_id, question_index + 1)
+                else:
+                    followup_prompt = "This looks like a high-severity leak. Should I create a work order now?"
+                    bot.send_ai_message(
+                        channel_id,
+                        persona,
+                        followup_prompt,
+                        metadata={"context_type": "discovery", "incident_id": incident_id},
+                    )
+                    context_manager.append_message(user_id, channel_id, "assistant", followup_prompt)
+                    context_manager.advance_flow_state(user_id, channel_id, "job-ready", {"question_index": question_index + 1, "answers": answers})
 
         elif next_stage == "job.request":
             incident_id = incident_id or context.get("active_incident")

@@ -114,8 +114,27 @@ class ContextManager:
         merged = {**context, **updates}
         merged["persona"] = updates.get("persona", context.get("persona"))
         merged["active_intent"] = updates.get("active_intent", context.get("active_intent"))
-        merged["active_incident"] = updates.get("active_incident", context.get("active_incident"))
-        merged["active_job"] = updates.get("active_job", context.get("active_job"))
+
+        # CRITICAL: Preserve active_incident and active_job unless explicitly updated
+        # Never allow these to be accidentally reset to None
+        existing_incident = context.get("active_incident")
+        existing_job = context.get("active_job")
+
+        # Only update if explicitly provided and not None, otherwise preserve
+        if "active_incident" in updates and updates["active_incident"] is not None:
+            merged["active_incident"] = updates["active_incident"]
+        elif existing_incident:
+            merged["active_incident"] = existing_incident
+        else:
+            merged["active_incident"] = None
+
+        if "active_job" in updates and updates["active_job"] is not None:
+            merged["active_job"] = updates["active_job"]
+        elif existing_job:
+            merged["active_job"] = existing_job
+        else:
+            merged["active_job"] = None
+
         merged["entities"] = updates.get("entities", context.get("entities", {}))
         merged["metadata"] = updates.get("metadata", context.get("metadata", {}))
         merged["flow_state"] = updates.get("flow_state", context.get("flow_state", {}))
@@ -203,6 +222,49 @@ class ContextManager:
             channel_id,
             {"active_job": job_id, "active_intent": "job.request"},
         )
+
+    def clear_active_incident(self, user_id: str, channel_id: str) -> bool:
+        """
+        Explicitly clear the active incident.
+
+        Use this method only when incident is truly resolved/closed.
+        Regular updates will preserve the incident automatically.
+        """
+        context = self.get_context(user_id, channel_id, create_if_missing=False)
+        if context is None:
+            return False
+
+        # Force clear by directly setting in the update
+        context["active_incident"] = None
+        flow_state = dict(context.get("flow_state") or {})
+        flow_state["incident_id"] = None
+        flow_state["stage"] = "idle"
+
+        success = self._write_context(context, user_id, channel_id)
+        if success:
+            logger.info("[context-manager] Explicitly cleared active incident for %s", user_id)
+        return success
+
+    def clear_active_job(self, user_id: str, channel_id: str) -> bool:
+        """
+        Explicitly clear the active job.
+
+        Use this method only when job is truly completed/cancelled.
+        Regular updates will preserve the job automatically.
+        """
+        context = self.get_context(user_id, channel_id, create_if_missing=False)
+        if context is None:
+            return False
+
+        # Force clear by directly setting in the update
+        context["active_job"] = None
+        flow_state = dict(context.get("flow_state") or {})
+        flow_state["job_id"] = None
+
+        success = self._write_context(context, user_id, channel_id)
+        if success:
+            logger.info("[context-manager] Explicitly cleared active job for %s", user_id)
+        return success
 
     def append_message(
         self,

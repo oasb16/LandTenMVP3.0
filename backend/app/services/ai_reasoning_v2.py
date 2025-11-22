@@ -55,6 +55,9 @@ class Intent(str, Enum):
     APPROVAL_REQUEST = "approval.request"
     APPROVAL_DECISION = "approval.decision"
 
+    # Meta/System queries
+    META_INFO_REQUEST = "meta.info_request"
+
     # General
     GENERAL_CHAT = "general.chat"
     GREETING = "greeting"
@@ -455,6 +458,25 @@ class AIReasoningV2:
                 "reasoning": "Fallback: greeting detected"
             }
 
+        # Check for meta/system information requests
+        meta_keywords = [
+            "what are", "what is", "current issues", "current jobs", "context manager",
+            "what incidents", "show me", "list", "active incidents", "active jobs",
+            "tell me what", "what's happening", "your response", "logged in"
+        ]
+        if any(keyword in message_lower for keyword in meta_keywords):
+            # Additional validation: check if it's a system/status query, not a maintenance issue
+            maintenance_words = ["leak", "broken", "damage", "not working", "repair", "fix"]
+            is_maintenance_query = any(word in message_lower for word in maintenance_words)
+
+            if not is_maintenance_query:
+                return {
+                    "intent": Intent.META_INFO_REQUEST.value,
+                    "confidence": 0.85,
+                    "entities": {},
+                    "reasoning": "Fallback: meta/system information request detected"
+                }
+
         # Check for incident keywords
         incident_keywords = ["leak", "broken", "damage", "not working", "issue", "problem", "repair"]
         if any(keyword in message_lower for keyword in incident_keywords):
@@ -562,15 +584,45 @@ class AIReasoningV2:
 
         This prevents generic fallback during active flows.
         """
-        # DISCOVERY STAGE - Always acknowledge answers
+        # DISCOVERY STAGE - Validate answer relevance
         if stage == FlowStage.DISCOVERY:
-            return {
-                "response_text": "Thanks for that information. I'm recording your response.",
-                "card_type": CardType.DISCOVERY.value,
-                "actions": ["continue_discovery"],
-                "metadata": {"stage": stage.value},
-                "context_updates": {}
-            }
+            # Check if this is actually a discovery answer or an off-topic question
+            if intent == Intent.META_INFO_REQUEST.value:
+                # User is asking a system question during discovery - answer it but don't advance
+                return {
+                    "response_text": "I can help with that, but let me finish gathering details about your issue first. Please answer the current question.",
+                    "card_type": CardType.NONE.value,
+                    "actions": ["prompt_discovery_answer"],
+                    "metadata": {"stage": stage.value, "off_topic": True},
+                    "context_updates": {}
+                }
+            elif intent == Intent.GENERAL_CHAT.value:
+                # User is making general conversation - redirect to discovery
+                return {
+                    "response_text": "I understand, but I need you to answer the current discovery question so I can help resolve your issue.",
+                    "card_type": CardType.NONE.value,
+                    "actions": ["prompt_discovery_answer"],
+                    "metadata": {"stage": stage.value, "off_topic": True},
+                    "context_updates": {}
+                }
+            elif intent == Intent.DISCOVERY_RESPONSE.value or intent == Intent.DISCOVERY_CONTINUE.value:
+                # Valid discovery answer - acknowledge and continue
+                return {
+                    "response_text": "Thanks for that information. I'm recording your response.",
+                    "card_type": CardType.DISCOVERY.value,
+                    "actions": ["continue_discovery"],
+                    "metadata": {"stage": stage.value},
+                    "context_updates": {}
+                }
+            else:
+                # Other intent during discovery - redirect
+                return {
+                    "response_text": "I need you to answer the current question about your issue first.",
+                    "card_type": CardType.NONE.value,
+                    "actions": ["prompt_discovery_answer"],
+                    "metadata": {"stage": stage.value, "off_topic": True},
+                    "context_updates": {}
+                }
 
         # JOB-READY STAGE - Prompt for job creation
         if stage == FlowStage.JOB_READY:
@@ -696,6 +748,8 @@ class AIReasoningV2:
         - timeline (if mentioned)
 
         Only include entities that are clearly present in the message.
+        DO NOT extract system/technical terms like "context_manager", "incidents", "jobs", etc.
+        Focus ONLY on maintenance/property-related entities.
         """
 
         try:
@@ -703,15 +757,19 @@ class AIReasoningV2:
                 model=self.model,
                 temperature=0.1,
                 messages=[
-                    {"role": "system", "content": "You are a precise entity extraction system."},
+                    {"role": "system", "content": "You are a precise entity extraction system for property maintenance issues."},
                     {"role": "user", "content": prompt},
                 ],
                 response_format={"type": "json_object"},
             )
 
             entities = json.loads(response.choices[0].message.content)
-            logger.debug(f"[ai-reasoning-v2] Extracted entities: {entities}")
-            return entities
+
+            # Filter out irrelevant entities
+            filtered_entities = self._filter_entities(entities)
+
+            logger.debug(f"[ai-reasoning-v2] Extracted entities (filtered): {filtered_entities}")
+            return filtered_entities
 
         except Exception as e:
             logger.error(f"[ai-reasoning-v2] Entity extraction failed: {e}")
@@ -720,6 +778,46 @@ class AIReasoningV2:
     # ============================================================================
     # Helper Methods
     # ============================================================================
+
+    def _filter_entities(self, entities: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Filter out irrelevant entities from extraction results.
+
+        Removes system/technical terms and keeps only property maintenance-related entities.
+        """
+        # Allowed entity keys for property maintenance
+        allowed_keys = {
+            "category", "severity", "urgency", "location", "symptoms",
+            "cost_estimate", "timeline", "contractor", "job_type",
+            "priority", "description", "summary"
+        }
+
+        # Disallowed entity keys (system/technical terms)
+        disallowed_keys = {
+            "context_manager", "incidents", "jobs", "active_incident",
+            "active_job", "flow_state", "stage", "intent", "response",
+            "current", "logged", "system", "backend", "database"
+        }
+
+        filtered = {}
+        for key, value in entities.items():
+            # Skip if key is explicitly disallowed
+            if key.lower() in disallowed_keys:
+                logger.debug(f"[entity-filter] Skipping disallowed entity: {key}")
+                continue
+
+            # Skip if key is not in allowed list (strict filtering)
+            if key.lower() not in allowed_keys:
+                logger.debug(f"[entity-filter] Skipping non-maintenance entity: {key}")
+                continue
+
+            # Skip if value is empty or None
+            if value is None or (isinstance(value, str) and not value.strip()):
+                continue
+
+            filtered[key] = value
+
+        return filtered
 
     def _build_context_summary(self, context: Dict[str, Any]) -> str:
         """Build a concise summary of the conversation context."""
@@ -771,6 +869,7 @@ class AIReasoningV2:
         - job.inquiry: User is asking about a job
         - bids.request: User wants to see contractor bids
         - approval.decision: User is approving/rejecting something
+        - meta.info_request: User is asking about system state/status (current issues, jobs, incidents, what's happening)
         - general.chat: General conversation
         - greeting: User is greeting
         - help: User needs help
