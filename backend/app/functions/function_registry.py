@@ -67,17 +67,14 @@ async def create_incident(
         }
 
         # Save to DynamoDB
-        await dynamo.create_incident(incident_data)
+        dynamo.create_incident(incident_data)
 
-        # Send incident card to Stream Chat
-        await bot.send_incident_card(
+        # Send incident card to Stream Chat (using simplified message instead of non-existent card)
+        bot.send_ai_message(
             channel_id=channel_id,
-            incident_id=incident_id,
-            title=title,
-            category=category,
-            severity=severity,
-            urgency=urgency,
-            description=description,
+            persona="tenant",
+            text=f"✅ Incident Reported: {title}\n\nCategory: {category}\nSeverity: {severity}\nUrgency: {urgency}\n\nWe'll gather more details and get this resolved quickly.",
+            metadata={"incident_id": incident_id, "type": "incident_created"},
         )
 
         logger.info(f"Created incident {incident_id} for user {user_id}")
@@ -121,7 +118,7 @@ async def update_incident(
         updates.update(kwargs)
         updates["updated_at"] = datetime.utcnow().isoformat()
 
-        await dynamo.update_incident_status(
+        dynamo.update_incident_status(
             incident_id=incident_id,
             status=status or "detected",
             user_id=user_id,
@@ -149,7 +146,7 @@ async def get_incident(incident_id: str, user_id: str) -> FunctionResult:
     """Retrieve incident details"""
     try:
         dynamo = get_dynamo_service()
-        incident = await dynamo.get_incident(incident_id, user_id)
+        incident = dynamo.get_incident(incident_id, user_id)
 
         if not incident:
             return FunctionResult(
@@ -182,7 +179,7 @@ async def close_incident(
     try:
         dynamo = get_dynamo_service()
 
-        await dynamo.update_incident_status(
+        dynamo.update_incident_status(
             incident_id=incident_id,
             status="completed",
             user_id=user_id,
@@ -219,7 +216,7 @@ async def start_discovery(
         discovery_questions = questions or DEFAULT_DISCOVERY_QUESTIONS
 
         # Send discovery question to user
-        await bot.send_ai_message(
+        bot.send_ai_message(
             channel_id=channel_id,
             persona="tenant",
             text=f"📋 Discovery Question 1/{len(discovery_questions)}: {discovery_questions[0]}",
@@ -265,7 +262,7 @@ async def record_discovery_answer(
         progress_msg = f"✅ Answer recorded ({next_index}/{total_questions})"
         if next_index < total_questions:
             progress_msg += f"\n\nNext question coming..."
-        await bot.send_ai_message(
+        bot.send_ai_message(
             channel_id=channel_id,
             persona="tenant",
             text=progress_msg,
@@ -348,7 +345,7 @@ async def create_work_order(
         now = datetime.utcnow().isoformat()
 
         # Get incident details
-        incident = await dynamo.get_incident(incident_id, user_id)
+        incident = dynamo.get_incident(incident_id, user_id)
         if not incident:
             return FunctionResult(
                 success=False,
@@ -372,17 +369,17 @@ async def create_work_order(
         }
 
         # Save to DynamoDB
-        await dynamo.create_job(job_data)
+        dynamo.create_job(job_data)
 
         # Update incident status
-        await dynamo.update_incident_status(
+        dynamo.update_incident_status(
             incident_id=incident_id,
             status="work_order",
             user_id=user_id,
         )
 
         # Send work order notification
-        await bot.send_ai_message(
+        bot.send_ai_message(
             channel_id=channel_id,
             persona="tenant",
             text=f"🔧 Work Order Created\n\n**Title:** {title}\n**Category:** {incident.get('category')}\n**Estimated Cost:** ${estimated_cost}\n**Urgency:** {urgency or incident.get('urgency')}\n**Job ID:** {job_id}",
@@ -421,7 +418,7 @@ async def update_work_order(job_id: str, **kwargs) -> FunctionResult:
         updates = {**kwargs}
         updates["updated_at"] = datetime.utcnow().isoformat()
 
-        await dynamo.update_job(job_id, **updates)
+        dynamo.update_job(job_id, **updates)
 
         logger.info(f"Updated work order {job_id}")
 
@@ -444,7 +441,7 @@ async def get_work_order(job_id: str) -> FunctionResult:
     """Retrieve work order details"""
     try:
         dynamo = get_dynamo_service()
-        job = await dynamo.get_job(job_id)
+        job = dynamo.get_job(job_id)
 
         if not job:
             return FunctionResult(
@@ -477,7 +474,7 @@ async def assign_contractor(
     try:
         dynamo = get_dynamo_service()
 
-        await dynamo.update_job(
+        dynamo.update_job(
             job_id,
             contractor_id=contractor_id,
             contractor_name=contractor_name,
@@ -521,7 +518,7 @@ async def generate_bids(job_id: str, category: str, channel_id: str) -> Function
         if len(bids) > 3:
             bids_summary += f"\n+{len(bids) - 3} more bids available"
 
-        await bot.send_ai_message(
+        bot.send_ai_message(
             channel_id=channel_id,
             persona="landlord",
             text=bids_summary,
@@ -549,7 +546,7 @@ async def get_bids(job_id: str) -> FunctionResult:
     """Retrieve bids for a job"""
     try:
         dynamo = get_dynamo_service()
-        bids = await dynamo.list_bids_by_job(job_id)
+        bids = dynamo.list_bids_by_job(job_id)
 
         return FunctionResult(
             success=True,
@@ -572,15 +569,15 @@ async def accept_bid(bid_id: str, job_id: str) -> FunctionResult:
         dynamo = get_dynamo_service()
 
         # Update bid status
-        await dynamo.update_bid_status(bid_id, "accepted")
+        dynamo.update_bid_status(bid_id, "accepted")
 
         # Get bid details to assign contractor
-        bids = await dynamo.list_bids_by_job(job_id)
+        bids = dynamo.list_bids_by_job(job_id)
         accepted_bid = next((b for b in bids if b.get("bid_id") == bid_id), None)
 
         if accepted_bid:
             # Assign contractor to job
-            await dynamo.update_job(
+            dynamo.update_job(
                 job_id,
                 contractor_id=accepted_bid.get("contractor_id"),
                 contractor_name=accepted_bid.get("contractor_name"),
@@ -615,13 +612,13 @@ async def request_landlord_approval(
         dynamo = get_dynamo_service()
 
         # Get job and incident details
-        job = await dynamo.get_job(job_id)
-        incident = await dynamo.get_incident(incident_id, job.get("landlord_id", ""))
+        job = dynamo.get_job(job_id)
+        incident = dynamo.get_incident(incident_id, job.get("landlord_id", ""))
 
         # Send approval request to landlord
         approval_msg = f"📋 **Approval Required**\n\n**Job:** {job.get('title')}\n**Category:** {job.get('category')}\n**Estimated Cost:** ${job.get('estimated_cost')}\n**Urgency:** {job.get('urgency')}\n\nPlease review and approve or reject this work order."
 
-        await bot.send_ai_message(
+        bot.send_ai_message(
             channel_id=channel_id,
             persona="landlord",
             text=approval_msg,
@@ -655,7 +652,7 @@ async def process_approval_decision(
         dynamo = get_dynamo_service()
 
         if decision == "approved":
-            await dynamo.update_job(
+            dynamo.update_job(
                 job_id,
                 status="approved",
                 approval_status="approved",
@@ -663,7 +660,7 @@ async def process_approval_decision(
             )
             message_text = f"Job {job_id} approved"
         else:
-            await dynamo.update_job(
+            dynamo.update_job(
                 job_id,
                 status="rejected",
                 approval_status="rejected",
@@ -693,7 +690,7 @@ async def get_user_incidents(user_id: str, limit: int = 10) -> FunctionResult:
     """Get user's incidents"""
     try:
         dynamo = get_dynamo_service()
-        incidents = await dynamo.list_incidents_by_tenant(user_id)
+        incidents = dynamo.list_incidents_by_tenant(user_id)
 
         # Limit results
         incidents = incidents[:limit] if incidents else []
@@ -738,7 +735,7 @@ async def get_property_info(property_id: str) -> FunctionResult:
     """Get property information"""
     try:
         dynamo = get_dynamo_service()
-        property_info = await dynamo.get_property(property_id)
+        property_info = dynamo.get_property(property_id)
 
         if not property_info:
             return FunctionResult(

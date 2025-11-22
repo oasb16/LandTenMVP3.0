@@ -18,7 +18,9 @@ class MetaContextManager:
     """Manages meta-context storage and retrieval"""
 
     def __init__(self):
-        self.table_name = f"{settings.TABLE_PREFIX}_{settings.STAGE}_chat_contexts"
+        table_prefix = getattr(settings, "TABLE_PREFIX", "landten")
+        stage = getattr(settings, "STAGE", "dev")
+        self.table_name = f"{table_prefix}_{stage}_chat_contexts"
         self.ttl_hours = getattr(settings, "CONTEXT_TTL_HOURS", 24)
         self._dynamo_client = None
         self._table = None
