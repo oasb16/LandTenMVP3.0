@@ -14,7 +14,7 @@ from ..models.orchestrator_schemas import (
     BidResult,
 )
 from ..services.dynamo_service import get_dynamo_service
-from ..services.stream_bot import get_stream_bot
+from ..services.stream_bot import get_bot
 from ..services.card_builder import (
     incident_card,
     discovery_card,
@@ -51,7 +51,7 @@ async def create_incident(
     """Create a new maintenance incident"""
     try:
         dynamo = get_dynamo_service()
-        bot = get_stream_bot()
+        bot = get_bot()
 
         incident_id = f"inc_{uuid.uuid4().hex[:12]}"
         now = datetime.utcnow().isoformat()
@@ -221,7 +221,7 @@ async def start_discovery(
 ) -> FunctionResult:
     """Start discovery question flow"""
     try:
-        bot = get_stream_bot()
+        bot = get_bot()
 
         discovery_questions = questions or DEFAULT_DISCOVERY_QUESTIONS
 
@@ -266,7 +266,7 @@ async def record_discovery_answer(
 ) -> FunctionResult:
     """Record a discovery answer and send next question"""
     try:
-        bot = get_stream_bot()
+        bot = get_bot()
         next_index = question_index + 1
 
         # Update discovery card with answer
@@ -347,7 +347,7 @@ async def create_work_order(
     """Create a work order (job) from an incident"""
     try:
         dynamo = get_dynamo_service()
-        bot = get_stream_bot()
+        bot = get_bot()
 
         job_id = f"job_{uuid.uuid4().hex[:12]}"
         now = datetime.utcnow().isoformat()
@@ -517,7 +517,7 @@ async def assign_contractor(
 async def generate_bids(job_id: str, category: str, channel_id: str) -> FunctionResult:
     """Generate contractor bids for a job"""
     try:
-        bot = get_stream_bot()
+        bot = get_bot()
 
         # Generate mock bids (in production, this would query real contractors)
         bids = generate_contractor_bids(category)
@@ -612,7 +612,7 @@ async def request_landlord_approval(
 ) -> FunctionResult:
     """Request landlord approval for a work order"""
     try:
-        bot = get_stream_bot()
+        bot = get_bot()
         dynamo = get_dynamo_service()
 
         # Get job and incident details
