@@ -15,6 +15,14 @@ import time
 _dynamodb_client = None
 _dynamodb_resource = None
 
+# STRICT whitelist for incident update fields (must match function_registry.py)
+ALLOWED_INCIDENT_FIELDS = {
+    "incident_id", "title", "description", "status", "category",
+    "severity", "urgency", "discovery_responses", "discovery_answers",
+    "updated_at", "created_at", "resolution_notes", "completed_at",
+    "location"
+}
+
 
 def get_dynamodb_client():
     """Get or create DynamoDB client (thread-safe singleton)"""
@@ -159,14 +167,39 @@ class IncidentDB:
         }
         expr_names = {"#status": "status"}
 
-        # Add optional updates (filter out 'status' to prevent duplicate key error)
-        kwargs_filtered = {k: v for k, v in kwargs.items() if k != "status"}
+        # CRITICAL: Apply STRICT whitelist filtering
+        # Strip 'status', 'incident_id', 'user_id', 'updated_at' - they're handled separately
+        forbidden_keys = {"status", "incident_id", "user_id", "updated_at", "channel_id",
+                          "stage", "persona", "model", "metadata", "routing"}
 
+        kwargs_filtered = {}
+        filtered_out = []
+
+        for key, value in kwargs.items():
+            # Skip forbidden keys
+            if key in forbidden_keys:
+                filtered_out.append(key)
+                continue
+
+            # Only allow fields in ALLOWED_INCIDENT_FIELDS
+            if key in ALLOWED_INCIDENT_FIELDS:
+                kwargs_filtered[key] = value
+            else:
+                filtered_out.append(key)
+
+        if filtered_out:
+            print(f"[IncidentDB] 🔒 Filtered out {len(filtered_out)} forbidden fields: {filtered_out}")
+
+        # Build update expression for allowed fields only
         for key, value in kwargs_filtered.items():
-            update_expr += f", {key} = :{key}"
-            expr_values[f":{key}"] = value
+            # Use ExpressionAttributeNames for reserved keywords
+            attr_name = f"#{key}"
+            attr_value = f":{key}"
+            update_expr += f", {attr_name} = {attr_value}"
+            expr_names[attr_name] = key
+            expr_values[attr_value] = value
 
-        print(f"[IncidentDB] Updating incident {incident_id} with status {status} and {kwargs}")
+        print(f"[IncidentDB] ✅ Updating incident {incident_id}: status={status}, fields={list(kwargs_filtered.keys())}")
 
         try:
             if not user_id:
@@ -175,7 +208,7 @@ class IncidentDB:
                 if found:
                     user_id = found.get("user_id")
                 if not user_id:
-                    print(f"[IncidentDB] Cannot update {incident_id} — user_id missing.")
+                    print(f"[IncidentDB] ❌ Cannot update {incident_id} — user_id missing.")
                     return False
 
             table.update_item(
@@ -184,10 +217,12 @@ class IncidentDB:
                 ExpressionAttributeValues=expr_values,
                 ExpressionAttributeNames=expr_names
             )
-            print(f"[IncidentDB] Updated incident {incident_id} status to {status}")
+            print(f"[IncidentDB] ✅ Successfully updated incident {incident_id}")
             return True
         except Exception as e:
             print(f"[IncidentDB] ❌ Error updating incident: {e}")
+            print(f"[IncidentDB]    UpdateExpression: {update_expr}")
+            print(f"[IncidentDB]    ExpressionAttributeNames: {expr_names}")
             return False
 
 
