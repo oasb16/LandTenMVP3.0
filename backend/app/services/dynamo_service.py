@@ -20,7 +20,7 @@ ALLOWED_INCIDENT_FIELDS = {
     "incident_id", "title", "description", "status", "category",
     "severity", "urgency", "discovery_responses", "discovery_answers",
     "updated_at", "created_at", "resolution_notes", "completed_at",
-    "location"
+    "location", "discovery_index"
 }
 
 
@@ -96,7 +96,8 @@ class IncidentDB:
 
         item = {
             # Always include DynamoDB's expected partition key
-            "user_id": incident_data.get("user_id") or incident_data.get("tenant_id") or "unknown",
+            # CRITICAL FIX: Never use "unknown" as user_id - it breaks queries
+            "user_id": incident_data.get("user_id") or incident_data.get("tenant_id"),
             # Optional sort key if your schema requires it
             "incident_id": incident_data.get("incident_id"),
             "tenant_id": incident_data.get("tenant_id", "unknown"),
@@ -112,6 +113,10 @@ class IncidentDB:
             "channel_id": incident_data.get("channel_id", ""),
             "media_urls": incident_data.get("media_urls", []),
         }
+
+        # Validate user_id is present
+        if not item.get("user_id"):
+            raise ValueError("user_id is required to create incident")
 
         # Add optional fields
         if "discovery_data" in incident_data:
@@ -160,12 +165,17 @@ class IncidentDB:
         dynamodb = get_dynamodb_resource()
         table = dynamodb.Table(IncidentDB.TABLE_NAME)
 
-        update_expr = "SET #status = :status, updated_at = :updated_at"
-        expr_values = {
-            ":status": status,
-            ":updated_at": datetime.now(timezone.utc).isoformat()
-        }
-        expr_names = {"#status": "status"}
+        # CRITICAL FIX: Build update expression incrementally to avoid overlaps
+        update_parts = []
+        expr_values = {}
+        expr_names = {}
+
+        # Always update these fields
+        update_parts.append("#status = :status")
+        update_parts.append("updated_at = :updated_at")
+        expr_names["#status"] = "status"
+        expr_values[":status"] = status
+        expr_values[":updated_at"] = datetime.now(timezone.utc).isoformat()
 
         # CRITICAL: Apply STRICT whitelist filtering
         # Strip 'status', 'incident_id', 'user_id', 'updated_at' - they're handled separately
@@ -190,25 +200,36 @@ class IncidentDB:
         if filtered_out:
             print(f"[IncidentDB] 🔒 Filtered out {len(filtered_out)} forbidden fields: {filtered_out}")
 
-        # Build update expression for allowed fields only
+        # Build update expression for allowed fields only (avoiding duplicates)
         for key, value in kwargs_filtered.items():
             # Use ExpressionAttributeNames for reserved keywords
             attr_name = f"#{key}"
             attr_value = f":{key}"
-            update_expr += f", {attr_name} = {attr_value}"
+
+            # Check for duplicate paths
+            if attr_name in expr_names:
+                print(f"[IncidentDB] ⚠️ Skipping duplicate field: {key}")
+                continue
+
+            update_parts.append(f"{attr_name} = {attr_value}")
             expr_names[attr_name] = key
             expr_values[attr_value] = value
+
+        # Assemble final expression
+        update_expr = "SET " + ", ".join(update_parts)
 
         print(f"[IncidentDB] ✅ Updating incident {incident_id}: status={status}, fields={list(kwargs_filtered.keys())}")
 
         try:
             if not user_id:
-                print(f"[IncidentDB] Missing user_id for update_incident_status, attempting fallback lookup...")
-                found = IncidentDB.get_incident(incident_id, user_id=user_id)
+                print(f"[IncidentDB] ⚠️ Missing user_id for update_incident_status, attempting fallback scan...")
+                # Use None to trigger scan-based lookup
+                found = IncidentDB.get_incident(incident_id, user_id=None)
                 if found:
                     user_id = found.get("user_id")
-                if not user_id:
-                    print(f"[IncidentDB] ❌ Cannot update {incident_id} — user_id missing.")
+
+                if not user_id or user_id == "unknown":
+                    print(f"[IncidentDB] ❌ Cannot update {incident_id} — user_id still missing after scan.")
                     return False
 
             table.update_item(
