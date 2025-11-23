@@ -159,8 +159,10 @@ class IncidentDB:
         }
         expr_names = {"#status": "status"}
 
-        # Add optional updates
-        for key, value in kwargs.items():
+        # Add optional updates (filter out 'status' to prevent duplicate key error)
+        kwargs_filtered = {k: v for k, v in kwargs.items() if k != "status"}
+
+        for key, value in kwargs_filtered.items():
             update_expr += f", {key} = :{key}"
             expr_values[f":{key}"] = value
 
