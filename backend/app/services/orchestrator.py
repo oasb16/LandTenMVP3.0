@@ -91,18 +91,26 @@ and manage conversation context. Always respond with valid JSON in this format:
 
     def _format_meta_context(self, meta_context: MetaContext) -> str:
         """Format meta-context for LLM consumption"""
+
+        # Enhanced context with discovery state detection
         context_dict = {
             "persona": meta_context.persona,
             "stage": meta_context.stage,
             "active_incident_id": meta_context.active_incident_id,
             "active_job_id": meta_context.active_job_id,
             "discovery": {
+                "incident_id": meta_context.discovery.incident_id if hasattr(meta_context.discovery, "incident_id") else None,
                 "question_index": meta_context.discovery.question_index,
                 "questions": meta_context.discovery.questions,
                 "answers": meta_context.discovery.answers,
+                "is_active": meta_context.stage == "discovery" and meta_context.active_incident_id is not None,
             },
             "last_intent": meta_context.last_intent,
             "last_user_message": meta_context.last_user_message,
+
+            # CRITICAL: Add incident status hint to prevent updates to closed incidents
+            "active_incident_status": None,  # Will be populated if incident is loaded
+
             "conversation_history": [
                 {"role": msg.role, "text": msg.text, "timestamp": msg.timestamp}
                 for msg in meta_context.conversation_history[-5:]  # Last 5 messages
@@ -130,10 +138,24 @@ and manage conversation context. Always respond with valid JSON in this format:
             # Try to extract JSON from response
             response_text = response_text.strip()
 
+            # Handle case where LLM returns natural language instead of JSON
+            if not response_text.startswith("{") and not response_text.startswith("```"):
+                logger.warning(f"LLM returned non-JSON response: {response_text[:100]}")
+                # Try to recover by treating it as general.chat
+                return OrchestratorOutput(
+                    intent="general.chat",
+                    reasoning="LLM returned natural language instead of structured output",
+                    context_updates=ContextUpdates(),
+                    function_call=FunctionCall(name=None, arguments={}),
+                    response_to_user=response_text,
+                )
+
             # Handle markdown code blocks
             if response_text.startswith("```"):
                 lines = response_text.split("\n")
-                response_text = "\n".join(lines[1:-1])
+                # Strip ```json or ``` from first line
+                if lines[0].strip() in ["```json", "```"]:
+                    response_text = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
 
             response_json = json.loads(response_text)
 
@@ -160,13 +182,14 @@ and manage conversation context. Always respond with valid JSON in this format:
             logger.error(f"Failed to parse LLM response as JSON: {e}")
             logger.error(f"Response text: {response_text}")
 
-            # Return fallback output
+            # CRITICAL FIX: Don't default to general.chat for valid maintenance requests
+            # Instead, ask user to rephrase
             return OrchestratorOutput(
-                intent="general.chat",
+                intent="parse_error",
                 reasoning="Failed to parse LLM response",
                 context_updates=ContextUpdates(),
                 function_call=FunctionCall(name=None, arguments={}),
-                response_to_user="I'm having trouble processing that request. Could you please rephrase?",
+                response_to_user="I'm having trouble understanding that. Could you please describe your maintenance issue more clearly?",
             )
 
         except Exception as e:
@@ -194,6 +217,28 @@ and manage conversation context. Always respond with valid JSON in this format:
         try:
             client = self._get_openai_client()
 
+            # CRITICAL PRE-FLIGHT CHECK: If active_incident_id exists, check if it's closed
+            if meta_context.active_incident_id:
+                try:
+                    from ..services.dynamo_service import get_dynamo_service
+                    dynamo = get_dynamo_service()
+                    incident = dynamo.get_incident(
+                        meta_context.active_incident_id,
+                        meta_context.user_id
+                    )
+
+                    if incident and incident.get("status") == "completed":
+                        logger.info(f"⚠️ Active incident {meta_context.active_incident_id} is closed")
+                        # Inject into context
+                        meta_context.metadata["active_incident_status"] = "completed"
+                    elif incident:
+                        meta_context.metadata["active_incident_status"] = incident.get("status")
+                        meta_context.metadata["active_incident_category"] = incident.get("category")
+                        meta_context.metadata["active_incident_title"] = incident.get("title")
+
+                except Exception as e:
+                    logger.error(f"Error checking active incident status: {e}")
+
             # Build user message content
             user_content_parts = []
 
@@ -213,6 +258,17 @@ and manage conversation context. Always respond with valid JSON in this format:
             user_content_parts.append(f"\n**User Message:** {user_message}")
 
             user_content = "\n".join(user_content_parts)
+
+            # CRITICAL: Add discovery flow detection hints
+            if meta_context.stage == "discovery" and meta_context.active_incident_id:
+                user_content = (
+                    f"🔍 **DISCOVERY MODE ACTIVE**\n"
+                    f"Incident {meta_context.active_incident_id} is in discovery.\n"
+                    f"Question index: {meta_context.discovery.question_index}\n"
+                    f"If user sends text answer → call record_discovery_answer\n"
+                    f"If user mentions NEW issue → pause discovery, create new incident\n\n"
+                    + user_content
+                )
 
             # Build tools
             tools = self._build_tools_for_openai(available_functions)
@@ -260,8 +316,11 @@ and manage conversation context. Always respond with valid JSON in this format:
                 except json.JSONDecodeError:
                     arguments = {}
 
+                # Extract intent from reasoning or default to function name
+                intent = meta_context.last_intent or tool_call.function.name.replace("_", ".")
+
                 output = OrchestratorOutput(
-                    intent=meta_context.last_intent or "unknown",
+                    intent=intent,
                     reasoning=message.content or f"Selected function {tool_call.function.name}",
                     context_updates=ContextUpdates(),
                     function_call=FunctionCall(

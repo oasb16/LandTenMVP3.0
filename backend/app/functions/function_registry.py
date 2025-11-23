@@ -28,6 +28,7 @@ from ..utils.discovery_questions import (
     get_first_discovery_question,
     should_ask_discovery_questions,
 )
+from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,10 @@ DEFAULT_DISCOVERY_QUESTIONS = [
     "Are there any safety hazards (water near electricity, gas smell, etc.)?",
 ]
 
+# Global incident deduplication cache (incident fingerprints)
+# Maps user_id -> set of incident fingerprints (title+category+severity hash)
+_recent_incidents = defaultdict(set)
+
 # ==================== FUNCTION IMPLEMENTATIONS ====================
 
 # Known incident update fields (whitelist for DynamoDB updates)
@@ -48,7 +53,7 @@ ALLOWED_INCIDENT_UPDATES = {
     "incident_id", "title", "description", "status", "category",
     "severity", "urgency", "discovery_responses", "discovery_answers",
     "updated_at", "created_at", "resolution_notes", "completed_at",
-    "location"
+    "location", "discovery_index"
 }
 
 
@@ -81,6 +86,29 @@ async def create_incident(
 ) -> FunctionResult:
     """Create a new maintenance incident"""
     try:
+        # IDEMPOTENCY CHECK: Prevent duplicate incident creation
+        import hashlib
+        fingerprint = hashlib.md5(
+            f"{title.lower().strip()}:{category}:{severity}".encode()
+        ).hexdigest()[:8]
+
+        if fingerprint in _recent_incidents[user_id]:
+            logger.warning(f"⚠️ Duplicate incident detected for user {user_id}: {title}")
+            # Check if there's an active incident with same fingerprint
+            dynamo = get_dynamo_service()
+            recent_incidents = dynamo.list_incidents_by_tenant(user_id)
+            for inc in recent_incidents:
+                if inc.get("status") not in ["completed"] and inc.get("category") == category:
+                    return FunctionResult(
+                        success=False,
+                        error="Duplicate incident",
+                        data={"incident_id": inc.get("incident_id"), "status": inc.get("status")},
+                        message=f"You already have an open {category} incident ({inc.get('incident_id')}). Would you like to update that one instead?",
+                    )
+
+        # Mark fingerprint as recent
+        _recent_incidents[user_id].add(fingerprint)
+
         dynamo = get_dynamo_service()
         bot = get_bot()
 
@@ -101,6 +129,7 @@ async def create_incident(
             "created_at": now,
             "updated_at": now,
             "channel_id": channel_id,
+            "discovery_index": 0,
             "media_urls": [],
         }
 
@@ -153,6 +182,11 @@ async def create_incident(
                     "type": "discovery_question",
                     "question_index": 0,
                 },
+            )
+
+            # Update incident status to 'discovery' immediately
+            dynamo.update_incident_status(
+                incident_id=incident_id, status="discovery", user_id=user_id
             )
 
         logger.info(f"Created incident {incident_id} for user {user_id}")
@@ -218,13 +252,19 @@ async def update_incident(
 
         updates["updated_at"] = datetime.utcnow().isoformat()
 
-        # Extract status to prevent duplicate argument error
-        final_status = updates.pop("status", status or "detected")
+        # CRITICAL FIX: Extract status carefully to avoid duplicate arguments
+        # If status is in updates dict, use that; otherwise use status param
+        if "status" in updates:
+            final_status = updates.pop("status")
+        else:
+            final_status = status if status is not None else "detected"
 
         # Final safety check: strip 'incident_id' from updates (it's a key, not an update field)
         updates.pop("incident_id", None)
 
-        # Log what we're actually updating
+        # Also strip user_id if it leaked in
+        updates.pop("user_id", None)
+
         logger.info(f"✅ Updating incident {incident_id} with fields: {list(updates.keys())}")
 
         dynamo.update_incident_status(
@@ -424,17 +464,55 @@ async def record_discovery_answer(
     question_index: int,
     answer: str,
     channel_id: str,
-    total_questions: int,
+    user_id: str,
+    total_questions: Optional[int] = None,
 ) -> FunctionResult:
     """Record a discovery answer and send next question"""
     try:
+        dynamo = get_dynamo_service()
         bot = get_bot()
+
+        # Get incident to determine total questions if not provided
+        incident = dynamo.get_incident(incident_id, user_id)
+        if not incident:
+            return FunctionResult(
+                success=False,
+                error="Incident not found",
+                message=f"Cannot record answer: incident {incident_id} not found",
+            )
+
+        # Determine total questions
+        if total_questions is None:
+            total_questions = 5  # Default
+
+        # CRITICAL FIX: Save answer to DynamoDB incident
+        existing_answers = incident.get("discovery_answers", {})
+        if isinstance(existing_answers, dict):
+            existing_answers[f"q{question_index}"] = answer
+        else:
+            existing_answers = {f"q{question_index}": answer}
+
         next_index = question_index + 1
+
+        # Save answer + increment discovery_index
+        update_success = dynamo.update_incident_status(
+            incident_id=incident_id,
+            status="discovery",  # Keep in discovery state
+            user_id=user_id,
+            discovery_answers=existing_answers,
+            discovery_index=next_index,
+        )
+
+        if not update_success:
+            logger.error(f"Failed to save discovery answer for {incident_id}")
 
         # Acknowledge answer progress
         progress_msg = f"✅ Answer recorded ({next_index}/{total_questions})"
         if next_index < total_questions:
             progress_msg += f"\n\nNext question coming..."
+        else:
+            progress_msg += f"\n\n🎯 Discovery complete! Creating work order..."
+
         bot.send_ai_message(
             channel_id=channel_id,
             persona="tenant",
@@ -445,6 +523,14 @@ async def record_discovery_answer(
         # Check if discovery is complete
         if next_index >= total_questions:
             logger.info(f"Discovery completed for incident {incident_id}")
+
+            # CRITICAL FIX: Transition incident status to 'discovery_complete'
+            dynamo.update_incident_status(
+                incident_id=incident_id,
+                status="discovery_complete",
+                user_id=user_id,
+            )
+
             return FunctionResult(
                 success=True,
                 data={
@@ -1042,6 +1128,7 @@ def get_function_definitions() -> List[FunctionDefinition]:
                     "incident_id": {"type": "string", "description": "Incident ID"},
                     "question_index": {"type": "integer", "description": "Question index (0-based)"},
                     "answer": {"type": "string", "description": "User's answer"},
+                    "total_questions": {"type": "integer", "description": "Total number of questions (optional, defaults to 5)"},
                 },
                 "required": ["incident_id", "question_index", "answer"],
             },
@@ -1177,16 +1264,15 @@ async def execute_function(
     # Must be VERY specific to avoid treating normal functions as dynamic tools
     if function_name and (
         function_name not in FUNCTION_IMPLEMENTATIONS and (
-            function_name.startswith("run_code") or
-            function_name.startswith("eval_js") or
-            function_name.startswith("exec_python") or
-            function_name.startswith("execute_code") or
-            function_name.startswith("sandbox_") or
-            function_name.startswith("plugin_") or
-            function_name.startswith("dynamic_tool_")
+            function_name.startswith(("run_code", "eval_js", "exec_python", "execute_code",
+                                     "sandbox_", "plugin_", "dynamic_tool_")) or
+            # Also catch common LLM hallucinations
+            function_name.startswith(("get_incident_by_", "search_", "find_",
+                                     "query_", "lookup_", "fetch_"))
         )
     ):
         logger.info(f"Dynamic tool sandbox triggered for: {function_name}")
+        logger.warning(f"⚠️ LLM hallucinated unknown function: {function_name}")
         return FunctionResult(
             success=True,
             data={
