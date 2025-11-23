@@ -5,6 +5,7 @@ Contains all callable functions with schemas and implementations.
 from typing import Dict, Any, List, Optional
 import uuid
 import logging
+import inspect
 from datetime import datetime
 from ..models.orchestrator_schemas import (
     FunctionDefinition,
@@ -40,6 +41,12 @@ DEFAULT_DISCOVERY_QUESTIONS = [
 ]
 
 # ==================== FUNCTION IMPLEMENTATIONS ====================
+
+# Known incident update fields (whitelist for DynamoDB updates)
+ALLOWED_INCIDENT_UPDATES = {
+    "description", "location", "severity", "urgency", "category",
+    "title", "status", "updated_at", "discovery_answers", "resolution_notes", "completed_at"
+}
 
 
 def collapse_text(text: str, limit: int = 300) -> str:
@@ -180,10 +187,18 @@ async def update_incident(
     try:
         dynamo = get_dynamo_service()
 
+        # Strip ALL metadata/routing fields before DynamoDB update
         updates = {}
         if status:
             updates["status"] = status
-        updates.update(kwargs)
+
+        # Only allow known incident fields - aggressively filter metadata
+        for key, value in kwargs.items():
+            if key in ALLOWED_INCIDENT_UPDATES:
+                updates[key] = value
+            else:
+                logger.debug(f"Filtering out metadata field '{key}' from incident update")
+
         updates["updated_at"] = datetime.utcnow().isoformat()
 
         # Extract status to prevent duplicate argument error
@@ -1107,15 +1122,26 @@ async def execute_function(
 ) -> FunctionResult:
     """Execute a function by name with given arguments"""
 
-    # Dynamic tool sandbox: detect pseudo-functions and capture as metadata
+    # Strip "functions." prefix if LLM added it
+    if function_name and function_name.startswith("functions."):
+        function_name = function_name.replace("functions.", "", 1)
+
+    # Dynamic tool sandbox: detect code-like/pseudo-functions
+    # Only trigger for non-registry functions that look like dynamic tools
     if function_name and (
-        function_name.startswith("request_") or
-        function_name.startswith("create_dynamic_") or
-        function_name.startswith("eval_") or
-        function_name.startswith("execute_code") or
-        "sandbox" in function_name.lower() or
-        "plugin" in function_name.lower()
+        function_name not in FUNCTION_IMPLEMENTATIONS and (
+            function_name.startswith("run_") or
+            function_name.startswith("exec_") or
+            function_name.startswith("eval_") or
+            function_name.startswith("execute_code") or
+            "sandbox" in function_name.lower() or
+            "plugin" in function_name.lower() or
+            "tool" in function_name.lower() or
+            "dynamic" in function_name.lower() or
+            "code" in function_name.lower()
+        )
     ):
+        logger.info(f"Dynamic tool sandbox triggered for: {function_name}")
         return FunctionResult(
             success=True,
             data={
@@ -1124,28 +1150,58 @@ async def execute_function(
                 "arguments": arguments,
                 "context": context,
             },
+            error=None,
             message=f"Dynamic tool request captured: {function_name}",
         )
 
-    # Strip "functions." prefix if LLM added it
-    if function_name and function_name.startswith("functions."):
-        function_name = function_name.replace("functions.", "", 1)
-
     if function_name not in FUNCTION_IMPLEMENTATIONS:
+        logger.warning(f"Unknown function requested: {function_name}")
+        available = list(FUNCTION_IMPLEMENTATIONS.keys())
         return FunctionResult(
             success=False,
             error=f"Function {function_name} not found",
-            message=f"Unknown function: {function_name}",
+            data={"available_functions": available[:10]},
+            message=f"Unknown function: {function_name}. Available: {', '.join(available[:5])}...",
         )
 
     func = FUNCTION_IMPLEMENTATIONS[function_name]
 
-    # Inject context fields into arguments
-    arguments["user_id"] = context.get("user_id")
-    arguments["channel_id"] = context.get("channel_id")
+    # Inspect function signature to filter arguments
+    try:
+        sig = inspect.signature(func)
+        valid_params = set(sig.parameters.keys())
+
+        # Inject context fields only if function accepts them
+        if "user_id" in valid_params and "user_id" not in arguments:
+            arguments["user_id"] = context.get("user_id")
+        if "channel_id" in valid_params and "channel_id" not in arguments:
+            arguments["channel_id"] = context.get("channel_id")
+
+        # Filter out any arguments not in function signature
+        filtered_args = {}
+        filtered_out = []
+        for key, value in arguments.items():
+            if key in valid_params:
+                filtered_args[key] = value
+            else:
+                filtered_out.append(key)
+
+        if filtered_out:
+            logger.debug(f"Filtered out args from {function_name}: {filtered_out}")
+
+        logger.info(f"Executing {function_name} with args: {list(filtered_args.keys())}")
+
+    except Exception as e:
+        logger.warning(f"Could not inspect {function_name} signature: {e}, using all arguments")
+        # Fallback: inject context and use all arguments
+        filtered_args = arguments.copy()
+        if "user_id" not in filtered_args:
+            filtered_args["user_id"] = context.get("user_id")
+        if "channel_id" not in filtered_args:
+            filtered_args["channel_id"] = context.get("channel_id")
 
     try:
-        result = await func(**arguments)
+        result = await func(**filtered_args)
         return result
     except TypeError as e:
         logger.error(f"Function {function_name} argument error: {e}", exc_info=True)
