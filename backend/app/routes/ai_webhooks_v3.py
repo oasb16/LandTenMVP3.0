@@ -243,32 +243,45 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
                 # Update active incident/job IDs if function created them
                 if "incident_id" in function_result.data and not meta_context.active_incident_id:
                     context_updates["active_incident_id"] = function_result.data["incident_id"]
-                    logger.info(f"Set active_incident_id: {function_result.data['incident_id']}")
+                    logger.info(f"✅ Set active_incident_id: {function_result.data['incident_id']}")
 
                 if "job_id" in function_result.data and not meta_context.active_job_id:
                     context_updates["active_job_id"] = function_result.data["job_id"]
-                    logger.info(f"Set active_job_id: {function_result.data['job_id']}")
+                    logger.info(f"✅ Set active_job_id: {function_result.data['job_id']}")
+
+                # 🚨 CRITICAL: Check if discovery was auto-started by create_incident
+                # If discovery_auto_started=True, DO NOT call start_discovery again
+                if function_result.data.get("discovery_auto_started"):
+                    logger.info(f"✅ Discovery auto-started by create_incident, updating stage to discovery")
+                    context_updates["stage"] = "discovery"
+                    # Discovery questions and first question were already sent by create_incident
+                    # DO NOT trigger start_discovery again
 
                 # Update discovery state if function returned discovery info
                 if "questions" in function_result.data:
                     context_updates["discovery"] = {
                         "questions": function_result.data["questions"],
                         "question_index": function_result.data.get("question_index", 0),
+                        "incident_id": function_result.data.get("incident_id"),
                     }
+                    logger.info(f"✅ Updated discovery state: Q{function_result.data.get('question_index', 0) + 1}/{len(function_result.data['questions'])}")
 
+                # Update discovery question index if advancing
                 if "next_question_index" in function_result.data:
-                    context_updates["discovery"] = {
-                        **meta_context.discovery.model_dump(),
-                        "question_index": function_result.data["next_question_index"],
-                    }
+                    current_discovery = meta_context.discovery.model_dump()
+                    current_discovery["question_index"] = function_result.data["next_question_index"]
+                    context_updates["discovery"] = current_discovery
+                    logger.info(f"✅ Advanced to discovery Q{function_result.data['next_question_index'] + 1}")
 
                 # Check if discovery is complete
                 if function_result.data.get("discovery_complete"):
-                    context_updates["stage"] = "job-ready"
-                    logger.info("Discovery complete, transitioning to job-ready stage")
+                    context_updates["stage"] = "discovery_complete"
+                    logger.info("✅ Discovery complete, transitioning to discovery_complete stage")
 
+                # Apply all context updates
                 if context_updates:
                     meta_context = await context_manager.update_context(user_id, channel_id, context_updates)
+                    logger.info(f"✅ Context updated: {list(context_updates.keys())}")
 
             # Check if we need multi-turn function calling
             next_action = orchestrator_output.context_updates.next_action
@@ -322,6 +335,39 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
                 # Use second orchestrator's response if available
                 if orchestrator_output_2.response_to_user:
                     orchestrator_output.response_to_user = orchestrator_output_2.response_to_user
+
+        # 🚨 Handle special intents (garbage, errors, etc.)
+        if orchestrator_output.intent in ["garbage_input", "off_topic"]:
+            logger.info(f"🗑️ Garbage/off-topic input detected: {orchestrator_output.intent}")
+            # Send friendly fallback message
+            fallback_messages = {
+                "garbage_input": "I'm here to help with property maintenance issues. If you're experiencing a problem (leak, broken appliance, etc.), please describe it and I'll help you report it.",
+                "off_topic": "I'm focused on property maintenance. If you have a maintenance issue, I'm here to help report and track it.",
+            }
+            fallback_text = fallback_messages.get(orchestrator_output.intent, "I'm here to help with maintenance issues.")
+
+            bot.send_ai_message(
+                channel_id=channel_id,
+                persona=meta_context.persona,
+                text=fallback_text,
+                metadata={"intent": orchestrator_output.intent},
+            )
+
+            return {
+                "status": "acknowledged",
+                "intent": orchestrator_output.intent,
+                "reason": "garbage_or_offtopic",
+            }
+
+        # Handle JSON parse errors
+        if orchestrator_output.intent == "json_parse_error":
+            logger.error(f"🚨 LLM JSON parse error: {orchestrator_output.reasoning}")
+            # Don't send error to user, just log and return
+            return {
+                "status": "error",
+                "intent": "json_parse_error",
+                "reason": "LLM output invalid JSON",
+            }
 
         # Send response to user if LLM provided one
         if orchestrator_output.response_to_user:

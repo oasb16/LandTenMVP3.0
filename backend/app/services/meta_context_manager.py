@@ -1,6 +1,18 @@
 """
-Meta-context manager for LLM orchestrator.
-Manages conversation state, flow stages, and context persistence.
+🔒 PRIMARY CONTEXT MANAGER for LandTen V3 AI Orchestrator
+THIS IS THE ONLY CONTEXT MANAGER - DO NOT USE context_manager.py
+
+Manages conversation state, flow stages, and context persistence for the LLM orchestrator.
+All context operations MUST go through this service.
+
+Key responsibilities:
+- Store and retrieve meta-context (user_id, channel_id, stage, active_incident_id, discovery state)
+- Track conversation history
+- Manage discovery question flow
+- Persist context to DynamoDB with TTL
+- Provide context to orchestrator for decision-making
+
+CRITICAL: This is the single source of truth for conversational context.
 """
 from typing import Dict, Any, Optional, List
 import boto3
