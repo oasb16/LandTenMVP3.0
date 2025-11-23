@@ -23,11 +23,11 @@ class ConversationMessage(BaseModel):
 
 
 class MetaContext(BaseModel):
-    """Complete conversation meta-context"""
+    """Complete conversation meta-context for HYBRID MODE"""
     user_id: str
     channel_id: str
     persona: Literal["tenant", "landlord", "contractor"]
-    stage: Literal["idle", "discovery", "job-ready", "approval-pending", "job-active", "completed"] = "idle"
+    stage: Literal["idle", "detected", "discovery", "diagnosing", "work_order", "scheduling", "approval", "completed"] = "idle"
     active_incident_id: Optional[str] = None
     active_job_id: Optional[str] = None
     discovery: DiscoveryState = Field(default_factory=DiscoveryState)
@@ -92,7 +92,7 @@ class CreateIncidentParams(BaseModel):
 class UpdateIncidentParams(BaseModel):
     """Parameters for update_incident function"""
     incident_id: str
-    status: Optional[Literal["detected", "discovery", "work_order", "in_progress", "completed"]] = None
+    status: Optional[Literal["detected", "discovery", "diagnosing", "work_order", "scheduling", "approval", "in_progress", "completed"]] = None
     title: Optional[str] = None
     description: Optional[str] = None
     category: Optional[str] = None
@@ -122,6 +122,11 @@ class RecordDiscoveryAnswerParams(BaseModel):
     incident_id: str
     question_index: int
     answer: str
+
+
+class CompleteDiscoveryParams(BaseModel):
+    """Parameters for complete_discovery function"""
+    incident_id: str
 
 
 class GetDiscoveryStatusParams(BaseModel):
