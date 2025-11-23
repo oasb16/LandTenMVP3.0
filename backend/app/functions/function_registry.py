@@ -43,9 +43,12 @@ DEFAULT_DISCOVERY_QUESTIONS = [
 # ==================== FUNCTION IMPLEMENTATIONS ====================
 
 # Known incident update fields (whitelist for DynamoDB updates)
+# STRICT whitelist - ONLY these fields allowed in DynamoDB updates
 ALLOWED_INCIDENT_UPDATES = {
-    "description", "location", "severity", "urgency", "category",
-    "title", "status", "updated_at", "discovery_answers", "resolution_notes", "completed_at"
+    "incident_id", "title", "description", "status", "category",
+    "severity", "urgency", "discovery_responses", "discovery_answers",
+    "updated_at", "created_at", "resolution_notes", "completed_at",
+    "location"
 }
 
 
@@ -108,7 +111,7 @@ async def create_incident(
         collapsed_description = collapse_text(description, limit=300)
 
         incident_card_text = (
-            f"🧾 **Incident Reported**\n\n"
+            f"📄 **Incident Reported**\n\n"
             f"**Incident ID:** {incident_id}\n"
             f"**Title:** {title}\n"
             f"**Category:** {category}\n"
@@ -187,22 +190,42 @@ async def update_incident(
     try:
         dynamo = get_dynamo_service()
 
-        # Strip ALL metadata/routing fields before DynamoDB update
+        # First, check if incident exists and is already closed
+        existing = dynamo.get_incident(incident_id, user_id)
+        if existing and existing.get("status") == "completed":
+            # Return friendly message for closed incidents
+            return FunctionResult(
+                success=False,
+                data={"incident_id": incident_id, "status": "completed"},
+                message="This incident is already closed, but I can open a new incident for you.",
+            )
+
+        # Apply STRICT whitelist filtering - only allow known incident fields
         updates = {}
         if status:
             updates["status"] = status
 
-        # Only allow known incident fields - aggressively filter metadata
+        # Aggressively filter: ONLY allow fields in ALLOWED_INCIDENT_UPDATES
+        filtered_out = []
         for key, value in kwargs.items():
             if key in ALLOWED_INCIDENT_UPDATES:
                 updates[key] = value
             else:
-                logger.debug(f"Filtering out metadata field '{key}' from incident update")
+                filtered_out.append(key)
+
+        if filtered_out:
+            logger.info(f"🔒 Stripped metadata from update_incident: {filtered_out}")
 
         updates["updated_at"] = datetime.utcnow().isoformat()
 
         # Extract status to prevent duplicate argument error
         final_status = updates.pop("status", status or "detected")
+
+        # Final safety check: strip 'incident_id' from updates (it's a key, not an update field)
+        updates.pop("incident_id", None)
+
+        # Log what we're actually updating
+        logger.info(f"✅ Updating incident {incident_id} with fields: {list(updates.keys())}")
 
         dynamo.update_incident_status(
             incident_id=incident_id,
@@ -297,6 +320,7 @@ async def start_discovery(
     severity: Optional[str] = None,
     user_message: Optional[str] = None,
     questions: Optional[List[str]] = None,
+    user_id: Optional[str] = None,
 ) -> FunctionResult:
     """Start discovery question flow with category-specific questions"""
     try:
@@ -304,16 +328,37 @@ async def start_discovery(
         dynamo = get_dynamo_service()
 
         # Get incident details if category/severity not provided
-        if not category or not severity:
-            incident = dynamo.get_incident(incident_id, None)
-            if incident:
-                category = category or incident.get("category", "general")
-                severity = severity or incident.get("severity", "medium")
-                user_message = user_message or incident.get("description", "")
-            else:
-                category = category or "general"
-                severity = severity or "medium"
-                user_message = user_message or ""
+        incident = dynamo.get_incident(incident_id, user_id)
+
+        # Check if incident is closed/resolved
+        if incident and incident.get("status") == "completed":
+            logger.info(f"⚠️ Cannot start discovery for closed incident {incident_id}")
+            return FunctionResult(
+                success=False,
+                error="Incident is already closed",
+                message="This incident has been resolved. Please create a new incident if you have a new issue.",
+            )
+
+        # Check if discovery already in progress (status = discovery or work_order)
+        if incident and incident.get("status") in ["discovery", "work_order"]:
+            logger.info(f"ℹ️ Discovery already started for incident {incident_id}")
+
+        if incident:
+            category = category or incident.get("category", "general")
+            severity = severity or incident.get("severity", "medium")
+            user_message = user_message or incident.get("description", "")
+        else:
+            category = category or "general"
+            severity = severity or "medium"
+            user_message = user_message or ""
+
+        # Update incident status to 'discovery' if not already
+        if incident and incident.get("status") not in ["discovery", "work_order", "completed"]:
+            dynamo.update_incident_status(
+                incident_id=incident_id,
+                status="discovery",
+                user_id=user_id or incident.get("user_id"),
+            )
 
         # Get adaptive questions based on category and severity
         discovery_questions = questions or get_discovery_questions(
@@ -328,13 +373,15 @@ async def start_discovery(
 
         # Send discovery question with progress bar
         total = len(discovery_questions)
-        progress_bar = "▓" + ("░" * (total - 1))
+        filled = 1
+        empty = total - filled
+        progress_bar = "▓" * filled + "░" * empty
 
         discovery_text = (
             f"🔍 **Discovery Question**\n\n"
             f"Progress: [{progress_bar}] 1/{total}\n\n"
             f"**Q1:** {discovery_questions[0]}\n\n"
-            f"_Please answer to help us understand the issue better._"
+            f"Please answer to help us understand the issue better."
         )
 
         bot.send_ai_message(
@@ -1126,19 +1173,17 @@ async def execute_function(
     if function_name and function_name.startswith("functions."):
         function_name = function_name.replace("functions.", "", 1)
 
-    # Dynamic tool sandbox: detect code-like/pseudo-functions
-    # Only trigger for non-registry functions that look like dynamic tools
+    # Dynamic tool sandbox: ONLY trigger for explicit dynamic tool patterns
+    # Must be VERY specific to avoid treating normal functions as dynamic tools
     if function_name and (
         function_name not in FUNCTION_IMPLEMENTATIONS and (
-            function_name.startswith("run_") or
-            function_name.startswith("exec_") or
-            function_name.startswith("eval_") or
+            function_name.startswith("run_code") or
+            function_name.startswith("eval_js") or
+            function_name.startswith("exec_python") or
             function_name.startswith("execute_code") or
-            "sandbox" in function_name.lower() or
-            "plugin" in function_name.lower() or
-            "tool" in function_name.lower() or
-            "dynamic" in function_name.lower() or
-            "code" in function_name.lower()
+            function_name.startswith("sandbox_") or
+            function_name.startswith("plugin_") or
+            function_name.startswith("dynamic_tool_")
         )
     ):
         logger.info(f"Dynamic tool sandbox triggered for: {function_name}")
@@ -1166,52 +1211,73 @@ async def execute_function(
 
     func = FUNCTION_IMPLEMENTATIONS[function_name]
 
-    # Inspect function signature to filter arguments
+    # ========== CRITICAL: Aggressive kwargs filtering ==========
+    # MUST strip ALL metadata fields that don't exist in function signature
+    # Common metadata to strip: channel_id, stage, persona, model, context, etc.
+
     try:
         sig = inspect.signature(func)
         valid_params = set(sig.parameters.keys())
 
-        # Inject context fields only if function accepts them
+        # Inject context fields ONLY if function signature accepts them
         if "user_id" in valid_params and "user_id" not in arguments:
             arguments["user_id"] = context.get("user_id")
         if "channel_id" in valid_params and "channel_id" not in arguments:
             arguments["channel_id"] = context.get("channel_id")
+        if "property_id" in valid_params and "property_id" not in arguments:
+            arguments["property_id"] = context.get("property_id")
 
-        # Filter out any arguments not in function signature
+        # AGGRESSIVE FILTERING: Strip EVERYTHING not in function signature
         filtered_args = {}
         filtered_out = []
+
         for key, value in arguments.items():
             if key in valid_params:
                 filtered_args[key] = value
             else:
                 filtered_out.append(key)
 
-        if filtered_out:
-            logger.debug(f"Filtered out args from {function_name}: {filtered_out}")
+        # Also strip common metadata fields from context injection
+        metadata_fields = {
+            "stage", "persona", "model", "context", "message_id",
+            "timestamp", "session_id", "conversation_id", "thread_id",
+            "metadata", "routing", "workflow_stage"
+        }
 
-        logger.info(f"Executing {function_name} with args: {list(filtered_args.keys())}")
+        for meta_field in metadata_fields:
+            if meta_field in filtered_args and meta_field not in valid_params:
+                filtered_out.append(meta_field)
+                filtered_args.pop(meta_field, None)
+
+        if filtered_out:
+            logger.info(f"🔒 Stripped {len(filtered_out)} metadata fields from {function_name}: {filtered_out}")
+
+        logger.info(f"✅ Executing {function_name} with valid args: {list(filtered_args.keys())}")
 
     except Exception as e:
-        logger.warning(f"Could not inspect {function_name} signature: {e}, using all arguments")
-        # Fallback: inject context and use all arguments
+        logger.warning(f"⚠️ Could not inspect {function_name} signature: {e}")
+        # Fallback: still filter out known metadata fields
         filtered_args = arguments.copy()
-        if "user_id" not in filtered_args:
-            filtered_args["user_id"] = context.get("user_id")
-        if "channel_id" not in filtered_args:
-            filtered_args["channel_id"] = context.get("channel_id")
+
+        # Strip known metadata even in fallback
+        known_metadata = {"stage", "persona", "model", "metadata", "routing"}
+        for meta in known_metadata:
+            filtered_args.pop(meta, None)
 
     try:
         result = await func(**filtered_args)
         return result
     except TypeError as e:
-        logger.error(f"Function {function_name} argument error: {e}", exc_info=True)
+        logger.error(f"❌ Function {function_name} argument error: {e}", exc_info=True)
+        logger.error(f"   Attempted args: {list(filtered_args.keys())}")
+        logger.error(f"   Valid params: {list(valid_params) if 'valid_params' in locals() else 'unknown'}")
         return FunctionResult(
             success=False,
             error=f"Invalid arguments: {str(e)}",
             message=f"Failed to execute {function_name}: invalid arguments",
         )
     except Exception as e:
-        logger.error(f"Function {function_name} execution error: {e}", exc_info=True)
+        logger.error(f"❌ Function {function_name} execution error: {e}", exc_info=True)
         return FunctionResult(
             success=False,
             error=str(e),
