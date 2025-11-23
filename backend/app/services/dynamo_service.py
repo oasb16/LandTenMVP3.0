@@ -15,12 +15,15 @@ import time
 _dynamodb_client = None
 _dynamodb_resource = None
 
-# STRICT whitelist for incident update fields (must match function_registry.py)
+# 🔒 STRICT WHITELIST for incident update fields (must match function_registry.py)
+# ONLY these fields are allowed in incident updates
+# ALL other fields will be STRIPPED before reaching DynamoDB
 ALLOWED_INCIDENT_FIELDS = {
     "incident_id", "title", "description", "status", "category",
     "severity", "urgency", "discovery_responses", "discovery_answers",
     "updated_at", "created_at", "resolution_notes", "completed_at",
-    "location", "discovery_index"
+    "location", "discovery_index", "property_id", "tenant_id",
+    "media_urls", "discovery_data"
 }
 
 

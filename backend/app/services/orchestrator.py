@@ -132,41 +132,20 @@ and manage conversation context. Always respond with valid JSON in this format:
 
         return json.dumps(result_dict, indent=2)
 
-    def _parse_orchestrator_output(self, response_text: str) -> OrchestratorOutput:
-        """Parse LLM response into OrchestratorOutput with robust fallback handling"""
+    def _parse_orchestrator_output(self, response_text: str, retry_count: int = 0) -> OrchestratorOutput:
+        """Parse LLM response into OrchestratorOutput with STRICT JSON-ONLY enforcement"""
         try:
             # Try to extract JSON from response
             response_text = response_text.strip()
 
-            # Handle case where LLM returns natural language instead of JSON
+            # 🚨 CRITICAL: NEVER accept non-JSON responses
+            # If LLM returns plain text, this is a FAILURE, not a fallback scenario
             if not response_text.startswith("{") and not response_text.startswith("```"):
-                logger.warning(f"LLM returned non-JSON response: {response_text[:100]}")
+                logger.error(f"🚨 LLM violated JSON-ONLY mode: {response_text[:200]}")
 
-                # Try to detect if this was meant to be a helpful response vs error
-                # If it contains friendly language, treat as general.chat
-                # Otherwise, ask for clarification
-
-                friendly_indicators = ["hi", "hello", "help", "assist", "here", "i'm", "let me"]
-                is_friendly = any(indicator in response_text.lower() for indicator in friendly_indicators)
-
-                if is_friendly:
-                    # LLM tried to be helpful - use the response
-                    return OrchestratorOutput(
-                        intent="general.chat",
-                        reasoning="LLM returned natural language instead of JSON structure",
-                        context_updates=ContextUpdates(),
-                        function_call=FunctionCall(name=None, arguments={}),
-                        response_to_user=response_text,
-                    )
-                else:
-                    # LLM was confused - ask for clarification
-                    return OrchestratorOutput(
-                        intent="clarification_needed",
-                        reasoning="LLM returned non-JSON response",
-                        context_updates=ContextUpdates(),
-                        function_call=FunctionCall(name=None, arguments={}),
-                        response_to_user="I didn't quite understand that. If you're experiencing a maintenance issue, please describe what's happening and where it's located.",
-                    )
+                # DO NOT fall back to general.chat - this is FORBIDDEN
+                # Instead, raise exception to trigger retry
+                raise ValueError(f"LLM output is not JSON. Output starts with: {response_text[:50]}")
 
             # Handle markdown code blocks
             if response_text.startswith("```"):
@@ -177,13 +156,31 @@ and manage conversation context. Always respond with valid JSON in this format:
 
             response_json = json.loads(response_text)
 
+            # Validate required fields exist
+            if "intent" not in response_json:
+                logger.warning("Missing 'intent' in LLM response, defaulting to 'unknown'")
+                response_json["intent"] = "unknown"
+
+            if "function" not in response_json:
+                response_json["function"] = "none"
+
+            if "arguments" not in response_json:
+                response_json["arguments"] = {}
+
             # Build context updates
             context_updates_data = response_json.get("context_updates", {})
-            context_updates = ContextUpdates(**context_updates_data)
+            context_updates = ContextUpdates(**context_updates_data) if context_updates_data else ContextUpdates()
 
-            # Build function call
-            function_call_data = response_json.get("function_call", {})
-            function_call = FunctionCall(**function_call_data)
+            # Build function call - support both "function" and "function_call" formats
+            if "function_call" in response_json and isinstance(response_json["function_call"], dict):
+                function_call_data = response_json["function_call"]
+                function_call = FunctionCall(**function_call_data)
+            else:
+                # Simple format: {"function": "create_incident", "arguments": {...}}
+                function_call = FunctionCall(
+                    name=response_json.get("function") if response_json.get("function") != "none" else None,
+                    arguments=response_json.get("arguments", {})
+                )
 
             # Build orchestrator output
             output = OrchestratorOutput(
@@ -194,34 +191,24 @@ and manage conversation context. Always respond with valid JSON in this format:
                 response_to_user=response_json.get("response_to_user"),
             )
 
+            logger.info(f"✅ Parsed JSON successfully: intent={output.intent}, function={output.function_call.name or 'none'}")
             return output
 
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse LLM response as JSON: {e}")
-            logger.error(f"Response text: {response_text}")
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.error(f"❌ JSON parsing failed: {e}")
+            logger.error(f"Response text: {response_text[:500]}")
 
-            # More intelligent fallback based on the content
-            # If response looks like a valid assistant message, use it
-            # Otherwise, ask for clarification
+            # 🚨 DO NOT FALL BACK TO general.chat
+            # This is a critical system failure - LLM must output JSON
+            # Return error state that forces clarification
 
-            if len(response_text) > 20 and not response_text.startswith("Error"):
-                # Looks like a valid response, just not in JSON format
-                return OrchestratorOutput(
-                    intent="general.chat",
-                    reasoning="JSON parse error but response looks valid",
-                    context_updates=ContextUpdates(),
-                    function_call=FunctionCall(name=None, arguments={}),
-                    response_to_user=response_text if len(response_text) < 500 else "I'm having trouble formatting my response. Could you please rephrase your question?",
-                )
-            else:
-                # Short or error-like response - ask for clarification
-                return OrchestratorOutput(
-                    intent="clarification_needed",
-                    reasoning="Failed to parse LLM response as JSON",
-                    context_updates=ContextUpdates(),
-                    function_call=FunctionCall(name=None, arguments={}),
-                    response_to_user="I'm having trouble understanding that. If you're experiencing a maintenance issue, please describe what's happening and where it's located.",
-                )
+            return OrchestratorOutput(
+                intent="json_parse_error",
+                reasoning=f"LLM failed to output valid JSON (attempt {retry_count + 1})",
+                context_updates=ContextUpdates(),
+                function_call=FunctionCall(name=None, arguments={}),
+                response_to_user="I'm having trouble processing that request. Could you please rephrase it?",
+            )
 
         except Exception as e:
             logger.error(f"Error parsing orchestrator output: {e}", exc_info=True)
@@ -248,7 +235,37 @@ and manage conversation context. Always respond with valid JSON in this format:
         try:
             client = self._get_openai_client()
 
-            # CRITICAL PRE-FLIGHT CHECK: If active_incident_id exists, check if it's closed
+            # 🚨 CRITICAL PRE-FLIGHT CHECK: Garbage input filter
+            # Detect and reject garbage before calling LLM to save tokens
+            garbage_indicators = [
+                len(user_message.strip()) < 3,  # Too short (unless emergency keywords)
+                user_message.strip() in ["hi", "hello", "hey", "sup", "ok", "thanks", "yes", "no", "k", "lol"],
+                all(c in "!?.,;:'\"-_()[]{}/" for c in user_message.strip()),  # All punctuation
+                user_message.count(user_message.split()[0]) > 5 if user_message.split() else False,  # Repeated words
+            ]
+
+            # Check for maintenance keywords to override garbage detection
+            maintenance_keywords = [
+                "leak", "broken", "clog", "drip", "smell", "noise", "crack", "malfunction",
+                "issue", "problem", "repair", "fix", "stopped", "won't", "doesn't", "can't",
+                "flooding", "sparking", "burning", "sink", "toilet", "fridge", "heater",
+                "ac", "door", "window", "outlet", "breaker", "emergency", "urgent"
+            ]
+            has_maintenance_keyword = any(keyword in user_message.lower() for keyword in maintenance_keywords)
+
+            # If garbage AND no maintenance keywords → skip LLM call
+            if any(garbage_indicators) and not has_maintenance_keyword:
+                logger.info(f"🗑️ Garbage input detected, skipping LLM: {user_message[:50]}")
+                # Don't call LLM for garbage - return general.chat immediately
+                return OrchestratorOutput(
+                    intent="garbage_input",
+                    reasoning="Input is too short, greeting, or nonsense without maintenance keywords",
+                    context_updates=ContextUpdates(),
+                    function_call=FunctionCall(name=None, arguments={}),
+                    response_to_user=None,  # Webhook will handle default response
+                )
+
+            # 🚨 CRITICAL PRE-FLIGHT CHECK: If active_incident_id exists, check if it's closed
             if meta_context.active_incident_id:
                 try:
                     from ..services.dynamo_service import get_dynamo_service
@@ -262,10 +279,15 @@ and manage conversation context. Always respond with valid JSON in this format:
                         logger.info(f"⚠️ Active incident {meta_context.active_incident_id} is closed")
                         # Inject into context
                         meta_context.metadata["active_incident_status"] = "completed"
+                        meta_context.metadata["active_incident_category"] = incident.get("category")
+                        meta_context.metadata["active_incident_title"] = incident.get("title")
                     elif incident:
                         meta_context.metadata["active_incident_status"] = incident.get("status")
                         meta_context.metadata["active_incident_category"] = incident.get("category")
                         meta_context.metadata["active_incident_title"] = incident.get("title")
+                        meta_context.metadata["active_incident_description"] = incident.get("description", "")[:200]
+
+                        logger.info(f"📌 Active incident context: {incident.get('title')} ({incident.get('status')})")
 
                 except Exception as e:
                     logger.error(f"Error checking active incident status: {e}")

@@ -86,59 +86,84 @@ async def create_incident(
 ) -> FunctionResult:
     """Create a new maintenance incident"""
     try:
-        # IDEMPOTENCY CHECK: Prevent duplicate incident creation
-        # Check if user already has an active incident in the same category
+        # 🚨 CRITICAL: IDEMPOTENCY CHECK - Prevent duplicate incident creation
+        # AGGRESSIVELY check if user already has an active incident
         dynamo = get_dynamo_service()
 
-        logger.info(f"🔍 Checking for duplicate incidents for user {user_id} in category {category}")
+        logger.info(f"🔍 Duplicate detection for user {user_id}: category={category}, title='{title}'")
         recent_incidents = dynamo.list_incidents_by_tenant(user_id)
 
-        # Check for active incidents in same category
+        # HARD BLOCK: Only ONE active incident per category at a time
+        active_statuses = ["detected", "discovery", "diagnosing", "work_order", "scheduling", "approval", "followup"]
+
         for inc in recent_incidents:
             inc_status = inc.get("status")
             inc_category = inc.get("category")
             inc_id = inc.get("incident_id")
             inc_title = inc.get("title", "")
+            inc_description = inc.get("description", "")
 
-            # Skip completed incidents
-            if inc_status == "completed":
+            # Skip completed/closed incidents (allow recurrence)
+            if inc_status == "completed" or inc_status == "closed":
                 continue
 
-            # Check if same category
-            if inc_category == category:
-                # Check if title is very similar (simple keyword match)
-                title_words = set(title.lower().split())
-                inc_title_words = set(inc_title.lower().split())
-                common_words = title_words.intersection(inc_title_words)
+            # Check if SAME category AND active status
+            if inc_category == category and inc_status in active_statuses:
+                # AGGRESSIVE SIMILARITY CHECK
+                # Method 1: Title keyword overlap
+                title_words = set(w.lower() for w in title.split() if len(w) > 2)
+                inc_title_words = set(w.lower() for w in inc_title.split() if len(w) > 2)
+                title_overlap = len(title_words.intersection(inc_title_words))
+                title_similarity = title_overlap / max(len(title_words), 1) if title_words else 0
 
-                # If > 50% overlap in meaningful words, likely duplicate
-                min_len = min(len(title_words), len(inc_title_words))
-                if min_len > 0 and len(common_words) / min_len > 0.5:
-                    logger.warning(f"⚠️ Duplicate incident detected: {inc_id} (status={inc_status})")
+                # Method 2: Description keyword overlap
+                desc_words = set(w.lower() for w in description.split() if len(w) > 3)
+                inc_desc_words = set(w.lower() for w in inc_description.split() if len(w) > 3)
+                desc_overlap = len(desc_words.intersection(inc_desc_words))
+                desc_similarity = desc_overlap / max(len(desc_words), 1) if desc_words else 0
+
+                # DUPLICATE if:
+                # - Same category + title similarity > 40% OR
+                # - Same category + description similarity > 40% OR
+                # - Same category + both title and desc have ANY overlap
+                is_duplicate = (
+                    title_similarity > 0.4 or
+                    desc_similarity > 0.4 or
+                    (title_overlap > 0 and desc_overlap > 0)
+                )
+
+                if is_duplicate:
+                    logger.warning(f"🚨 DUPLICATE BLOCKED: {inc_id} (status={inc_status}, title_sim={title_similarity:.2f}, desc_sim={desc_similarity:.2f})")
                     return FunctionResult(
                         success=False,
-                        error="Duplicate incident",
+                        error="duplicate_incident",
                         data={
                             "incident_id": inc_id,
                             "status": inc_status,
                             "title": inc_title,
-                            "category": inc_category
+                            "category": inc_category,
+                            "similarity": {
+                                "title": title_similarity,
+                                "description": desc_similarity
+                            }
                         },
-                        message=f"You already have an open {category} incident ({inc_id}): '{inc_title}'. Are you providing more details about that issue, or is this a different problem?",
+                        message=f"You already have an open {category} incident ({inc_id}): '{inc_title}' (status: {inc_status}). Are you providing more details about that issue?",
                     )
 
-                # Same category, but different specific issue
-                # Log but allow creation
-                logger.info(f"ℹ️ Creating new {category} incident despite existing {inc_id} (different specific issue)")
+                # Same category but clearly different issue (similarity < 40%)
+                logger.info(f"✅ Allowing new {category} incident despite existing {inc_id} (low similarity: title={title_similarity:.2f}, desc={desc_similarity:.2f})")
 
-        # Use fingerprinting as backup check
+        # Fingerprinting as backup check (prevent rapid duplicates within 5 minutes)
         import hashlib
         fingerprint = hashlib.md5(
             f"{title.lower().strip()}:{category}:{severity}".encode()
         ).hexdigest()[:8]
 
-        # Mark fingerprint as recent (prevent rapid duplicates)
-        _recent_incidents[user_id].add(fingerprint)
+        if fingerprint in _recent_incidents[user_id]:
+            logger.warning(f"⚠️ Fingerprint duplicate detected: {fingerprint}")
+            # Still allow but warn
+        else:
+            _recent_incidents[user_id].add(fingerprint)
 
         # dynamo already initialized above
         bot = get_bot()
