@@ -42,6 +42,23 @@ DEFAULT_DISCOVERY_QUESTIONS = [
 # ==================== FUNCTION IMPLEMENTATIONS ====================
 
 
+def collapse_text(text: str, limit: int = 300) -> str:
+    """Collapse long text into preview with '(see more)' indicator"""
+    if not text or len(text) <= limit:
+        return text
+
+    truncated = text[:limit]
+    last_period = truncated.rfind(". ")
+    if last_period > limit * 0.7:
+        truncated = truncated[:last_period + 1]
+    else:
+        last_space = truncated.rfind(" ")
+        if last_space > 0:
+            truncated = truncated[:last_space]
+
+    return f"{truncated}... *(see more)*"
+
+
 async def create_incident(
     title: str,
     description: str,
@@ -80,15 +97,19 @@ async def create_incident(
         # Save to DynamoDB
         dynamo.create_incident(incident_data)
 
-        # Send beautifully formatted incident card
-        incident_card_text = format_incident_card({
-            "incident_id": incident_id,
-            "title": title,
-            "category": category,
-            "severity": severity,
-            "urgency": urgency,
-            "description": description,
-        })
+        # Send incident card with collapsed description
+        collapsed_description = collapse_text(description, limit=300)
+
+        incident_card_text = (
+            f"🧾 **Incident Reported**\n\n"
+            f"**Incident ID:** {incident_id}\n"
+            f"**Title:** {title}\n"
+            f"**Category:** {category}\n"
+            f"**Severity:** {severity}\n"
+            f"**Urgency:** {urgency}\n\n"
+            f"**Details:**\n{collapsed_description}\n\n"
+            f"---\nWe'll gather more details to resolve this quickly."
+        )
 
         bot.send_ai_message(
             channel_id=channel_id,
@@ -165,9 +186,12 @@ async def update_incident(
         updates.update(kwargs)
         updates["updated_at"] = datetime.utcnow().isoformat()
 
+        # Extract status to prevent duplicate argument error
+        final_status = updates.pop("status", status or "detected")
+
         dynamo.update_incident_status(
             incident_id=incident_id,
-            status=status or "detected",
+            status=final_status,
             user_id=user_id,
             **updates,
         )
@@ -287,11 +311,15 @@ async def start_discovery(
         if not discovery_questions:
             discovery_questions = DEFAULT_DISCOVERY_QUESTIONS
 
-        # Send first discovery question with beautiful formatting
-        discovery_text = format_discovery_progress(
-            question_index=0,
-            total_questions=len(discovery_questions),
-            current_question=discovery_questions[0],
+        # Send discovery question with progress bar
+        total = len(discovery_questions)
+        progress_bar = "▓" + ("░" * (total - 1))
+
+        discovery_text = (
+            f"🔍 **Discovery Question**\n\n"
+            f"Progress: [{progress_bar}] 1/{total}\n\n"
+            f"**Q1:** {discovery_questions[0]}\n\n"
+            f"_Please answer to help us understand the issue better._"
         )
 
         bot.send_ai_message(
@@ -1078,6 +1106,27 @@ async def execute_function(
     context: Dict[str, Any],
 ) -> FunctionResult:
     """Execute a function by name with given arguments"""
+
+    # Dynamic tool sandbox: detect pseudo-functions and capture as metadata
+    if function_name and (
+        function_name.startswith("request_") or
+        function_name.startswith("create_dynamic_") or
+        function_name.startswith("eval_") or
+        function_name.startswith("execute_code") or
+        "sandbox" in function_name.lower() or
+        "plugin" in function_name.lower()
+    ):
+        return FunctionResult(
+            success=True,
+            data={
+                "type": "dynamic_tool_request",
+                "tool_idea": function_name,
+                "arguments": arguments,
+                "context": context,
+            },
+            message=f"Dynamic tool request captured: {function_name}",
+        )
+
     # Strip "functions." prefix if LLM added it
     if function_name and function_name.startswith("functions."):
         function_name = function_name.replace("functions.", "", 1)
