@@ -133,7 +133,7 @@ and manage conversation context. Always respond with valid JSON in this format:
         return json.dumps(result_dict, indent=2)
 
     def _parse_orchestrator_output(self, response_text: str) -> OrchestratorOutput:
-        """Parse LLM response into OrchestratorOutput"""
+        """Parse LLM response into OrchestratorOutput with robust fallback handling"""
         try:
             # Try to extract JSON from response
             response_text = response_text.strip()
@@ -141,14 +141,32 @@ and manage conversation context. Always respond with valid JSON in this format:
             # Handle case where LLM returns natural language instead of JSON
             if not response_text.startswith("{") and not response_text.startswith("```"):
                 logger.warning(f"LLM returned non-JSON response: {response_text[:100]}")
-                # Try to recover by treating it as general.chat
-                return OrchestratorOutput(
-                    intent="general.chat",
-                    reasoning="LLM returned natural language instead of structured output",
-                    context_updates=ContextUpdates(),
-                    function_call=FunctionCall(name=None, arguments={}),
-                    response_to_user=response_text,
-                )
+
+                # Try to detect if this was meant to be a helpful response vs error
+                # If it contains friendly language, treat as general.chat
+                # Otherwise, ask for clarification
+
+                friendly_indicators = ["hi", "hello", "help", "assist", "here", "i'm", "let me"]
+                is_friendly = any(indicator in response_text.lower() for indicator in friendly_indicators)
+
+                if is_friendly:
+                    # LLM tried to be helpful - use the response
+                    return OrchestratorOutput(
+                        intent="general.chat",
+                        reasoning="LLM returned natural language instead of JSON structure",
+                        context_updates=ContextUpdates(),
+                        function_call=FunctionCall(name=None, arguments={}),
+                        response_to_user=response_text,
+                    )
+                else:
+                    # LLM was confused - ask for clarification
+                    return OrchestratorOutput(
+                        intent="clarification_needed",
+                        reasoning="LLM returned non-JSON response",
+                        context_updates=ContextUpdates(),
+                        function_call=FunctionCall(name=None, arguments={}),
+                        response_to_user="I didn't quite understand that. If you're experiencing a maintenance issue, please describe what's happening and where it's located.",
+                    )
 
             # Handle markdown code blocks
             if response_text.startswith("```"):
@@ -182,15 +200,28 @@ and manage conversation context. Always respond with valid JSON in this format:
             logger.error(f"Failed to parse LLM response as JSON: {e}")
             logger.error(f"Response text: {response_text}")
 
-            # CRITICAL FIX: Don't default to general.chat for valid maintenance requests
-            # Instead, ask user to rephrase
-            return OrchestratorOutput(
-                intent="parse_error",
-                reasoning="Failed to parse LLM response",
-                context_updates=ContextUpdates(),
-                function_call=FunctionCall(name=None, arguments={}),
-                response_to_user="I'm having trouble understanding that. Could you please describe your maintenance issue more clearly?",
-            )
+            # More intelligent fallback based on the content
+            # If response looks like a valid assistant message, use it
+            # Otherwise, ask for clarification
+
+            if len(response_text) > 20 and not response_text.startswith("Error"):
+                # Looks like a valid response, just not in JSON format
+                return OrchestratorOutput(
+                    intent="general.chat",
+                    reasoning="JSON parse error but response looks valid",
+                    context_updates=ContextUpdates(),
+                    function_call=FunctionCall(name=None, arguments={}),
+                    response_to_user=response_text if len(response_text) < 500 else "I'm having trouble formatting my response. Could you please rephrase your question?",
+                )
+            else:
+                # Short or error-like response - ask for clarification
+                return OrchestratorOutput(
+                    intent="clarification_needed",
+                    reasoning="Failed to parse LLM response as JSON",
+                    context_updates=ContextUpdates(),
+                    function_call=FunctionCall(name=None, arguments={}),
+                    response_to_user="I'm having trouble understanding that. If you're experiencing a maintenance issue, please describe what's happening and where it's located.",
+                )
 
         except Exception as e:
             logger.error(f"Error parsing orchestrator output: {e}", exc_info=True)

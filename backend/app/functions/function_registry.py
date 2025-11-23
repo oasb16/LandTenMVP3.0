@@ -87,29 +87,60 @@ async def create_incident(
     """Create a new maintenance incident"""
     try:
         # IDEMPOTENCY CHECK: Prevent duplicate incident creation
+        # Check if user already has an active incident in the same category
+        dynamo = get_dynamo_service()
+
+        logger.info(f"🔍 Checking for duplicate incidents for user {user_id} in category {category}")
+        recent_incidents = dynamo.list_incidents_by_tenant(user_id)
+
+        # Check for active incidents in same category
+        for inc in recent_incidents:
+            inc_status = inc.get("status")
+            inc_category = inc.get("category")
+            inc_id = inc.get("incident_id")
+            inc_title = inc.get("title", "")
+
+            # Skip completed incidents
+            if inc_status == "completed":
+                continue
+
+            # Check if same category
+            if inc_category == category:
+                # Check if title is very similar (simple keyword match)
+                title_words = set(title.lower().split())
+                inc_title_words = set(inc_title.lower().split())
+                common_words = title_words.intersection(inc_title_words)
+
+                # If > 50% overlap in meaningful words, likely duplicate
+                min_len = min(len(title_words), len(inc_title_words))
+                if min_len > 0 and len(common_words) / min_len > 0.5:
+                    logger.warning(f"⚠️ Duplicate incident detected: {inc_id} (status={inc_status})")
+                    return FunctionResult(
+                        success=False,
+                        error="Duplicate incident",
+                        data={
+                            "incident_id": inc_id,
+                            "status": inc_status,
+                            "title": inc_title,
+                            "category": inc_category
+                        },
+                        message=f"You already have an open {category} incident ({inc_id}): '{inc_title}'. Are you providing more details about that issue, or is this a different problem?",
+                    )
+
+                # Same category, but different specific issue
+                # Log but allow creation
+                logger.info(f"ℹ️ Creating new {category} incident despite existing {inc_id} (different specific issue)")
+
+        # Use fingerprinting as backup check
         import hashlib
         fingerprint = hashlib.md5(
             f"{title.lower().strip()}:{category}:{severity}".encode()
         ).hexdigest()[:8]
 
-        if fingerprint in _recent_incidents[user_id]:
-            logger.warning(f"⚠️ Duplicate incident detected for user {user_id}: {title}")
-            # Check if there's an active incident with same fingerprint
-            dynamo = get_dynamo_service()
-            recent_incidents = dynamo.list_incidents_by_tenant(user_id)
-            for inc in recent_incidents:
-                if inc.get("status") not in ["completed"] and inc.get("category") == category:
-                    return FunctionResult(
-                        success=False,
-                        error="Duplicate incident",
-                        data={"incident_id": inc.get("incident_id"), "status": inc.get("status")},
-                        message=f"You already have an open {category} incident ({inc.get('incident_id')}). Would you like to update that one instead?",
-                    )
-
-        # Mark fingerprint as recent
+        # Mark fingerprint as recent (prevent rapid duplicates)
         _recent_incidents[user_id].add(fingerprint)
 
-        dynamo = get_dynamo_service()
+        # dynamo already initialized above
         bot = get_bot()
 
         incident_id = f"inc_{uuid.uuid4().hex[:12]}"
@@ -165,8 +196,14 @@ async def create_incident(
             },
         )
 
-        # Automatically send first discovery question if appropriate
-        if should_ask_discovery_questions(category, severity):
+        # CRITICAL FIX: Only send first discovery question if appropriate
+        # DO NOT send if orchestrator will handle it (prevents duplicates)
+        # Check if we should auto-start discovery
+        auto_start_discovery = should_ask_discovery_questions(category, severity)
+
+        if auto_start_discovery:
+            logger.info(f"✅ Auto-starting discovery for incident {incident_id}")
+
             first_question = get_first_discovery_question(category, severity, description)
             discovery_text = format_discovery_progress(
                 question_index=0,
@@ -187,6 +224,23 @@ async def create_incident(
             # Update incident status to 'discovery' immediately
             dynamo.update_incident_status(
                 incident_id=incident_id, status="discovery", user_id=user_id
+            )
+
+            # CRITICAL: Return flag indicating discovery was auto-started
+            # This prevents the orchestrator from calling start_discovery again
+            return FunctionResult(
+                success=True,
+                data={
+                    "incident_id": incident_id,
+                    "status": "discovery",  # Changed from "detected"
+                    "title": title,
+                    "category": category,
+                    "severity": severity,
+                    "urgency": urgency,
+                    "created_at": now,
+                    "discovery_auto_started": True,  # Flag for orchestrator
+                },
+                message=f"Incident {incident_id} created and discovery started automatically",
             )
 
         logger.info(f"Created incident {incident_id} for user {user_id}")
@@ -522,7 +576,7 @@ async def record_discovery_answer(
 
         # Check if discovery is complete
         if next_index >= total_questions:
-            logger.info(f"Discovery completed for incident {incident_id}")
+            logger.info(f"✅ Discovery completed for incident {incident_id}")
 
             # CRITICAL FIX: Transition incident status to 'discovery_complete'
             dynamo.update_incident_status(
@@ -542,6 +596,41 @@ async def record_discovery_answer(
                 message="Discovery questions completed",
             )
 
+        # CRITICAL: Automatically send next question
+        # Get discovery questions from context or generate new ones
+        category = incident.get("category", "general")
+        severity = incident.get("severity", "medium")
+        description = incident.get("description", "")
+
+        from ..utils.discovery_questions import get_discovery_questions
+        questions = get_discovery_questions(category, severity, description, max_questions=total_questions)
+
+        if next_index < len(questions):
+            next_question = questions[next_index]
+
+            # Send next discovery question
+            from ..utils.message_cards import format_discovery_progress
+            discovery_text = format_discovery_progress(
+                question_index=next_index,
+                total_questions=total_questions,
+                current_question=next_question,
+            )
+
+            bot.send_ai_message(
+                channel_id=channel_id,
+                persona="tenant",
+                text=discovery_text,
+                metadata={
+                    "incident_id": incident_id,
+                    "type": "discovery_question",
+                    "question_index": next_index,
+                },
+            )
+
+            logger.info(f"✅ Sent discovery question {next_index+1}/{total_questions} for incident {incident_id}")
+        else:
+            logger.warning(f"⚠️ No question available for index {next_index}")
+
         # Send next question
         logger.info(f"Recorded discovery answer {question_index} for incident {incident_id}")
 
@@ -554,7 +643,7 @@ async def record_discovery_answer(
                 "discovery_complete": False,
                 "next_question_index": next_index,
             },
-            message=f"Discovery answer {question_index} recorded",
+            message=f"Discovery answer {question_index} recorded, next question sent",
         )
 
     except Exception as e:
