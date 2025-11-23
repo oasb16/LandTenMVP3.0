@@ -12,7 +12,8 @@ interface TextExpanderProps {
 }
 
 export function TextExpander({ text, maxLength = 300, className = '', isBot = false }: TextExpanderProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
+  // Auto-expand AI messages by default so full responses are visible
+  const [isExpanded, setIsExpanded] = useState(isBot);
   const [shouldTruncate, setShouldTruncate] = useState(false);
 
   useEffect(() => {

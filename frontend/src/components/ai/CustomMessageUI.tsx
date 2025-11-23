@@ -283,7 +283,7 @@ export const CustomMessageUI = memo(function CustomMessageUI({
             className={`${bubbleClasses} ${bubbleAlignment}`}
             transition={{ type: "spring", stiffness: 260, damping: 24 }}
           >
-            <TextExpander text={messageText} maxLength={300} isBot={isAIMessage} />
+            <TextExpander text={messageText} maxLength={10000} isBot={isAIMessage} />
           </motion.div>
         )
       ) : null}
