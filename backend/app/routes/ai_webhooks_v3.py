@@ -174,6 +174,81 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
 
         logger.info(f"Persona: {meta_context.persona}, Stage: {meta_context.stage}")
 
+        # 🚀 PHASE OMEGA: Agent Router Integration
+        agent_enhanced_context = None
+        try:
+            from ..agents.agent_router import get_agent_router
+
+            agent_router = get_agent_router()
+            agent_response = await agent_router.route(
+                message=message_text,
+                context={
+                    "stage": meta_context.stage,
+                    "active_incident_id": meta_context.active_incident_id,
+                    "persona": meta_context.persona,
+                    "metadata": meta_context.metadata,
+                },
+            )
+
+            if agent_response and agent_response.get("agent_response"):
+                agent_enhanced_context = agent_response.get("agent_response")
+                logger.info(f"🤖 Routed to {agent_response.get('agent_type', 'unknown')} agent")
+        except Exception as e:
+            logger.error(f"Agent routing error: {e}", exc_info=True)
+
+        # 🚀 PHASE OMEGA: Topic Graph Update
+        try:
+            from ..services.incident_topic_graph import get_incident_graph
+
+            if meta_context.active_incident_id:
+                incident_graph = get_incident_graph(user_id)
+
+                incident_graph.update_context(
+                    incident_id=meta_context.active_incident_id,
+                    user_message=message_text,
+                )
+
+                shift_result = incident_graph.detect_topic_shift(
+                    user_message=message_text,
+                    current_incident_id=meta_context.active_incident_id,
+                )
+
+                if shift_result.get("is_shift"):
+                    logger.info(f"🔀 Topic shift detected: {shift_result.get('reason')}")
+
+                    target_incident = shift_result.get("target_incident_id")
+
+                    if target_incident:
+                        logger.info(f"↪️ Switching to existing incident: {target_incident}")
+                        meta_context = await context_manager.update_context(
+                            user_id,
+                            channel_id,
+                            {
+                                "active_incident_id": target_incident,
+                                "stage": shift_result.get("target_stage", "discovery"),
+                            },
+                        )
+
+        except Exception as e:
+            logger.error(f"Topic graph update error: {e}", exc_info=True)
+
+        # 🚀 PHASE OMEGA: Dynamic Incident Cards
+        enhanced_metadata = {
+            "persona": meta_context.persona,
+            "stage": meta_context.stage,
+            "active_incident_id": meta_context.active_incident_id,
+        }
+
+        try:
+            from ..services.dynamic_incident_cards import get_card_generator
+
+            card_generator = get_card_generator()
+            enhanced_metadata["card_generator_available"] = True
+
+        except Exception as e:
+            logger.error(f"Card generator initialization error: {e}", exc_info=True)
+            enhanced_metadata["card_generator_available"] = False
+
         # Append user message to conversation history
         await context_manager.append_message(user_id, channel_id, "user", message_text)
 
@@ -430,6 +505,21 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "assistant",
                 orchestrator_output.response_to_user,
             )
+
+        # 🚀 PHASE OMEGA: Record interaction for auto-evolving skills
+        try:
+            from ..services.orchestrator import record_agent_interaction
+
+            if agent_enhanced_context:
+                await record_agent_interaction(
+                    user_id=user_id,
+                    agent_type="multi_agent",
+                    user_message=message_text,
+                    agent_response=orchestrator_output.response_to_user or "",
+                    outcome="success" if orchestrator_output.function_call.name else "chat",
+                )
+        except Exception as e:
+            logger.error(f"Error recording interaction: {e}", exc_info=True)
 
         # Log performance
         duration = (time.time() - start_time) * 1000

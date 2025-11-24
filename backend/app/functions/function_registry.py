@@ -220,19 +220,51 @@ async def create_incident(
         # Save to DynamoDB
         dynamo.create_incident(incident_data)
 
-        # Send incident card with collapsed description
-        collapsed_description = collapse_text(description, limit=300)
+        # 🚀 PHASE OMEGA: Generate Dynamic Incident Card
+        try:
+            from ..services.dynamic_incident_cards import get_card_generator
 
-        incident_card_text = (
-            f"📄 **Incident Reported**\n\n"
-            f"**Incident ID:** {incident_id}\n"
-            f"**Title:** {title}\n"
-            f"**Category:** {category}\n"
-            f"**Severity:** {severity}\n"
-            f"**Urgency:** {urgency}\n\n"
-            f"**Details:**\n{collapsed_description}\n\n"
-            f"---\nWe'll gather more details to resolve this quickly."
-        )
+            card_generator = get_card_generator()
+
+            card_data = await card_generator.generate_incident_card(
+                incident_id=incident_id,
+                title=title,
+                description=description,
+                category=category,
+                severity=severity,
+                urgency=urgency,
+                status="detected",
+            )
+
+            if card_data.get("success"):
+                incident_card_text = card_data["card_text"]
+                logger.info(f"✨ Generated dynamic incident card")
+            else:
+                collapsed_description = collapse_text(description, limit=300)
+                incident_card_text = (
+                    f"📄 **Incident Reported**\n\n"
+                    f"**Incident ID:** {incident_id}\n"
+                    f"**Title:** {title}\n"
+                    f"**Category:** {category}\n"
+                    f"**Severity:** {severity}\n"
+                    f"**Urgency:** {urgency}\n\n"
+                    f"**Details:**\n{collapsed_description}\n\n"
+                    f"---\nWe'll gather more details to resolve this quickly."
+                )
+
+        except Exception as e:
+            logger.error(f"Error generating dynamic incident card: {e}", exc_info=True)
+            collapsed_description = collapse_text(description, limit=300)
+            incident_card_text = (
+                f"📄 **Incident Reported**\n\n"
+                f"**Incident ID:** {incident_id}\n"
+                f"**Title:** {title}\n"
+                f"**Category:** {category}\n"
+                f"**Severity:** {severity}\n"
+                f"**Urgency:** {urgency}\n\n"
+                f"**Details:**\n{collapsed_description}\n\n"
+                f"---\nWe'll gather more details to resolve this quickly."
+            )
 
         bot.send_ai_message(
             channel_id=channel_id,
@@ -511,6 +543,49 @@ async def start_discovery(
             severity = severity or "medium"
             user_message = user_message or ""
 
+        # 🚀 PHASE OMEGA: Dynamic Discovery Integration
+        if not questions:
+            try:
+                from ..services.dynamic_discovery import get_dynamic_discovery_generator
+
+                generator = get_dynamic_discovery_generator()
+
+                logger.info(f"🔮 Generating dynamic discovery questions for category={category}, severity={severity}")
+
+                dynamic_questions = await generator.generate_questions(
+                    category=category,
+                    severity=severity,
+                    user_message=user_message,
+                    max_questions=5,
+                )
+
+                if dynamic_questions and len(dynamic_questions) > 0:
+                    questions = dynamic_questions
+                    logger.info(f"✨ Generated {len(questions)} dynamic discovery questions")
+                else:
+                    logger.warning(f"⚠️ Dynamic discovery returned no questions, using defaults")
+                    questions = None
+
+            except Exception as e:
+                logger.error(f"Error generating dynamic discovery questions: {e}", exc_info=True)
+                logger.info(f"Falling back to static discovery questions")
+                questions = None
+
+            # 🚀 PHASE OMEGA: Record pattern for auto-evolving skills
+            try:
+                from ..services.auto_evolving_skills import get_skills_recorder
+
+                recorder = get_skills_recorder()
+                await recorder.record_discovery_pattern(
+                    category=category,
+                    severity=severity,
+                    user_message=user_message,
+                    questions_generated=dynamic_questions if dynamic_questions else [],
+                )
+
+            except Exception as e:
+                logger.error(f"Error recording discovery pattern: {e}", exc_info=True)
+
         # Update incident status to 'discovery' if not already
         if incident and incident.get("status") not in ["discovery", "discovery_complete", "diagnosing", "work_order", "completed"]:
             dynamo.update_incident_status(
@@ -519,7 +594,7 @@ async def start_discovery(
                 user_id=user_id or incident.get("user_id"),
             )
 
-        # Get adaptive questions based on category and severity
+        # Get adaptive questions based on category and severity (fallback)
         discovery_questions = questions or get_discovery_questions(
             category=category,
             severity=severity,
@@ -810,6 +885,26 @@ async def start_diagnosis(
             discovery_answers=discovery_answers,
             incident=incident
         )
+
+        # 🚀 PHASE OMEGA: Record diagnosis pattern for skills evolution
+        try:
+            from ..services.auto_evolving_skills import get_skills_recorder
+
+            recorder = get_skills_recorder()
+            await recorder.record_diagnosis_pattern(
+                category=category,
+                severity=severity,
+                discovery_answers=discovery_answers,
+                diagnosis_summary=diagnosis_summary,
+            )
+
+            # Check if we should generate a diagnostic tool
+            tool_suggestion = await recorder.suggest_diagnostic_tool(category)
+            if tool_suggestion.get("should_create"):
+                logger.info(f"💡 Diagnostic tool suggestion: {tool_suggestion.get('tool_name')}")
+
+        except Exception as e:
+            logger.error(f"Error recording diagnosis pattern: {e}", exc_info=True)
 
         # Send diagnosis message to user
         diagnosis_text = (
@@ -1821,9 +1916,28 @@ async def execute_function(
         # If tool exists in dynamic registry, execute it
         if function_name in runtime.tools:
             logger.info(f"🔧 Executing dynamic tool: {function_name}")
-            return await loader.execute_dynamic_tool(
+            result = await loader.execute_dynamic_tool(
                 function_name, arguments, context
             )
+
+            # 🚀 PHASE OMEGA: Record dynamic tool execution for skills evolution
+            try:
+                from ..services.auto_evolving_skills import get_skills_recorder
+
+                recorder = get_skills_recorder()
+                await recorder.record_tool_execution(
+                    tool_name=function_name,
+                    arguments=arguments,
+                    result=result.data if result.success else None,
+                    success=result.success,
+                    user_id=context.get("user_id"),
+                )
+
+            except Exception as e:
+                logger.error(f"Error recording tool execution: {e}", exc_info=True)
+
+            return result
+
     except Exception as e:
         logger.error(f"Error checking dynamic tools: {e}", exc_info=True)
 
