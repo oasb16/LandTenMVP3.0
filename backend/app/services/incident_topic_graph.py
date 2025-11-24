@@ -64,6 +64,7 @@ class IncidentTopicGraph:
         self.active_incidents: List[str] = []  # List of active incident IDs
         self.category_index: Dict[str, List[str]] = defaultdict(list)  # category -> incident_ids
         self.keyword_index: Dict[str, List[str]] = defaultdict(list)  # keyword -> incident_ids
+        self.edges: List[Dict[str, Any]] = []  # List of edges (relationships)
 
     def add_incident(
         self,
@@ -201,6 +202,84 @@ class IncidentTopicGraph:
             self.nodes[parent_id].child_incidents.append(child_id)
             logger.info(f"🔗 Linked incidents: {parent_id} → {child_id}")
 
+    def add_node(self, node_type: str, node_id: str, metadata: Dict[str, Any]):
+        """
+        PHASE OMEGA: Add a generic node to the graph (incident, work_order, etc.)
+
+        Args:
+            node_type: Type of node (incident, work_order, diagnosis, etc.)
+            node_id: Unique ID for the node
+            metadata: Additional metadata for the node
+        """
+        # For work orders and other non-incident nodes, store as metadata
+        if node_type == "work_order":
+            # Create a simple node structure for work orders
+            if node_id not in self.nodes:
+                # Create minimal incident-like node for work orders
+                work_order_node = IncidentNode(
+                    incident_id=node_id,
+                    category="work_order",
+                    title=metadata.get("title", f"Work Order {node_id}"),
+                    description=f"Work order for incident {metadata.get('incident_id', 'unknown')}",
+                    keywords=set(),
+                )
+                work_order_node.metadata = metadata
+                self.nodes[node_id] = work_order_node
+                logger.info(f"📌 Added work order node: {node_id}")
+
+    def add_edge(self, from_id: str, to_id: str, edge_type: str):
+        """
+        PHASE OMEGA: Add an edge (relationship) between two nodes
+
+        Args:
+            from_id: Source node ID
+            to_id: Target node ID
+            edge_type: Type of relationship (work_order_created, related_to, etc.)
+        """
+        edge = {
+            "from": from_id,
+            "to": to_id,
+            "type": edge_type,
+            "created_at": datetime.utcnow().isoformat(),
+        }
+        self.edges.append(edge)
+        logger.info(f"🔗 Added edge: {from_id} → {to_id} ({edge_type})")
+
+    def add_relation(self, from_id: str, to_id: str, relation_type: str):
+        """Alias for add_edge() for compatibility"""
+        self.add_edge(from_id, to_id, relation_type)
+
+    def add_work_order(self, incident_id: str, job_id: str, title: str):
+        """
+        PHASE OMEGA: Convenience method to add work order and link to incident
+
+        Args:
+            incident_id: Parent incident ID
+            job_id: Work order job ID
+            title: Work order title
+        """
+        metadata = {
+            "incident_id": incident_id,
+            "title": title,
+            "type": "work_order",
+        }
+        self.add_node("work_order", job_id, metadata)
+        self.add_edge(incident_id, job_id, "work_order_created")
+        logger.info(f"📋 Added work order {job_id} for incident {incident_id}")
+
+    def save(self):
+        """
+        PHASE OMEGA OBJECTIVE #3: TOPIC GRAPH PERSISTENCE
+        Save graph to persistent storage
+        """
+        try:
+            # In production, this would save to DynamoDB or Redis
+            # For now, we keep it in memory with logging
+            logger.info(f"💾 Saving incident graph for user {self.user_id} ({len(self.nodes)} nodes, {len(self.edges)} edges)")
+            # TODO: Implement actual persistence to DynamoDB
+        except Exception as e:
+            logger.error(f"Error saving incident graph: {e}", exc_info=True)
+
     def _extract_keywords(self, text: str) -> Set[str]:
         """Extract meaningful keywords from text"""
         # Simple keyword extraction (can be enhanced with NLP)
@@ -257,6 +336,7 @@ class IncidentTopicGraph:
                 for incident_id, node in self.nodes.items()
             },
             "active_incidents": self.active_incidents,
+            "edges": self.edges,
         }
 
     @classmethod
@@ -286,6 +366,7 @@ class IncidentTopicGraph:
                 graph.keyword_index[keyword].append(incident_id)
 
         graph.active_incidents = data["active_incidents"]
+        graph.edges = data.get("edges", [])
 
         return graph
 

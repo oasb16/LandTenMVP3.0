@@ -516,9 +516,8 @@ async def start_discovery(
     questions: Optional[List[str]] = None,
 ) -> FunctionResult:
     """
-    PHASE OMEGA OBJECTIVE #5: DISCOVERY DE-DUPLICATION
-    Start discovery question flow with category-specific questions
-    MUST only be called ONCE per incident
+    PHASE OMEGA: Pure executor - orchestrator ensures single call.
+    Start discovery question flow with category-specific questions.
     """
     try:
         bot = get_bot()
@@ -526,29 +525,6 @@ async def start_discovery(
 
         # Get incident details if category/severity not provided
         incident = dynamo.get_incident(incident_id, user_id)
-
-        # 🚨 FIX: Check if incident is closed/resolved
-        if incident and incident.get("status") in ["completed", "closed"]:
-            logger.info(f"⚠️ Cannot start discovery for closed incident {incident_id}")
-            return FunctionResult(
-                success=False,
-                error="Incident is already closed",
-                message="This incident has been resolved. Please create a new incident if you have a new issue.",
-            )
-
-        # 🚨 FIX: Check if discovery already in progress
-        if incident and incident.get("status") in ["discovery", "discovery_complete", "diagnosing", "work_order"]:
-            logger.warning(f"🛑 BLOCKED: Discovery already started for incident {incident_id} (status={incident.get('status')})")
-            return FunctionResult(
-                success=True,
-                data={
-                    "incident_id": incident_id,
-                    "status": incident.get("status"),
-                    "already_started": True,
-                    "user_message_sent": False,
-                },
-                message=f"Discovery already in progress for incident {incident_id}",
-            )
 
         if incident:
             category = category or incident.get("category", "general")
@@ -845,14 +821,11 @@ async def start_diagnosis(
     channel_id: str,
 ) -> FunctionResult:
     """
-    PHASE OMEGA OBJECTIVE #6: DIAGNOSIS DE-DUPLICATION
+    PHASE OMEGA: Pure executor - orchestrator ensures single call.
     Start diagnosis stage after discovery completion.
     Analyzes discovery answers and provides category-specific diagnosis.
-
-    MUST only be called ONCE per incident when stage == "discovery_complete"
     """
     try:
-        # PHASE OMEGA OBJECTIVE #6: Check if already diagnosing
         dynamo = get_dynamo_service()
         incident = dynamo.get_incident(incident_id, user_id)
 
@@ -861,19 +834,6 @@ async def start_diagnosis(
                 success=False,
                 error="Incident not found",
                 message=f"Cannot diagnose: incident {incident_id} not found",
-            )
-
-        if incident.get("status") == "diagnosing":
-            logger.warning(f"🛑 BLOCKED: Diagnosis already in progress for incident {incident_id}")
-            return FunctionResult(
-                success=True,
-                data={
-                    "incident_id": incident_id,
-                    "status": "diagnosing",
-                    "already_diagnosed": True,
-                    "user_message_sent": False,
-                },
-                message=f"Diagnosis already in progress for incident {incident_id}",
             )
 
         bot = get_bot()
@@ -1052,39 +1012,11 @@ async def create_work_order(
     urgency: Optional[str] = None,
 ) -> FunctionResult:
     """
-    PHASE OMEGA OBJECTIVE #7: WORK ORDER STABILIZATION
-    Create a work order (job) from an incident
-    Prevents duplicates and adds to topic graph
+    PHASE OMEGA: Pure executor - orchestrator prevents duplicates.
+    Create a work order (job) from an incident and add to topic graph.
     """
     try:
-        # PHASE OMEGA OBJECTIVE #7: Check for duplicate work orders
         dynamo = get_dynamo_service()
-
-        # Check if work order already exists for this incident
-        try:
-            from ..services.dynamo_service import get_dynamo_service
-            dynamo_check = get_dynamo_service()
-
-            # Query jobs by incident_id
-            existing_jobs = dynamo_check.list_jobs_by_incident(incident_id)
-
-            for job in existing_jobs:
-                if job.get("status") not in ["completed", "cancelled"]:
-                    logger.warning(f"🛑 BLOCKED: Work order already exists for incident {incident_id}")
-                    return FunctionResult(
-                        success=False,
-                        error="duplicate_work_order",
-                        data={
-                            "job_id": job.get("job_id"),
-                            "incident_id": incident_id,
-                            "status": job.get("status"),
-                        },
-                        message=f"Work order already exists for this incident: {job.get('job_id')}",
-                    )
-        except AttributeError:
-            # list_jobs_by_incident may not exist, skip duplicate check
-            logger.warning("list_jobs_by_incident not available, skipping duplicate check")
-
         bot = get_bot()
 
         job_id = f"job_{uuid.uuid4().hex[:12]}"
