@@ -742,6 +742,168 @@ async def get_discovery_status(incident_id: str) -> FunctionResult:
         )
 
 
+async def start_diagnosis(
+    incident_id: str,
+    user_id: str,
+    channel_id: str,
+) -> FunctionResult:
+    """
+    🚨 NEW FUNCTION: Start diagnosis stage after discovery completion.
+    Analyzes discovery answers and provides category-specific diagnosis.
+    """
+    try:
+        dynamo = get_dynamo_service()
+        bot = get_bot()
+
+        # Get incident with discovery answers
+        incident = dynamo.get_incident(incident_id, user_id)
+        if not incident:
+            return FunctionResult(
+                success=False,
+                error="Incident not found",
+                message=f"Cannot diagnose: incident {incident_id} not found",
+            )
+
+        # Validate incident is in correct state
+        incident_status = incident.get("status")
+        if incident_status not in ["discovery_complete", "diagnosing"]:
+            logger.warning(f"⚠️ Attempting diagnosis on incident with status {incident_status}")
+            # Allow it but warn
+
+        # Update incident status to 'diagnosing'
+        dynamo.update_incident_status(
+            incident_id=incident_id,
+            status="diagnosing",
+            user_id=user_id,
+        )
+
+        # Get category-specific diagnosis
+        category = incident.get("category", "general")
+        severity = incident.get("severity", "medium")
+        discovery_answers = incident.get("discovery_answers", {})
+
+        # Generate diagnosis summary
+        diagnosis_summary = _generate_diagnosis_summary(
+            category=category,
+            severity=severity,
+            discovery_answers=discovery_answers,
+            incident=incident
+        )
+
+        # Send diagnosis message to user
+        diagnosis_text = (
+            f"🔬 **Diagnosis Complete**\n\n"
+            f"Based on your answers, here's what I found:\n\n"
+            f"{diagnosis_summary}\n\n"
+            f"**Recommended Action:** {_get_recommended_action(category, severity)}\n\n"
+            f"---\nWould you like me to create a work order to fix this issue?"
+        )
+
+        bot.send_ai_message(
+            channel_id=channel_id,
+            persona="tenant",
+            text=diagnosis_text,
+            metadata={
+                "incident_id": incident_id,
+                "type": "diagnosis",
+                "category": category,
+                "severity": severity,
+            },
+        )
+
+        logger.info(f"✅ Started diagnosis for incident {incident_id}")
+
+        return FunctionResult(
+            success=True,
+            data={
+                "incident_id": incident_id,
+                "status": "diagnosing",
+                "diagnosis_summary": diagnosis_summary,
+                "recommended_action": _get_recommended_action(category, severity),
+            },
+            message=f"Diagnosis started for incident {incident_id}",
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Error starting diagnosis: {e}", exc_info=True)
+        return FunctionResult(
+            success=False,
+            error=str(e),
+            message="Failed to start diagnosis",
+        )
+
+
+def _generate_diagnosis_summary(
+    category: str,
+    severity: str,
+    discovery_answers: Dict[str, str],
+    incident: Dict[str, Any]
+) -> str:
+    """Generate category-specific diagnosis summary"""
+
+    # Extract key details from discovery answers
+    answers_text = "\n".join([f"- {q}: {a}" for q, a in discovery_answers.items()])
+
+    # Category-specific diagnosis templates
+    diagnosis_templates = {
+        "plumbing": f"💧 **Plumbing Issue Detected**\n\nBased on your responses:\n{answers_text}\n\nThis appears to be a **{severity}** severity plumbing issue requiring professional attention.",
+
+        "electrical": f"⚡ **Electrical Issue Detected**\n\nBased on your responses:\n{answers_text}\n\n⚠️ This is a **{severity}** severity electrical issue. For safety, avoid using affected outlets/switches.",
+
+        "hvac": f"🌡️ **HVAC Issue Detected**\n\nBased on your responses:\n{answers_text}\n\nThis is a **{severity}** severity heating/cooling issue that may require HVAC specialist attention.",
+
+        "structural": f"🏗️ **Structural Issue Detected**\n\nBased on your responses:\n{answers_text}\n\n⚠️ This is a **{severity}** severity structural concern requiring inspection.",
+
+        "appliance": f"🔧 **Appliance Issue Detected**\n\nBased on your responses:\n{answers_text}\n\nThis is a **{severity}** severity appliance malfunction.",
+    }
+
+    return diagnosis_templates.get(category, f"Based on your responses:\n{answers_text}\n\nThis is a **{severity}** severity issue.")
+
+
+def _get_recommended_action(category: str, severity: str) -> str:
+    """Get recommended action based on category and severity"""
+
+    if severity in ["emergency", "high"]:
+        return f"**Immediate professional {category} service required.** I'll create a work order for emergency dispatch."
+    elif severity == "medium":
+        return f"Professional {category} service recommended within 24-48 hours. I can create a work order now."
+    else:
+        return f"Routine {category} maintenance needed. I can schedule a service appointment."
+
+
+async def record_diagnosis_result(
+    incident_id: str,
+    user_id: str,
+    diagnosis_notes: str,
+) -> FunctionResult:
+    """Record diagnosis results to incident"""
+    try:
+        dynamo = get_dynamo_service()
+
+        dynamo.update_incident_status(
+            incident_id=incident_id,
+            status="diagnosing",
+            user_id=user_id,
+            diagnosis_notes=diagnosis_notes,
+        )
+
+        logger.info(f"Recorded diagnosis result for incident {incident_id}")
+
+        return FunctionResult(
+            success=True,
+            data={"incident_id": incident_id},
+            message=f"Diagnosis recorded for incident {incident_id}",
+        )
+
+    except Exception as e:
+        logger.error(f"Error recording diagnosis: {e}", exc_info=True)
+        return FunctionResult(
+            success=False,
+            error=str(e),
+            message="Failed to record diagnosis",
+        )
+
+
 async def create_work_order(
     incident_id: str,
     title: str,
@@ -1317,8 +1479,31 @@ def get_function_definitions() -> List[FunctionDefinition]:
             },
         ),
         FunctionDefinition(
+            name="start_diagnosis",
+            description="🚨 MANDATORY after discovery_complete: Start diagnosis stage. Analyzes discovery answers and provides category-specific diagnosis. MUST be called when stage=discovery_complete.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "incident_id": {"type": "string", "description": "Incident ID to diagnose"},
+                },
+                "required": ["incident_id"],
+            },
+        ),
+        FunctionDefinition(
+            name="record_diagnosis_result",
+            description="Record diagnosis findings and recommendations",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "incident_id": {"type": "string", "description": "Incident ID"},
+                    "diagnosis_notes": {"type": "string", "description": "Diagnosis notes and findings"},
+                },
+                "required": ["incident_id", "diagnosis_notes"],
+            },
+        ),
+        FunctionDefinition(
             name="create_work_order",
-            description="Create a work order (job) from an incident. Use after discovery is complete.",
+            description="Create a work order (job) from an incident. Use after diagnosis is complete.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -1417,6 +1602,8 @@ FUNCTION_IMPLEMENTATIONS = {
     "start_discovery": start_discovery,
     "record_discovery_answer": record_discovery_answer,
     "get_discovery_status": get_discovery_status,
+    "start_diagnosis": start_diagnosis,  # 🚨 NEW: Diagnosis stage
+    "record_diagnosis_result": record_diagnosis_result,  # 🚨 NEW: Record diagnosis
     "create_work_order": create_work_order,
     "update_work_order": update_work_order,
     "get_work_order": get_work_order,
