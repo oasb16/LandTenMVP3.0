@@ -27,7 +27,7 @@ class MetaContext(BaseModel):
     user_id: str
     channel_id: str
     persona: Literal["tenant", "landlord", "contractor"]
-    stage: Literal["idle", "detected", "discovery", "diagnosing", "work_order", "scheduling", "approval", "completed"] = "idle"
+    stage: Literal["idle", "detected", "discovery", "discovery_complete", "diagnosing", "work_order", "scheduling", "approval", "completed"] = "idle"
     active_incident_id: Optional[str] = None
     active_job_id: Optional[str] = None
     discovery: DiscoveryState = Field(default_factory=DiscoveryState)
