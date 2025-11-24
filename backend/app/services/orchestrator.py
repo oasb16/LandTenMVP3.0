@@ -598,6 +598,58 @@ NEVER mix both modes.
         - Natural language text (for conversation)
         """
         try:
+            # 🚀 PHASE OMEGA: Multi-Agent Pipeline Integration
+            agent_response = None
+            try:
+                from ..agents.agent_router import get_agent_router
+
+                agent_router = get_agent_router()
+                agent_context = {
+                    "stage": meta_context.stage,
+                    "active_incident_id": meta_context.active_incident_id,
+                    "persona": meta_context.persona,
+                    "metadata": meta_context.metadata,
+                }
+
+                agent_response = await agent_router.route(
+                    message=user_message,
+                    context=agent_context,
+                )
+
+                logger.info(f"🤖 Agent router: {agent_response.get('agent_type', 'unknown')}")
+
+                if agent_response and agent_response.get("structured_output"):
+                    structured = agent_response["structured_output"]
+                    if structured.get("function_call"):
+                        logger.info(f"🎯 Agent pre-selected function: {structured['function_call']}")
+
+            except Exception as e:
+                logger.error(f"Agent router error: {e}", exc_info=True)
+                agent_response = None
+
+            # 🚀 PHASE OMEGA: Topic Graph Integration
+            topic_shift_detected = False
+            incident_graph_context = None
+            try:
+                from ..services.incident_topic_graph import get_incident_graph
+
+                if meta_context.active_incident_id:
+                    incident_graph = get_incident_graph(meta_context.user_id)
+
+                    shift_result = incident_graph.detect_topic_shift(
+                        user_message=user_message,
+                        current_incident_id=meta_context.active_incident_id
+                    )
+
+                    topic_shift_detected = shift_result.get("is_shift", False)
+
+                    if topic_shift_detected:
+                        logger.info(f"🔀 Topic shift detected: {shift_result.get('reason')}")
+                        incident_graph_context = shift_result
+
+            except Exception as e:
+                logger.error(f"Topic graph error: {e}", exc_info=True)
+
             client = self._get_openai_client()
 
             # 🚨 CRITICAL PRE-FLIGHT CHECK: Garbage input filter
@@ -639,6 +691,18 @@ NEVER mix both modes.
 
             # Build user message content
             user_content_parts = []
+
+            # Add agent response as context enhancement if available
+            if agent_response and agent_response.get("agent_response"):
+                user_content_parts.append(
+                    f"**🤖 Specialized Agent Input ({agent_response.get('agent_type')}):**\n{agent_response.get('agent_response')}\n"
+                )
+
+            # Add topic shift detection results
+            if topic_shift_detected and incident_graph_context:
+                user_content_parts.append(
+                    f"**🔀 Topic Shift Detected:** User may be discussing a different incident. Details: {incident_graph_context.get('reason')}\n"
+                )
 
             # Add meta-context
             user_content_parts.append(f"**Meta-Context:**\n```json\n{self._format_meta_context(meta_context)}\n```")
@@ -836,6 +900,48 @@ NEVER mix both modes.
         except Exception as e:
             logger.error(f"Simple orchestrator error: {e}", exc_info=True)
             return "I'm having trouble processing that request. Please try again."
+
+
+async def record_agent_interaction(
+    user_id: str,
+    agent_type: str,
+    user_message: str,
+    agent_response: str,
+    outcome: str,
+) -> None:
+    """
+    🚀 PHASE OMEGA: Record agent interactions for auto-evolving skills
+    """
+    try:
+        from ..services.auto_evolving_skills import get_skills_recorder
+
+        recorder = get_skills_recorder()
+
+        await recorder.record_interaction(
+            user_id=user_id,
+            agent_type=agent_type,
+            user_message=user_message,
+            agent_response=agent_response,
+            outcome=outcome,
+        )
+
+        # Check if pattern detected and new skill should be created
+        pattern_result = await recorder.detect_pattern(user_id)
+
+        if pattern_result.get("pattern_detected"):
+            logger.info(f"🎓 Pattern detected: {pattern_result.get('pattern_type')}")
+
+            # Generate new skill/tool
+            skill_result = await recorder.generate_skill(
+                pattern_type=pattern_result["pattern_type"],
+                examples=pattern_result.get("examples", []),
+            )
+
+            if skill_result.get("success"):
+                logger.info(f"✨ Auto-generated skill: {skill_result.get('skill_name')}")
+
+    except Exception as e:
+        logger.error(f"Error recording agent interaction: {e}", exc_info=True)
 
 
 # Singleton instance

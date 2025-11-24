@@ -119,6 +119,17 @@ class MetaContextManager:
         create_if_missing: bool = True,
     ) -> MetaContext:
         """Load meta-context from DynamoDB"""
+
+        # 🚀 PHASE OMEGA: Topic Graph Integration
+        incident_graph = None
+        try:
+            from .incident_topic_graph import get_incident_graph
+
+            incident_graph = get_incident_graph(user_id)
+            logger.debug(f"📊 Loaded incident graph for user {user_id}")
+        except Exception as e:
+            logger.error(f"Error loading incident graph: {e}", exc_info=True)
+
         try:
             pk = f"user#{user_id}"
             sk = f"channel#{channel_id}"
@@ -140,6 +151,29 @@ class MetaContextManager:
                     channel_id=channel_id,
                     **context_data,
                 )
+
+                # Attach incident graph to metadata
+                if incident_graph:
+                    graph_dict = incident_graph.to_dict()
+                    meta_context.metadata["incident_graph"] = graph_dict
+                    logger.debug(f"📊 Attached incident graph with {len(incident_graph.nodes)} nodes")
+
+                    # Sync active incident to graph if missing
+                    if meta_context.active_incident_id:
+                        if meta_context.active_incident_id not in [n["incident_id"] for n in graph_dict.get("nodes", [])]:
+                            try:
+                                from ..services.dynamo_service import get_dynamo_service
+                                dynamo = get_dynamo_service()
+                                incident = dynamo.get_incident(meta_context.active_incident_id, user_id)
+                                if incident:
+                                    incident_graph.add_incident(
+                                        meta_context.active_incident_id,
+                                        incident.get("title", ""),
+                                        incident.get("category", ""),
+                                        incident.get("description", "")
+                                    )
+                            except Exception as e:
+                                logger.error(f"Error syncing incident to graph: {e}")
 
                 logger.info(f"Loaded context for user {user_id}, channel {channel_id}")
                 return meta_context
@@ -181,6 +215,16 @@ class MetaContextManager:
 
         # Save to DynamoDB
         await self.save_context(user_id, channel_id, meta_context)
+
+        # Initialize incident graph in metadata
+        try:
+            from .incident_topic_graph import get_incident_graph
+            incident_graph = get_incident_graph(user_id)
+            graph_dict = incident_graph.to_dict()
+            meta_context.metadata["incident_graph"] = graph_dict
+            logger.debug(f"📊 Initialized incident graph in metadata")
+        except Exception as e:
+            logger.error(f"Error initializing incident graph: {e}")
 
         logger.info(f"Created new context for user {user_id}, channel {channel_id}")
         return meta_context
@@ -321,7 +365,29 @@ class MetaContextManager:
         channel_id: str,
         incident_id: str,
     ) -> None:
-        """Set active incident ID"""
+        """Set active incident ID with topic graph integration"""
+
+        # 🚀 PHASE OMEGA: Register incident in topic graph
+        try:
+            from .incident_topic_graph import get_incident_graph
+            from ..services.dynamo_service import get_dynamo_service
+
+            incident_graph = get_incident_graph(user_id)
+            dynamo = get_dynamo_service()
+
+            incident = dynamo.get_incident(incident_id, user_id)
+
+            if incident:
+                incident_graph.add_incident(
+                    incident_id=incident_id,
+                    title=incident.get("title", ""),
+                    category=incident.get("category", "general"),
+                    description=incident.get("description", ""),
+                )
+                logger.info(f"📊 Added incident {incident_id} to topic graph")
+        except Exception as e:
+            logger.error(f"Error adding incident to topic graph: {e}", exc_info=True)
+
         await self.update_context(
             user_id,
             channel_id,
@@ -546,6 +612,87 @@ class MetaContextManager:
             },
         )
         logger.info(f"🧹 Cleared diagnosis tracking")
+
+    async def switch_active_incident(
+        self,
+        user_id: str,
+        channel_id: str,
+        new_incident_id: str,
+        reason: Optional[str] = None,
+    ) -> None:
+        """
+        🚀 PHASE OMEGA: Switch active incident (topic shift handling)
+        """
+        try:
+            from .incident_topic_graph import get_incident_graph
+
+            incident_graph = get_incident_graph(user_id)
+            incident_graph.set_active_incident(new_incident_id, reason=reason)
+
+            await self.set_active_incident(user_id, channel_id, new_incident_id)
+            logger.info(f"🔀 Switched active incident to {new_incident_id}: {reason}")
+
+        except Exception as e:
+            logger.error(f"Error switching active incident: {e}", exc_info=True)
+
+    async def detect_topic_shift(
+        self,
+        user_id: str,
+        channel_id: str,
+        incident_id: str,
+        user_message: str,
+    ) -> Dict[str, Any]:
+        """
+        🚀 PHASE OMEGA: Detect if user is switching topics to a different incident.
+
+        Returns:
+            dict with is_shift (bool), similarity_score (float), reason (str)
+        """
+        try:
+            from .incident_topic_graph import get_incident_graph
+
+            incident_graph = get_incident_graph(user_id)
+
+            shift_result = incident_graph.detect_topic_shift(
+                user_message=user_message,
+                current_incident_id=incident_id,
+            )
+
+            logger.info(f"📊 Topic shift detection: {shift_result}")
+            return shift_result
+
+        except Exception as e:
+            logger.error(f"Error detecting topic shift: {e}", exc_info=True)
+            return {"is_shift": False, "similarity_score": 0.0, "reason": "Error"}
+
+    async def get_incident_graph_summary(
+        self,
+        user_id: str,
+    ) -> Dict[str, Any]:
+        """
+        🚀 PHASE OMEGA: Get summary of all tracked incidents
+        """
+        try:
+            from .incident_topic_graph import get_incident_graph
+
+            incident_graph = get_incident_graph(user_id)
+
+            return {
+                "total_incidents": len(incident_graph.nodes),
+                "active_incident": incident_graph.active_incident_id,
+                "incidents": [
+                    {
+                        "incident_id": node.incident_id,
+                        "title": node.title,
+                        "category": node.category,
+                    }
+                    for node in incident_graph.nodes.values()
+                ],
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting incident graph summary: {e}", exc_info=True)
+            return {"total_incidents": 0, "active_incident": None, "incidents": []}
 
 
 # Singleton instance
