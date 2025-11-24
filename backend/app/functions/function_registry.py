@@ -6,7 +6,7 @@ from typing import Dict, Any, List, Optional
 import uuid
 import logging
 import inspect
-from datetime import datetime
+from datetime import datetime, timedelta
 from ..models.orchestrator_schemas import (
     FunctionDefinition,
     FunctionResult,
@@ -29,6 +29,7 @@ from ..utils.discovery_questions import (
     should_ask_discovery_questions,
 )
 from collections import defaultdict
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -41,9 +42,27 @@ DEFAULT_DISCOVERY_QUESTIONS = [
     "Are there any safety hazards (water near electricity, gas smell, etc.)?",
 ]
 
-# Global incident deduplication cache (incident fingerprints)
-# Maps user_id -> set of incident fingerprints (title+category+severity hash)
-_recent_incidents = defaultdict(set)
+# 🚨 FIX: Incident deduplication cache with TTL (auto-expire after 5 minutes)
+# Maps user_id -> {fingerprint: timestamp}
+_recent_incidents: Dict[str, Dict[str, float]] = defaultdict(dict)
+
+# Cache expiration time (5 minutes)
+_FINGERPRINT_TTL_SECONDS = 300
+
+def _clean_expired_fingerprints(user_id: str):
+    """Remove expired fingerprints from cache"""
+    if user_id not in _recent_incidents:
+        return
+
+    current_time = time.time()
+    expired = [
+        fp for fp, timestamp in _recent_incidents[user_id].items()
+        if current_time - timestamp > _FINGERPRINT_TTL_SECONDS
+    ]
+
+    for fp in expired:
+        del _recent_incidents[user_id][fp]
+        logger.debug(f"🧹 Expired fingerprint {fp} for user {user_id}")
 
 # ==================== FUNCTION IMPLEMENTATIONS ====================
 
@@ -86,6 +105,9 @@ async def create_incident(
 ) -> FunctionResult:
     """Create a new maintenance incident"""
     try:
+        # 🚨 FIX: Clean expired fingerprints first
+        _clean_expired_fingerprints(user_id)
+
         # 🚨 CRITICAL: IDEMPOTENCY CHECK - Prevent duplicate incident creation
         # AGGRESSIVELY check if user already has an active incident
         dynamo = get_dynamo_service()
@@ -94,7 +116,8 @@ async def create_incident(
         recent_incidents = dynamo.list_incidents_by_tenant(user_id)
 
         # HARD BLOCK: Only ONE active incident per category at a time
-        active_statuses = ["detected", "discovery", "diagnosing", "work_order", "scheduling", "approval", "followup"]
+        # 🚨 FIX: Added "discovery_complete" and "diagnosing" to active statuses
+        active_statuses = ["detected", "discovery", "discovery_complete", "diagnosing", "work_order", "scheduling", "approval", "followup"]
 
         for inc in recent_incidents:
             inc_status = inc.get("status")
@@ -103,8 +126,9 @@ async def create_incident(
             inc_title = inc.get("title", "")
             inc_description = inc.get("description", "")
 
-            # Skip completed/closed incidents (allow recurrence)
-            if inc_status == "completed" or inc_status == "closed":
+            # 🚨 FIX: Skip completed/closed incidents (allow recurrence)
+            if inc_status in ["completed", "closed"]:
+                logger.debug(f"✅ Skipping completed incident {inc_id}")
                 continue
 
             # Check if SAME category AND active status
@@ -153,17 +177,21 @@ async def create_incident(
                 # Same category but clearly different issue (similarity < 40%)
                 logger.info(f"✅ Allowing new {category} incident despite existing {inc_id} (low similarity: title={title_similarity:.2f}, desc={desc_similarity:.2f})")
 
-        # Fingerprinting as backup check (prevent rapid duplicates within 5 minutes)
+        # 🚨 FIX: Fingerprinting with TTL (prevent rapid duplicates within 5 minutes)
         import hashlib
         fingerprint = hashlib.md5(
             f"{title.lower().strip()}:{category}:{severity}".encode()
         ).hexdigest()[:8]
 
+        current_time = time.time()
         if fingerprint in _recent_incidents[user_id]:
-            logger.warning(f"⚠️ Fingerprint duplicate detected: {fingerprint}")
-            # Still allow but warn
-        else:
-            _recent_incidents[user_id].add(fingerprint)
+            last_time = _recent_incidents[user_id][fingerprint]
+            if current_time - last_time < _FINGERPRINT_TTL_SECONDS:
+                logger.warning(f"⚠️ Fingerprint duplicate detected within TTL: {fingerprint}")
+                # Still allow but warn
+
+        # Add fingerprint with timestamp
+        _recent_incidents[user_id][fingerprint] = current_time
 
         # dynamo already initialized above
         bot = get_bot()
@@ -407,6 +435,9 @@ async def close_incident(
     try:
         dynamo = get_dynamo_service()
 
+        # 🚨 FIX: Clear fingerprint when incident is closed
+        _clean_expired_fingerprints(user_id)
+
         dynamo.update_incident_status(
             incident_id=incident_id,
             status="completed",
@@ -449,8 +480,8 @@ async def start_discovery(
         # Get incident details if category/severity not provided
         incident = dynamo.get_incident(incident_id, user_id)
 
-        # Check if incident is closed/resolved
-        if incident and incident.get("status") == "completed":
+        # 🚨 FIX: Check if incident is closed/resolved
+        if incident and incident.get("status") in ["completed", "closed"]:
             logger.info(f"⚠️ Cannot start discovery for closed incident {incident_id}")
             return FunctionResult(
                 success=False,
@@ -458,9 +489,18 @@ async def start_discovery(
                 message="This incident has been resolved. Please create a new incident if you have a new issue.",
             )
 
-        # Check if discovery already in progress (status = discovery or work_order)
-        if incident and incident.get("status") in ["discovery", "work_order"]:
-            logger.info(f"ℹ️ Discovery already started for incident {incident_id}")
+        # 🚨 FIX: Check if discovery already in progress
+        if incident and incident.get("status") in ["discovery", "discovery_complete", "diagnosing", "work_order"]:
+            logger.info(f"ℹ️ Discovery already started or completed for incident {incident_id}")
+            return FunctionResult(
+                success=True,
+                data={
+                    "incident_id": incident_id,
+                    "status": incident.get("status"),
+                    "already_started": True,
+                },
+                message=f"Discovery already in progress for incident {incident_id}",
+            )
 
         if incident:
             category = category or incident.get("category", "general")
@@ -472,7 +512,7 @@ async def start_discovery(
             user_message = user_message or ""
 
         # Update incident status to 'discovery' if not already
-        if incident and incident.get("status") not in ["discovery", "work_order", "completed"]:
+        if incident and incident.get("status") not in ["discovery", "discovery_complete", "diagnosing", "work_order", "completed"]:
             dynamo.update_incident_status(
                 incident_id=incident_id,
                 status="discovery",
@@ -590,7 +630,7 @@ async def record_discovery_answer(
         if next_index < total_questions:
             progress_msg += f"\n\nNext question coming..."
         else:
-            progress_msg += f"\n\n🎯 Discovery complete! Creating work order..."
+            progress_msg += f"\n\n🎯 Discovery complete! Analyzing the issue..."
 
         bot.send_ai_message(
             channel_id=channel_id,
@@ -599,11 +639,11 @@ async def record_discovery_answer(
             metadata={"incident_id": incident_id, "question_index": next_index},
         )
 
-        # Check if discovery is complete
+        # 🚨 FIX: Check if discovery is complete
         if next_index >= total_questions:
             logger.info(f"✅ Discovery completed for incident {incident_id}")
 
-            # CRITICAL FIX: Transition incident status to 'discovery_complete'
+            # 🚨 CRITICAL FIX: Transition incident status to 'discovery_complete'
             dynamo.update_incident_status(
                 incident_id=incident_id,
                 status="discovery_complete",
@@ -617,8 +657,9 @@ async def record_discovery_answer(
                     "question_index": question_index,
                     "answer": answer,
                     "discovery_complete": True,
+                    "next_stage": "diagnosing",
                 },
-                message="Discovery questions completed",
+                message="Discovery questions completed, moving to diagnosis",
             )
 
         # CRITICAL: Automatically send next question
@@ -717,13 +758,29 @@ async def create_work_order(
         job_id = f"job_{uuid.uuid4().hex[:12]}"
         now = datetime.utcnow().isoformat()
 
-        # Get incident details
-        incident = dynamo.get_incident(incident_id, user_id)
+        # 🚨 FIX: Get incident details with better error handling
+        try:
+            incident = dynamo.get_incident(incident_id, user_id)
+        except Exception as e:
+            logger.error(f"Error fetching incident {incident_id}: {e}")
+            incident = None
+
         if not incident:
+            logger.error(f"❌ Incident {incident_id} not found for user {user_id}")
             return FunctionResult(
                 success=False,
                 error="Incident not found",
-                message=f"Cannot create work order: incident {incident_id} not found",
+                message=f"Cannot create work order: incident {incident_id} not found. Please verify the incident ID.",
+            )
+
+        # 🚨 FIX: Check if incident is in correct state
+        incident_status = incident.get("status")
+        if incident_status in ["completed", "closed"]:
+            logger.error(f"❌ Cannot create work order for closed incident {incident_id}")
+            return FunctionResult(
+                success=False,
+                error="Incident is closed",
+                message=f"Cannot create work order: incident {incident_id} is already closed.",
             )
 
         job_data = {
@@ -741,15 +798,27 @@ async def create_work_order(
             "channel_id": channel_id,
         }
 
-        # Save to DynamoDB
-        dynamo.create_job(job_data)
+        # 🚨 FIX: Add try-except for job creation
+        try:
+            dynamo.create_job(job_data)
+        except Exception as e:
+            logger.error(f"Error creating job in DynamoDB: {e}", exc_info=True)
+            return FunctionResult(
+                success=False,
+                error=str(e),
+                message=f"Failed to save work order to database: {str(e)}",
+            )
 
         # Update incident status
-        dynamo.update_incident_status(
-            incident_id=incident_id,
-            status="work_order",
-            user_id=user_id,
-        )
+        try:
+            dynamo.update_incident_status(
+                incident_id=incident_id,
+                status="work_order",
+                user_id=user_id,
+            )
+        except Exception as e:
+            logger.error(f"Error updating incident status: {e}")
+            # Continue even if status update fails
 
         # Send beautifully formatted work order card
         work_order_text = format_work_order_card({
@@ -773,7 +842,7 @@ async def create_work_order(
             },
         )
 
-        logger.info(f"Created work order {job_id} for incident {incident_id}")
+        logger.info(f"✅ Created work order {job_id} for incident {incident_id}")
 
         return FunctionResult(
             success=True,
@@ -789,11 +858,11 @@ async def create_work_order(
         )
 
     except Exception as e:
-        logger.error(f"Error creating work order: {e}", exc_info=True)
+        logger.error(f"❌ Error creating work order: {e}", exc_info=True)
         return FunctionResult(
             success=False,
             error=str(e),
-            message="Failed to create work order",
+            message=f"Failed to create work order: {str(e)}",
         )
 
 
@@ -1187,7 +1256,7 @@ def get_function_definitions() -> List[FunctionDefinition]:
                     "incident_id": {"type": "string", "description": "Incident ID to update"},
                     "status": {
                         "type": "string",
-                        "enum": ["detected", "discovery", "work_order", "in_progress", "completed"],
+                        "enum": ["detected", "discovery", "discovery_complete", "diagnosing", "work_order", "in_progress", "completed"],
                         "description": "New status",
                     },
                 },
