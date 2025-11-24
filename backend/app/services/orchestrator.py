@@ -316,6 +316,77 @@ NEVER mix both modes.
 
         return False
 
+    def _determine_next_action(
+        self,
+        meta_context: MetaContext,
+        user_message: str,
+        agent_structured_output: Optional[Dict[str, Any]] = None,
+    ) -> Optional[OrchestratorOutput]:
+        """
+        PHASE OMEGA: Single Flow Engine - State Machine for all transitions.
+        Decides the next action based on current stage WITHOUT calling LLM.
+
+        Returns OrchestratorOutput if action is determined, None if LLM call needed.
+        """
+        stage = meta_context.stage
+        incident_id = meta_context.active_incident_id
+
+        logger.info(f"🎯 State machine check: stage={stage}, incident={incident_id}")
+
+        # STATE: discovery_complete → MUST call start_diagnosis
+        if stage == "discovery_complete" and incident_id:
+            logger.info(f"✅ State machine: discovery_complete → start_diagnosis")
+            return OrchestratorOutput(
+                intent="start_diagnosis",
+                reasoning="State machine: discovery_complete requires diagnosis",
+                context_updates=ContextUpdates(stage="diagnosing"),
+                function_call=FunctionCall(
+                    name="start_diagnosis",
+                    arguments={"incident_id": incident_id},
+                ),
+                response_to_user=None,
+            )
+
+        # STATE: diagnosing + user approval ("yes", "ok", "sure") → create_work_order
+        if stage == "diagnosing" and incident_id:
+            user_lower = user_message.lower().strip()
+            approval_keywords = ["yes", "ok", "sure", "proceed", "go ahead", "create it", "sounds good"]
+
+            if any(keyword in user_lower for keyword in approval_keywords):
+                logger.info(f"✅ State machine: diagnosing + approval → create_work_order")
+                return OrchestratorOutput(
+                    intent="create_work_order",
+                    reasoning="State machine: user approved work order creation",
+                    context_updates=ContextUpdates(stage="work_order"),
+                    function_call=FunctionCall(
+                        name="create_work_order",
+                        arguments={
+                            "incident_id": incident_id,
+                            "title": f"Repair for incident {incident_id}",
+                            "estimated_cost": "250.00",
+                        },
+                    ),
+                    response_to_user=None,
+                )
+
+        # No state machine action determined - proceed to LLM
+        return None
+
+    def _should_skip_llm(self, agent_response: Optional[Dict[str, Any]]) -> bool:
+        """
+        PHASE OMEGA: Check if we should skip LLM call.
+        Returns True if agent provided structured output with function call.
+        """
+        if not agent_response:
+            return False
+
+        structured = agent_response.get("structured_output")
+        if structured and structured.get("function_call"):
+            logger.info(f"⚡ Skipping LLM - agent provided function: {structured['function_call']}")
+            return True
+
+        return False
+
     def _handle_stage_transitions(
         self,
         output: OrchestratorOutput,
@@ -600,6 +671,21 @@ NEVER mix both modes.
 
             except Exception as e:
                 logger.error(f"Topic graph error: {e}", exc_info=True)
+
+            # 🚀 PHASE OMEGA: State Machine Pre-flight Check
+            # Check if state machine can determine next action without LLM
+            state_machine_output = self._determine_next_action(
+                meta_context=meta_context,
+                user_message=user_message,
+                agent_structured_output=agent_response.get("structured_output") if agent_response else None,
+            )
+
+            if state_machine_output:
+                logger.info(f"⚡ State machine decided action: {state_machine_output.function_call.name}")
+                # Apply stage transitions
+                state_machine_output = self._handle_stage_transitions(state_machine_output, meta_context)
+                state_machine_output = self._apply_guardrails(state_machine_output, meta_context)
+                return state_machine_output
 
             client = self._get_openai_client()
 
