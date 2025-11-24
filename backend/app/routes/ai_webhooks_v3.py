@@ -176,6 +176,7 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
 
         # 🚀 PHASE OMEGA: Agent Router Integration
         agent_enhanced_context = None
+        agent_blocks_orchestrator = False
         try:
             from ..agents.agent_router import get_agent_router
 
@@ -193,6 +194,13 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
             if agent_response and agent_response.get("agent_response"):
                 agent_enhanced_context = agent_response.get("agent_response")
                 logger.info(f"🤖 Routed to {agent_response.get('agent_type', 'unknown')} agent")
+
+                # PHASE OMEGA OBJECTIVE #1: STOP SIGNAL ROUTING
+                # If agent blocks orchestrator, return immediately without calling orchestrator
+                if agent_response.get("block_orchestrator"):
+                    logger.info(f"🛑 Agent blocked orchestrator - returning agent result directly")
+                    agent_blocks_orchestrator = True
+
         except Exception as e:
             logger.error(f"Agent routing error: {e}", exc_info=True)
 
@@ -207,6 +215,12 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
                     incident_id=meta_context.active_incident_id,
                     user_message=message_text,
                 )
+
+                # PHASE OMEGA OBJECTIVE #3: TOPIC GRAPH PERSISTENCE
+                try:
+                    incident_graph.save()
+                except Exception as save_err:
+                    logger.error(f"Failed to save incident graph: {save_err}")
 
                 shift_result = incident_graph.detect_topic_shift(
                     user_message=message_text,
@@ -228,6 +242,12 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
                                 "stage": shift_result.get("target_stage", "discovery"),
                             },
                         )
+
+                        # PHASE OMEGA OBJECTIVE #3: TOPIC GRAPH PERSISTENCE
+                        try:
+                            incident_graph.save()
+                        except Exception as save_err:
+                            logger.error(f"Failed to save incident graph after topic shift: {save_err}")
 
         except Exception as e:
             logger.error(f"Topic graph update error: {e}", exc_info=True)
@@ -255,6 +275,15 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
         # Reload context after appending message
         meta_context = await context_manager.load_context(user_id, channel_id)
 
+        # PHASE OMEGA OBJECTIVE #1: If agent blocked orchestrator, return immediately
+        if agent_blocks_orchestrator:
+            logger.info("Agent blocked orchestrator - skipping orchestration")
+            return {
+                "status": "success",
+                "intent": "agent_handled",
+                "agent_response": agent_enhanced_context,
+            }
+
         # Get available functions
         available_functions = get_function_definitions()
 
@@ -269,16 +298,19 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
         logger.info(f"Orchestrator result: intent={orchestrator_output.intent}, function={orchestrator_output.function_call.name or 'none'}")
         logger.debug(f"Reasoning: {orchestrator_output.reasoning}")
 
-        # Apply context updates
+        # PHASE OMEGA OBJECTIVE #2: CANONICAL STAGE ROUTING - Let orchestrator apply stage updates
         if orchestrator_output.context_updates:
-            logger.debug(f"Applying context updates: {orchestrator_output.context_updates.model_dump(exclude_none=True)}")
-            meta_context = await context_manager.merge_context_updates(
-                user_id,
-                channel_id,
-                orchestrator_output.context_updates.model_dump(exclude_none=True),
-            )
+            context_update_dict = orchestrator_output.context_updates.model_dump(exclude_none=True)
+            if context_update_dict:
+                logger.debug(f"Applying orchestrator context updates: {list(context_update_dict.keys())}")
+                meta_context = await context_manager.merge_context_updates(
+                    user_id,
+                    channel_id,
+                    context_update_dict,
+                )
 
         # Execute function if requested
+        function_sent_user_message = False
         function_result = None
         if orchestrator_output.function_call.name:
             logger.info(f"Executing function: {orchestrator_output.function_call.name}")
@@ -310,6 +342,12 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
             )
 
             logger.info(f"Function result: success={function_result.success}, message={function_result.message}")
+
+            # PHASE OMEGA OBJECTIVE #8: FUNCTION-CALL OUTPUT GUARD
+            # Check if function already sent a user message
+            if function_result.data and function_result.data.get("user_message_sent"):
+                function_sent_user_message = True
+                logger.info("Function already sent user message - skipping orchestrator response")
 
             # Update context with function result data
             if function_result.success and function_result.data:
@@ -352,43 +390,6 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
                 if function_result.data.get("discovery_complete"):
                     context_updates["stage"] = "discovery_complete"
                     logger.info("✅ Discovery complete, transitioning to discovery_complete stage")
-
-                # 🚨 CRITICAL FIX: Track diagnosis completion (ENHANCED)
-                if orchestrator_output.function_call.name == "start_diagnosis":
-                    if function_result.data.get("diagnosis_complete"):
-                        # Mark diagnosis as complete to prevent repeated calls
-                        # 🚨 ULTRA-CRITICAL: Set ALL tracking fields
-                        context_updates["metadata"] = {
-                            **meta_context.metadata,
-                            "diagnosis_complete": True,
-                            "last_tool_called": "start_diagnosis",
-                            "last_diagnosis_time": function_result.data.get("diagnosis_timestamp"),
-                            "diagnosed_incident_id": function_result.data.get("incident_id"),  # 🚨 NEW: Track which incident was diagnosed
-                        }
-                        logger.info(f"✅ Diagnosis complete, marked in metadata to prevent duplicate calls")
-                        logger.info(f"   diagnosis_complete: True")
-                        logger.info(f"   diagnosed_incident_id: {function_result.data.get('incident_id')}")
-                    elif function_result.data.get("already_diagnosed"):
-                        logger.warning("⚠️ start_diagnosis was called but diagnosis already completed (duplicate blocked)")
-
-                # 🚨 CRITICAL FIX: Clear diagnosis tracking when work order created
-                if orchestrator_output.function_call.name == "create_work_order":
-                    if function_result.data.get("clear_diagnosis_tracking"):
-                        # Clear diagnosis tracking since we've moved to work_order stage
-                        context_updates["metadata"] = {
-                            **meta_context.metadata,
-                            "diagnosis_complete": False,
-                            "last_tool_called": "create_work_order",
-                            "diagnosed_incident_id": None,
-                        }
-                        logger.info("✅ Cleared diagnosis tracking after work order creation")
-
-                # 🚨 Track all function calls for debugging
-                if orchestrator_output.function_call.name:
-                    if "metadata" not in context_updates:
-                        context_updates["metadata"] = {**meta_context.metadata}
-                    context_updates["metadata"]["last_tool_called"] = orchestrator_output.function_call.name
-                    context_updates["metadata"]["last_tool_called_at"] = time.time()
 
                 # Apply all context updates
                 if context_updates:
@@ -481,8 +482,9 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "reason": "LLM output invalid JSON",
             }
 
-        # Send response to user if LLM provided one
-        if orchestrator_output.response_to_user:
+        # PHASE OMEGA OBJECTIVE #8: FUNCTION-CALL OUTPUT GUARD
+        # Send response to user if LLM provided one AND function didn't already send one
+        if orchestrator_output.response_to_user and not function_sent_user_message:
             logger.info(f"Sending LLM response to user: {orchestrator_output.response_to_user[:100]}")
 
             response_metadata = {
