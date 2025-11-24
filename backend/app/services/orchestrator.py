@@ -316,19 +316,117 @@ NEVER mix both modes.
 
         return False
 
+    def _handle_stage_transitions(
+        self,
+        output: OrchestratorOutput,
+        meta_context: MetaContext,
+    ) -> OrchestratorOutput:
+        """
+        PHASE OMEGA OBJECTIVE #2: CANONICAL STAGE ROUTING
+        All stage transitions happen here - single source of truth
+        """
+        function_name = output.function_call.name
+        current_stage = meta_context.stage
+
+        # Stage transition rules
+        stage_transitions = {
+            "create_incident": "detected",
+            "start_discovery": "discovery",
+            "start_diagnosis": "diagnosing",
+            "create_work_order": "work_order",
+        }
+
+        # Apply stage transition if function triggers one
+        if function_name in stage_transitions:
+            new_stage = stage_transitions[function_name]
+            if current_stage != new_stage:
+                logger.info(f"🔄 Stage transition: {current_stage} → {new_stage} (triggered by {function_name})")
+                output.context_updates.stage = new_stage
+
+        return output
+
+    def _handle_auto_evolving_tools(
+        self,
+        output: OrchestratorOutput,
+        meta_context: MetaContext,
+    ) -> OrchestratorOutput:
+        """
+        PHASE OMEGA OBJECTIVE #4: AUTO-EVOLVING DIAGNOSTIC TOOLS
+        Check if diagnosis suggested a new tool and prompt user for permission
+        """
+        # Check if start_diagnosis was called
+        if output.function_call.name == "start_diagnosis":
+            # Mark that we should check for tool suggestions after diagnosis
+            if not output.context_updates.metadata:
+                output.context_updates.metadata = {}
+            output.context_updates.metadata["check_tool_suggestion"] = True
+
+        return output
+
     def _apply_guardrails(
         self,
         output: OrchestratorOutput,
         meta_context: MetaContext,
     ) -> OrchestratorOutput:
         """
-        🚨 CRITICAL GUARDRAIL: Override incorrect LLM decisions.
-
-        This prevents the LLM from making catastrophic errors like:
-        - Calling create_incident during discovery_complete/diagnosing stages
-        - Responding with general.chat when diagnosis is required
-        - Ignoring mandatory flow transitions
+        PHASE OMEGA: Enhanced guardrails with de-duplication
         """
+
+        # PHASE OMEGA OBJECTIVE #5: DISCOVERY DE-DUPLICATION
+        if output.function_call.name == "start_discovery":
+            incident = None
+            try:
+                from ..services.dynamo_service import get_dynamo_service
+                dynamo = get_dynamo_service()
+                incident = dynamo.get_incident(
+                    meta_context.active_incident_id,
+                    meta_context.user_id
+                )
+            except Exception as e:
+                logger.error(f"Error checking incident status: {e}")
+
+            if incident:
+                incident_status = incident.get("status")
+                if incident_status in ["discovery", "discovery_complete", "diagnosing", "work_order"]:
+                    logger.warning(f"🛑 GUARDRAIL: Blocked duplicate start_discovery (status={incident_status})")
+                    return OrchestratorOutput(
+                        intent="general.chat",
+                        reasoning=f"Discovery already started/completed for this incident",
+                        context_updates=ContextUpdates(),
+                        function_call=FunctionCall(name=None, arguments={}),
+                        response_to_user="I'm already gathering information about this issue. What else would you like me to know?",
+                    )
+
+        # PHASE OMEGA OBJECTIVE #6: DIAGNOSIS DE-DUPLICATION
+        if output.function_call.name == "start_diagnosis":
+            # Check if stage is correct
+            if meta_context.stage not in ["discovery_complete", "diagnosing"]:
+                logger.warning(f"🛑 GUARDRAIL: Blocked start_diagnosis in stage {meta_context.stage}")
+                return OrchestratorOutput(
+                    intent="general.chat",
+                    reasoning=f"Cannot diagnose - wrong stage: {meta_context.stage}",
+                    context_updates=ContextUpdates(),
+                    function_call=FunctionCall(name=None, arguments={}),
+                    response_to_user="Let's complete the discovery questions first before diagnosing the issue.",
+                )
+
+            # Check if already diagnosing
+            if meta_context.stage == "diagnosing":
+                logger.warning(f"🛑 GUARDRAIL: Blocked duplicate start_diagnosis")
+                return OrchestratorOutput(
+                    intent="create_work_order",
+                    reasoning=f"Diagnosis already complete",
+                    context_updates=ContextUpdates(stage="work_order"),
+                    function_call=FunctionCall(
+                        name="create_work_order",
+                        arguments={
+                            "incident_id": meta_context.active_incident_id,
+                            "title": f"Repair for {meta_context.active_incident_id}",
+                            "estimated_cost": "250.00",
+                        },
+                    ),
+                    response_to_user=None,
+                )
 
         # GUARDRAIL #1: discovery_complete MUST trigger start_diagnosis
         if meta_context.stage == "discovery_complete":
@@ -387,153 +485,6 @@ NEVER mix both modes.
                     ),
                     response_to_user=None,
                 )
-
-        # 🚨 GUARDRAIL #2B: ULTRA-CRITICAL FIX - ABSOLUTE BLOCK on repeated start_diagnosis
-        # This is THE BIGGEST BUG - start_diagnosis MUST ONLY be called ONCE per incident
-        # MULTIPLE LAYERS OF PROTECTION:
-        diagnosis_complete = meta_context.metadata.get("diagnosis_complete", False)
-        last_tool_called = meta_context.metadata.get("last_tool_called")
-        diagnosed_incident_id = meta_context.metadata.get("diagnosed_incident_id")
-
-        # HARD BLOCK #1: If diagnosis_complete is True → NEVER allow start_diagnosis
-        if output.function_call.name == "start_diagnosis" and diagnosis_complete:
-            logger.error(f"🚨🚨🚨 CRITICAL GUARDRAIL ACTIVATED: ABSOLUTE BLOCK on start_diagnosis")
-            logger.error(f"   Reason: diagnosis_complete = True")
-            logger.error(f"   Stage: {meta_context.stage}")
-            logger.error(f"   Last tool: {last_tool_called}")
-            logger.error(f"   Forcing: create_work_order")
-
-            return OrchestratorOutput(
-                intent="create_work_order",
-                reasoning=f"HARD BLOCK: diagnosis_complete=True, forcing create_work_order",
-                context_updates=ContextUpdates(stage="work_order"),
-                function_call=FunctionCall(
-                    name="create_work_order",
-                    arguments={
-                        "incident_id": meta_context.active_incident_id,
-                        "title": f"Repair work order for incident {meta_context.active_incident_id}",
-                        "estimated_cost": "250.00",
-                    },
-                ),
-                response_to_user=None,
-            )
-
-        # HARD BLOCK #2: If stage is "diagnosing" → NEVER allow start_diagnosis
-        if meta_context.stage == "diagnosing" and output.function_call.name == "start_diagnosis":
-            logger.error(f"🚨🚨🚨 CRITICAL GUARDRAIL ACTIVATED: ABSOLUTE BLOCK on start_diagnosis")
-            logger.error(f"   Reason: Already in diagnosing stage")
-            logger.error(f"   Stage: diagnosing")
-            logger.error(f"   Last tool: {last_tool_called}")
-            logger.error(f"   Forcing: create_work_order")
-
-            return OrchestratorOutput(
-                intent="create_work_order",
-                reasoning=f"HARD BLOCK: stage=diagnosing, forcing create_work_order",
-                context_updates=ContextUpdates(stage="work_order"),
-                function_call=FunctionCall(
-                    name="create_work_order",
-                    arguments={
-                        "incident_id": meta_context.active_incident_id,
-                        "title": f"Repair work order for incident {meta_context.active_incident_id}",
-                        "estimated_cost": "250.00",
-                    },
-                ),
-                response_to_user=None,
-            )
-
-        # HARD BLOCK #3: If last_tool_called was "start_diagnosis" → NEVER allow it again
-        if output.function_call.name == "start_diagnosis" and last_tool_called == "start_diagnosis":
-            logger.error(f"🚨🚨🚨 CRITICAL GUARDRAIL ACTIVATED: ABSOLUTE BLOCK on start_diagnosis")
-            logger.error(f"   Reason: last_tool_called = start_diagnosis (duplicate detected)")
-            logger.error(f"   Forcing: create_work_order")
-
-            return OrchestratorOutput(
-                intent="create_work_order",
-                reasoning=f"HARD BLOCK: Duplicate start_diagnosis detected, forcing create_work_order",
-                context_updates=ContextUpdates(stage="work_order"),
-                function_call=FunctionCall(
-                    name="create_work_order",
-                    arguments={
-                        "incident_id": meta_context.active_incident_id,
-                        "title": f"Repair work order for incident {meta_context.active_incident_id}",
-                        "estimated_cost": "250.00",
-                    },
-                ),
-                response_to_user=None,
-            )
-
-        # HARD BLOCK #4: If diagnosed_incident_id exists and matches active → BLOCK
-        if output.function_call.name == "start_diagnosis" and diagnosed_incident_id:
-            if diagnosed_incident_id == meta_context.active_incident_id:
-                logger.error(f"🚨🚨🚨 CRITICAL GUARDRAIL ACTIVATED: ABSOLUTE BLOCK on start_diagnosis")
-                logger.error(f"   Reason: This incident already diagnosed (incident_id match)")
-                logger.error(f"   Diagnosed incident: {diagnosed_incident_id}")
-                logger.error(f"   Active incident: {meta_context.active_incident_id}")
-                logger.error(f"   Forcing: create_work_order")
-
-                return OrchestratorOutput(
-                    intent="create_work_order",
-                    reasoning=f"HARD BLOCK: Incident already diagnosed, forcing create_work_order",
-                    context_updates=ContextUpdates(stage="work_order"),
-                    function_call=FunctionCall(
-                        name="create_work_order",
-                        arguments={
-                            "incident_id": meta_context.active_incident_id,
-                            "title": f"Repair work order for incident {meta_context.active_incident_id}",
-                            "estimated_cost": "250.00",
-                        },
-                    ),
-                    response_to_user=None,
-                )
-
-        # 🚨 GUARDRAIL #2C: Detect "yes" pattern and override to create_work_order
-        # When user says "yes" after diagnosis, they're confirming work order creation
-        if meta_context.stage == "diagnosing":
-            if output.intent == "general.chat" and output.function_call.name is None:
-                # Check if user message looks like confirmation
-                user_msg = meta_context.last_user_message or ""
-                user_msg_lower = user_msg.lower().strip()
-
-                confirmation_patterns = ["yes", "ok", "sure", "go ahead", "create it", "proceed", "do it", "yeah", "yep", "sounds good"]
-                is_confirmation = user_msg_lower in confirmation_patterns or any(pattern in user_msg_lower for pattern in confirmation_patterns)
-
-                if is_confirmation and diagnosis_complete:
-                    logger.warning(f"🛑 GUARDRAIL ACTIVATED: Detected work order confirmation in diagnosing stage")
-                    logger.warning(f"   User message: '{user_msg}'")
-                    logger.warning(f"   Overriding to: create_work_order")
-
-                    return OrchestratorOutput(
-                        intent="create_work_order",
-                        reasoning=f"GUARDRAIL OVERRIDE: User confirmed work order creation after diagnosis",
-                        context_updates=ContextUpdates(stage="work_order"),
-                        function_call=FunctionCall(
-                            name="create_work_order",
-                            arguments={
-                                "incident_id": meta_context.active_incident_id,
-                                "title": f"Repair work order for incident {meta_context.active_incident_id}",
-                                "estimated_cost": "250.00",
-                            },
-                        ),
-                        response_to_user=None,
-                    )
-
-        # 🚨 GUARDRAIL #2D: DOWNGRADE to general.chat if LLM tries banned tools after diagnosis
-        # If diagnosis is complete but LLM selects forbidden tools, downgrade to general.chat
-        banned_tools_after_diagnosis = ["start_discovery", "record_discovery_answer", "update_incident"]
-
-        if diagnosis_complete and output.function_call.name in banned_tools_after_diagnosis:
-            logger.error(f"🚨🚨🚨 CRITICAL GUARDRAIL ACTIVATED: Banned tool after diagnosis")
-            logger.error(f"   Tool attempted: {output.function_call.name}")
-            logger.error(f"   diagnosis_complete: {diagnosis_complete}")
-            logger.error(f"   Downgrading to: general.chat")
-
-            return OrchestratorOutput(
-                intent="general.chat",
-                reasoning=f"GUARDRAIL OVERRIDE: Blocked {output.function_call.name} after diagnosis complete",
-                context_updates=ContextUpdates(),
-                function_call=FunctionCall(name=None, arguments={}),
-                response_to_user="I've completed the diagnosis for your maintenance issue. Would you like me to create a work order to proceed with repairs?",
-            )
 
         # GUARDRAIL #3: discovery stage MUST record answers, not create incidents
         if meta_context.stage == "discovery":
@@ -744,25 +695,17 @@ NEVER mix both modes.
                     + user_content
                 )
 
-            # 🚨 CRITICAL: Add diagnosing stage hint with diagnosis tracking
+            # 🚨 CRITICAL: Add diagnosing stage hint
             if meta_context.stage == "diagnosing" and meta_context.active_incident_id:
-                # Check diagnosis completion status
-                diagnosis_complete = meta_context.metadata.get("diagnosis_complete", False)
-                last_tool_called = meta_context.metadata.get("last_tool_called")
-
                 user_content = (
                     f"🩺 **DIAGNOSING MODE ACTIVE**\n"
                     f"Incident {meta_context.active_incident_id} is being diagnosed.\n"
-                    f"**Diagnosis Status:**\n"
-                    f"  - diagnosis_complete: {diagnosis_complete}\n"
-                    f"  - last_tool_called: {last_tool_called}\n\n"
                     f"🚨 CRITICAL RULES:\n"
-                    f"  - If diagnosis_complete = True → DO NOT call start_diagnosis again!\n"
                     f"  - If user says 'yes', 'ok', 'sure' → call create_work_order\n"
                     f"  - If user says 'no' → respond with general.chat\n"
                     f"  - If user provides details → call record_diagnosis_result\n"
                     f"  - DO NOT call create_incident\n"
-                    f"  - DO NOT call start_diagnosis if already called\n\n"
+                    f"  - DO NOT call start_diagnosis again\n\n"
                     + user_content
                 )
 
@@ -827,7 +770,10 @@ NEVER mix both modes.
                 )
 
                 # 🚨 CRITICAL GUARDRAIL: Override incorrect LLM decisions
+                # PHASE OMEGA: Apply stage transitions
+                output = self._handle_stage_transitions(output, meta_context)
                 output = self._apply_guardrails(output, meta_context)
+                output = self._handle_auto_evolving_tools(output, meta_context)
 
                 return output
 
@@ -837,7 +783,10 @@ NEVER mix both modes.
                 logger.info(f"📋 LLM intent: {output.intent}, function: {output.function_call.name or 'none'}")
 
                 # 🚨 CRITICAL GUARDRAIL: Override incorrect LLM decisions
+                # PHASE OMEGA: Apply stage transitions
+                output = self._handle_stage_transitions(output, meta_context)
                 output = self._apply_guardrails(output, meta_context)
+                output = self._handle_auto_evolving_tools(output, meta_context)
 
                 return output
 

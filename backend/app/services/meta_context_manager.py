@@ -158,6 +158,13 @@ class MetaContextManager:
                     meta_context.metadata["incident_graph"] = graph_dict
                     logger.debug(f"📊 Attached incident graph with {len(incident_graph.nodes)} nodes")
 
+                    # PHASE OMEGA OBJECTIVE #3: TOPIC GRAPH PERSISTENCE
+                    # Save graph after attaching
+                    try:
+                        incident_graph.save()
+                    except Exception as save_err:
+                        logger.error(f"Failed to save incident graph: {save_err}")
+
                     # Sync active incident to graph if missing
                     if meta_context.active_incident_id:
                         if meta_context.active_incident_id not in [n["incident_id"] for n in graph_dict.get("nodes", [])]:
@@ -172,6 +179,11 @@ class MetaContextManager:
                                         incident.get("category", ""),
                                         incident.get("description", "")
                                     )
+                                    # PHASE OMEGA OBJECTIVE #3: TOPIC GRAPH PERSISTENCE
+                                    try:
+                                        incident_graph.save()
+                                    except Exception as save_err:
+                                        logger.error(f"Failed to save incident graph after sync: {save_err}")
                             except Exception as e:
                                 logger.error(f"Error syncing incident to graph: {e}")
 
@@ -385,6 +397,12 @@ class MetaContextManager:
                     description=incident.get("description", ""),
                 )
                 logger.info(f"📊 Added incident {incident_id} to topic graph")
+
+                # PHASE OMEGA OBJECTIVE #3: TOPIC GRAPH PERSISTENCE
+                try:
+                    incident_graph.save()
+                except Exception as save_err:
+                    logger.error(f"Failed to save incident graph: {save_err}")
         except Exception as e:
             logger.error(f"Error adding incident to topic graph: {e}", exc_info=True)
 
@@ -630,6 +648,13 @@ class MetaContextManager:
             incident_graph.set_active_incident(new_incident_id, reason=reason)
 
             await self.set_active_incident(user_id, channel_id, new_incident_id)
+
+            # PHASE OMEGA OBJECTIVE #3: TOPIC GRAPH PERSISTENCE
+            try:
+                incident_graph.save()
+            except Exception as save_err:
+                logger.error(f"Failed to save incident graph after switch: {save_err}")
+
             logger.info(f"🔀 Switched active incident to {new_incident_id}: {reason}")
 
         except Exception as e:

@@ -220,6 +220,15 @@ async def create_incident(
         # Save to DynamoDB
         dynamo.create_incident(incident_data)
 
+        # PHASE OMEGA OBJECTIVE #7: WORK ORDER STABILIZATION - Add to topic graph
+        try:
+            from ..services.incident_topic_graph import get_incident_graph
+            incident_graph = get_incident_graph(user_id)
+            incident_graph.add_incident(incident_id, title, category, description)
+            incident_graph.save()
+        except Exception as e:
+            logger.error(f"Error adding incident to topic graph: {e}")
+
         # 🚀 PHASE OMEGA: Generate Dynamic Incident Card
         try:
             from ..services.dynamic_incident_cards import get_card_generator
@@ -281,6 +290,7 @@ async def create_incident(
             },
         )
 
+        user_message_sent = True
         # CRITICAL FIX: Only send first discovery question if appropriate
         # DO NOT send if orchestrator will handle it (prevents duplicates)
         # Check if we should auto-start discovery
@@ -324,6 +334,7 @@ async def create_incident(
                     "urgency": urgency,
                     "created_at": now,
                     "discovery_auto_started": True,  # Flag for orchestrator
+                    "user_message_sent": user_message_sent,
                 },
                 message=f"Incident {incident_id} created and discovery started automatically",
             )
@@ -498,13 +509,17 @@ async def close_incident(
 async def start_discovery(
     incident_id: str,
     channel_id: str,
+    user_id: Optional[str] = None,
     category: Optional[str] = None,
     severity: Optional[str] = None,
     user_message: Optional[str] = None,
     questions: Optional[List[str]] = None,
-    user_id: Optional[str] = None,
 ) -> FunctionResult:
-    """Start discovery question flow with category-specific questions"""
+    """
+    PHASE OMEGA OBJECTIVE #5: DISCOVERY DE-DUPLICATION
+    Start discovery question flow with category-specific questions
+    MUST only be called ONCE per incident
+    """
     try:
         bot = get_bot()
         dynamo = get_dynamo_service()
@@ -523,13 +538,14 @@ async def start_discovery(
 
         # 🚨 FIX: Check if discovery already in progress
         if incident and incident.get("status") in ["discovery", "discovery_complete", "diagnosing", "work_order"]:
-            logger.info(f"ℹ️ Discovery already started or completed for incident {incident_id}")
+            logger.warning(f"🛑 BLOCKED: Discovery already started for incident {incident_id} (status={incident.get('status')})")
             return FunctionResult(
                 success=True,
                 data={
                     "incident_id": incident_id,
                     "status": incident.get("status"),
                     "already_started": True,
+                    "user_message_sent": False,
                 },
                 message=f"Discovery already in progress for incident {incident_id}",
             )
@@ -630,6 +646,7 @@ async def start_discovery(
             },
         )
 
+        user_message_sent = True
         logger.info(f"Started discovery for incident {incident_id} with {len(discovery_questions)} questions")
 
         return FunctionResult(
@@ -640,6 +657,7 @@ async def start_discovery(
                 "current_question": discovery_questions[0],
                 "question_index": 0,
                 "total_questions": len(discovery_questions),
+                "user_message_sent": user_message_sent,
             },
             message=f"Discovery started for incident {incident_id}",
         )
@@ -714,6 +732,7 @@ async def record_discovery_answer(
             metadata={"incident_id": incident_id, "question_index": next_index},
         )
 
+        user_message_sent = True
         # 🚨 FIX: Check if discovery is complete
         if next_index >= total_questions:
             logger.info(f"✅ Discovery completed for incident {incident_id}")
@@ -733,6 +752,7 @@ async def record_discovery_answer(
                     "answer": answer,
                     "discovery_complete": True,
                     "next_stage": "diagnosing",
+                    "user_message_sent": user_message_sent,
                 },
                 message="Discovery questions completed, moving to diagnosis",
             )
@@ -768,6 +788,7 @@ async def record_discovery_answer(
                 },
             )
 
+            user_message_sent = True
             logger.info(f"✅ Sent discovery question {next_index+1}/{total_questions} for incident {incident_id}")
         else:
             logger.warning(f"⚠️ No question available for index {next_index}")
@@ -783,6 +804,7 @@ async def record_discovery_answer(
                 "answer": answer,
                 "discovery_complete": False,
                 "next_question_index": next_index,
+                "user_message_sent": user_message_sent,
             },
             message=f"Discovery answer {question_index} recorded, next question sent",
         )
@@ -823,17 +845,17 @@ async def start_diagnosis(
     channel_id: str,
 ) -> FunctionResult:
     """
-    🚨 CRITICAL FUNCTION: Start diagnosis stage after discovery completion.
+    PHASE OMEGA OBJECTIVE #6: DIAGNOSIS DE-DUPLICATION
+    Start diagnosis stage after discovery completion.
     Analyzes discovery answers and provides category-specific diagnosis.
 
-    🚨 FIX: This function should ONLY be called ONCE per incident!
+    MUST only be called ONCE per incident when stage == "discovery_complete"
     """
     try:
+        # PHASE OMEGA OBJECTIVE #6: Check if already diagnosing
         dynamo = get_dynamo_service()
-        bot = get_bot()
-
-        # Get incident with discovery answers
         incident = dynamo.get_incident(incident_id, user_id)
+
         if not incident:
             return FunctionResult(
                 success=False,
@@ -841,30 +863,20 @@ async def start_diagnosis(
                 message=f"Cannot diagnose: incident {incident_id} not found",
             )
 
-        # 🚨 CRITICAL FIX: Check if diagnosis already completed
-        incident_status = incident.get("status")
-
-        # If already diagnosing, check if we should prevent duplicate
-        if incident_status == "diagnosing":
-            logger.warning(f"⚠️ start_diagnosis called for already-diagnosing incident {incident_id}")
-            logger.warning(f"   This is likely a duplicate call - returning success without re-running")
-
-            # Return success with already_diagnosed flag
+        if incident.get("status") == "diagnosing":
+            logger.warning(f"🛑 BLOCKED: Diagnosis already in progress for incident {incident_id}")
             return FunctionResult(
                 success=True,
                 data={
                     "incident_id": incident_id,
                     "status": "diagnosing",
                     "already_diagnosed": True,
-                    "diagnosis_summary": "Diagnosis already completed for this incident.",
+                    "user_message_sent": False,
                 },
-                message=f"Diagnosis already completed for incident {incident_id}",
+                message=f"Diagnosis already in progress for incident {incident_id}",
             )
 
-        # Validate incident is in correct state for NEW diagnosis
-        if incident_status not in ["discovery_complete", "diagnosing"]:
-            logger.warning(f"⚠️ Attempting diagnosis on incident with status {incident_status}")
-            # Allow it but warn
+        bot = get_bot()
 
         # Update incident status to 'diagnosing'
         dynamo.update_incident_status(
@@ -901,7 +913,13 @@ async def start_diagnosis(
             # Check if we should generate a diagnostic tool
             tool_suggestion = await recorder.suggest_diagnostic_tool(category)
             if tool_suggestion.get("should_create"):
-                logger.info(f"💡 Diagnostic tool suggestion: {tool_suggestion.get('tool_name')}")
+                # PHASE OMEGA OBJECTIVE #4: AUTO-EVOLVING DIAGNOSTIC TOOLS
+                logger.info(f"💡 Tool suggestion: {tool_suggestion.get('tool_name')}")
+
+                # Ask user for permission
+                permission_msg = f"\n\n💡 **New Tool Suggestion**\nI can create a diagnostic tool called '{tool_suggestion.get('tool_name')}' to help analyze {category} issues faster in the future. Would you like me to create it?"
+
+                diagnosis_text += permission_msg
 
         except Exception as e:
             logger.error(f"Error recording diagnosis pattern: {e}", exc_info=True)
@@ -927,6 +945,7 @@ async def start_diagnosis(
             },
         )
 
+        user_message_sent = True
         logger.info(f"✅ Started diagnosis for incident {incident_id}")
 
         # 🚨 CRITICAL FIX: Mark diagnosis as complete to prevent repeated calls
@@ -938,9 +957,8 @@ async def start_diagnosis(
                 "status": "diagnosing",
                 "diagnosis_summary": diagnosis_summary,
                 "recommended_action": _get_recommended_action(category, severity),
-                # 🚨 NEW: Flag indicating diagnosis was just completed
-                "diagnosis_complete": True,
-                "diagnosis_timestamp": datetime.utcnow().isoformat(),
+                "user_message_sent": user_message_sent,
+                "tool_suggestion": tool_suggestion if tool_suggestion else None,
             },
             message=f"Diagnosis completed for incident {incident_id}",
         )
@@ -1033,9 +1051,40 @@ async def create_work_order(
     channel_id: str,
     urgency: Optional[str] = None,
 ) -> FunctionResult:
-    """Create a work order (job) from an incident"""
+    """
+    PHASE OMEGA OBJECTIVE #7: WORK ORDER STABILIZATION
+    Create a work order (job) from an incident
+    Prevents duplicates and adds to topic graph
+    """
     try:
+        # PHASE OMEGA OBJECTIVE #7: Check for duplicate work orders
         dynamo = get_dynamo_service()
+
+        # Check if work order already exists for this incident
+        try:
+            from ..services.dynamo_service import get_dynamo_service
+            dynamo_check = get_dynamo_service()
+
+            # Query jobs by incident_id
+            existing_jobs = dynamo_check.list_jobs_by_incident(incident_id)
+
+            for job in existing_jobs:
+                if job.get("status") not in ["completed", "cancelled"]:
+                    logger.warning(f"🛑 BLOCKED: Work order already exists for incident {incident_id}")
+                    return FunctionResult(
+                        success=False,
+                        error="duplicate_work_order",
+                        data={
+                            "job_id": job.get("job_id"),
+                            "incident_id": incident_id,
+                            "status": job.get("status"),
+                        },
+                        message=f"Work order already exists for this incident: {job.get('job_id')}",
+                    )
+        except AttributeError:
+            # list_jobs_by_incident may not exist, skip duplicate check
+            logger.warning("list_jobs_by_incident not available, skipping duplicate check")
+
         bot = get_bot()
 
         job_id = f"job_{uuid.uuid4().hex[:12]}"
@@ -1133,6 +1182,17 @@ async def create_work_order(
             },
         )
 
+        # PHASE OMEGA OBJECTIVE #7: Add work order to topic graph
+        try:
+            from ..services.incident_topic_graph import get_incident_graph
+            incident_graph = get_incident_graph(user_id)
+            incident_graph.add_node("work_order", job_id, {"incident_id": incident_id, "title": title})
+            incident_graph.add_edge(incident_id, job_id, "work_order_created")
+            incident_graph.save()
+        except Exception as e:
+            logger.error(f"Error adding work order to topic graph: {e}")
+
+        user_message_sent = True
         logger.info(f"✅ Created work order {job_id} for incident {incident_id}")
 
         # 🚨 CRITICAL FIX: Signal that diagnosis tracking should be cleared
@@ -1146,9 +1206,7 @@ async def create_work_order(
                 "title": title,
                 "estimated_cost": estimated_cost,
                 "created_at": now,
-                # 🚨 NEW: Signal to clear diagnosis tracking
-                "clear_diagnosis_tracking": True,
-                "stage_transition": "diagnosing → work_order",
+                "user_message_sent": user_message_sent,
             },
             message=f"Work order {job_id} created successfully",
         )
