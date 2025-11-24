@@ -517,6 +517,24 @@ NEVER mix both modes.
                         response_to_user=None,
                     )
 
+        # 🚨 GUARDRAIL #2D: DOWNGRADE to general.chat if LLM tries banned tools after diagnosis
+        # If diagnosis is complete but LLM selects forbidden tools, downgrade to general.chat
+        banned_tools_after_diagnosis = ["start_discovery", "record_discovery_answer", "update_incident"]
+
+        if diagnosis_complete and output.function_call.name in banned_tools_after_diagnosis:
+            logger.error(f"🚨🚨🚨 CRITICAL GUARDRAIL ACTIVATED: Banned tool after diagnosis")
+            logger.error(f"   Tool attempted: {output.function_call.name}")
+            logger.error(f"   diagnosis_complete: {diagnosis_complete}")
+            logger.error(f"   Downgrading to: general.chat")
+
+            return OrchestratorOutput(
+                intent="general.chat",
+                reasoning=f"GUARDRAIL OVERRIDE: Blocked {output.function_call.name} after diagnosis complete",
+                context_updates=ContextUpdates(),
+                function_call=FunctionCall(name=None, arguments={}),
+                response_to_user="I've completed the diagnosis for your maintenance issue. Would you like me to create a work order to proceed with repairs?",
+            )
+
         # GUARDRAIL #3: discovery stage MUST record answers, not create incidents
         if meta_context.stage == "discovery":
             if output.function_call.name == "create_incident":
@@ -542,6 +560,25 @@ NEVER mix both modes.
                     ),
                     response_to_user=None,
                 )
+
+        # 🚨 GUARDRAIL #4: TOPIC SHIFT DETECTION - Allow new incident when user mentions unrelated issue
+        # If user mentions a NEW maintenance issue while in post-discovery stages, allow topic switch
+        if meta_context.active_incident_id and meta_context.stage in ["discovery_complete", "diagnosing", "work_order"]:
+            # Check if LLM detected create_incident intent (topic shift detected)
+            if output.function_call.name == "create_incident":
+                # This is likely a new unrelated issue - allow it
+                logger.warning(f"🔄 TOPIC SHIFT DETECTED: New incident while in {meta_context.stage}")
+                logger.warning(f"   Previous incident: {meta_context.active_incident_id}")
+                logger.warning(f"   User message: {meta_context.last_user_message[:80]}")
+                logger.warning(f"   Allowing topic switch to create new incident")
+
+                # Clear previous incident context to allow new incident
+                output.context_updates = ContextUpdates(
+                    active_incident_id=None,  # Clear previous incident
+                    stage="idle",  # Reset to idle for new incident
+                )
+
+                return output
 
         # No guardrails triggered - return original output
         return output

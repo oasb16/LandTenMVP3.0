@@ -976,9 +976,12 @@ async def create_work_order(
             logger.warning(f"⚠️ Creating work order for incident with status {incident_status}")
             # Allow it but warn
 
+        # 🚨 CRITICAL FIX: ALWAYS include user_id in job_data
+        # DynamoDB requires user_id as a key field for job creation
         job_data = {
             "job_id": job_id,
             "incident_id": incident_id,
+            "user_id": user_id,  # 🚨 FIX: MUST include user_id for DynamoDB
             "property_id": incident.get("property_id", "default_property"),
             "landlord_id": incident.get("landlord_id", "default_landlord"),
             "title": title,
