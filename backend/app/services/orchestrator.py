@@ -316,6 +316,107 @@ NEVER mix both modes.
 
         return False
 
+    def _apply_guardrails(
+        self,
+        output: OrchestratorOutput,
+        meta_context: MetaContext,
+    ) -> OrchestratorOutput:
+        """
+        🚨 CRITICAL GUARDRAIL: Override incorrect LLM decisions.
+
+        This prevents the LLM from making catastrophic errors like:
+        - Calling create_incident during discovery_complete/diagnosing stages
+        - Responding with general.chat when diagnosis is required
+        - Ignoring mandatory flow transitions
+        """
+
+        # GUARDRAIL #1: discovery_complete MUST trigger start_diagnosis
+        if meta_context.stage == "discovery_complete":
+            if output.function_call.name == "create_incident":
+                logger.warning(f"🛑 GUARDRAIL ACTIVATED: Blocked create_incident during discovery_complete")
+                logger.warning(f"   Original intent: {output.intent}")
+                logger.warning(f"   Overriding to: start_diagnosis")
+
+                return OrchestratorOutput(
+                    intent="start_diagnosis",
+                    reasoning=f"GUARDRAIL OVERRIDE: discovery_complete stage requires diagnosis, not incident creation. Original: {output.reasoning}",
+                    context_updates=ContextUpdates(stage="diagnosing"),
+                    function_call=FunctionCall(
+                        name="start_diagnosis",
+                        arguments={"incident_id": meta_context.active_incident_id},
+                    ),
+                    response_to_user=None,
+                )
+
+            elif output.function_call.name is None and output.intent == "general.chat":
+                logger.warning(f"🛑 GUARDRAIL ACTIVATED: Blocked general.chat during discovery_complete")
+                logger.warning(f"   Overriding to: start_diagnosis")
+
+                return OrchestratorOutput(
+                    intent="start_diagnosis",
+                    reasoning=f"GUARDRAIL OVERRIDE: discovery_complete requires diagnosis, not chat",
+                    context_updates=ContextUpdates(stage="diagnosing"),
+                    function_call=FunctionCall(
+                        name="start_diagnosis",
+                        arguments={"incident_id": meta_context.active_incident_id},
+                    ),
+                    response_to_user=None,
+                )
+
+        # GUARDRAIL #2: diagnosing stage MUST NOT create new incidents
+        if meta_context.stage == "diagnosing":
+            if output.function_call.name == "create_incident":
+                logger.warning(f"🛑 GUARDRAIL ACTIVATED: Blocked create_incident during diagnosing")
+                logger.warning(f"   Active incident: {meta_context.active_incident_id}")
+                logger.warning(f"   Overriding to: record_diagnosis_result")
+
+                # Extract title/description from attempted incident creation
+                attempted_args = output.function_call.arguments or {}
+                diagnosis_notes = f"User provided: {attempted_args.get('title', '')} - {attempted_args.get('description', '')}"
+
+                return OrchestratorOutput(
+                    intent="record_diagnosis_result",
+                    reasoning=f"GUARDRAIL OVERRIDE: diagnosing stage, treating as additional diagnosis info",
+                    context_updates=ContextUpdates(),
+                    function_call=FunctionCall(
+                        name="record_diagnosis_result",
+                        arguments={
+                            "incident_id": meta_context.active_incident_id,
+                            "diagnosis_notes": diagnosis_notes,
+                        },
+                    ),
+                    response_to_user=None,
+                )
+
+        # GUARDRAIL #3: discovery stage MUST record answers, not create incidents
+        if meta_context.stage == "discovery":
+            if output.function_call.name == "create_incident":
+                logger.warning(f"🛑 GUARDRAIL ACTIVATED: Blocked create_incident during discovery")
+                logger.warning(f"   Active incident: {meta_context.active_incident_id}")
+                logger.warning(f"   Overriding to: record_discovery_answer")
+
+                # Extract description from attempted incident creation
+                attempted_args = output.function_call.arguments or {}
+                answer_text = attempted_args.get('description', attempted_args.get('title', 'Yes'))
+
+                return OrchestratorOutput(
+                    intent="record_discovery_answer",
+                    reasoning=f"GUARDRAIL OVERRIDE: discovery stage, treating as discovery answer",
+                    context_updates=ContextUpdates(),
+                    function_call=FunctionCall(
+                        name="record_discovery_answer",
+                        arguments={
+                            "incident_id": meta_context.active_incident_id,
+                            "question_index": meta_context.discovery.question_index,
+                            "answer": answer_text,
+                        },
+                    ),
+                    response_to_user=None,
+                )
+
+        # No guardrails triggered - return original output
+        return output
+
     async def run(
         self,
         user_message: str,
@@ -390,7 +491,7 @@ NEVER mix both modes.
 
             user_content = "\n".join(user_content_parts)
 
-            # CRITICAL: Add discovery flow detection hints
+            # 🚨 CRITICAL: Add discovery flow detection hints
             if meta_context.stage == "discovery" and meta_context.active_incident_id:
                 user_content = (
                     f"🔍 **DISCOVERY MODE ACTIVE**\n"
@@ -398,6 +499,29 @@ NEVER mix both modes.
                     f"Question index: {meta_context.discovery.question_index}\n"
                     f"If user sends text answer → call record_discovery_answer\n"
                     f"If user mentions NEW issue → pause discovery, create new incident\n\n"
+                    + user_content
+                )
+
+            # 🚨 CRITICAL: Add discovery_complete → diagnosing mandatory flow hint
+            if meta_context.stage == "discovery_complete" and meta_context.active_incident_id:
+                user_content = (
+                    f"🔬 **DISCOVERY COMPLETE → DIAGNOSIS REQUIRED**\n"
+                    f"Incident {meta_context.active_incident_id} has completed discovery.\n"
+                    f"YOU MUST CALL: start_diagnosis\n"
+                    f"DO NOT call create_incident\n"
+                    f"DO NOT respond with general.chat\n"
+                    f"MANDATORY ACTION: call start_diagnosis immediately\n\n"
+                    + user_content
+                )
+
+            # 🚨 CRITICAL: Add diagnosing stage hint
+            if meta_context.stage == "diagnosing" and meta_context.active_incident_id:
+                user_content = (
+                    f"🩺 **DIAGNOSING MODE ACTIVE**\n"
+                    f"Incident {meta_context.active_incident_id} is being diagnosed.\n"
+                    f"If user confirms work order → call create_work_order\n"
+                    f"If user provides details → call record_diagnosis_result\n"
+                    f"DO NOT call create_incident\n\n"
                     + user_content
                 )
 
@@ -461,12 +585,19 @@ NEVER mix both modes.
                     response_to_user=None,
                 )
 
+                # 🚨 CRITICAL GUARDRAIL: Override incorrect LLM decisions
+                output = self._apply_guardrails(output, meta_context)
+
                 return output
 
             # Otherwise, parse text content (could be JSON or natural language)
             elif message.content:
                 output = self._parse_orchestrator_output(message.content)
                 logger.info(f"📋 LLM intent: {output.intent}, function: {output.function_call.name or 'none'}")
+
+                # 🚨 CRITICAL GUARDRAIL: Override incorrect LLM decisions
+                output = self._apply_guardrails(output, meta_context)
+
                 return output
 
             else:
