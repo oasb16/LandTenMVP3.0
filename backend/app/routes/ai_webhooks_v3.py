@@ -278,17 +278,21 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
                     context_updates["stage"] = "discovery_complete"
                     logger.info("✅ Discovery complete, transitioning to discovery_complete stage")
 
-                # 🚨 CRITICAL FIX: Track diagnosis completion
+                # 🚨 CRITICAL FIX: Track diagnosis completion (ENHANCED)
                 if orchestrator_output.function_call.name == "start_diagnosis":
                     if function_result.data.get("diagnosis_complete"):
                         # Mark diagnosis as complete to prevent repeated calls
+                        # 🚨 ULTRA-CRITICAL: Set ALL tracking fields
                         context_updates["metadata"] = {
                             **meta_context.metadata,
                             "diagnosis_complete": True,
                             "last_tool_called": "start_diagnosis",
                             "last_diagnosis_time": function_result.data.get("diagnosis_timestamp"),
+                            "diagnosed_incident_id": function_result.data.get("incident_id"),  # 🚨 NEW: Track which incident was diagnosed
                         }
-                        logger.info("✅ Diagnosis complete, marked in metadata to prevent duplicate calls")
+                        logger.info(f"✅ Diagnosis complete, marked in metadata to prevent duplicate calls")
+                        logger.info(f"   diagnosis_complete: True")
+                        logger.info(f"   diagnosed_incident_id: {function_result.data.get('incident_id')}")
                     elif function_result.data.get("already_diagnosed"):
                         logger.warning("⚠️ start_diagnosis was called but diagnosis already completed (duplicate blocked)")
 

@@ -388,24 +388,92 @@ NEVER mix both modes.
                     response_to_user=None,
                 )
 
-        # 🚨 GUARDRAIL #2B: CRITICAL FIX - Prevent repeated start_diagnosis calls
-        # This is THE BIGGEST BUG - start_diagnosis should only be called ONCE per incident
-        if meta_context.stage == "diagnosing":
-            # Check if diagnosis was already completed
-            diagnosis_complete = meta_context.metadata.get("diagnosis_complete", False)
-            last_tool_called = meta_context.metadata.get("last_tool_called")
+        # 🚨 GUARDRAIL #2B: ULTRA-CRITICAL FIX - ABSOLUTE BLOCK on repeated start_diagnosis
+        # This is THE BIGGEST BUG - start_diagnosis MUST ONLY be called ONCE per incident
+        # MULTIPLE LAYERS OF PROTECTION:
+        diagnosis_complete = meta_context.metadata.get("diagnosis_complete", False)
+        last_tool_called = meta_context.metadata.get("last_tool_called")
+        diagnosed_incident_id = meta_context.metadata.get("diagnosed_incident_id")
 
-            if output.function_call.name == "start_diagnosis":
-                logger.warning(f"🛑 GUARDRAIL ACTIVATED: Blocked repeated start_diagnosis call")
-                logger.warning(f"   Stage: diagnosing (diagnosis already completed)")
-                logger.warning(f"   Last tool called: {last_tool_called}")
-                logger.warning(f"   Diagnosis complete: {diagnosis_complete}")
-                logger.warning(f"   Overriding to: create_work_order")
+        # HARD BLOCK #1: If diagnosis_complete is True → NEVER allow start_diagnosis
+        if output.function_call.name == "start_diagnosis" and diagnosis_complete:
+            logger.error(f"🚨🚨🚨 CRITICAL GUARDRAIL ACTIVATED: ABSOLUTE BLOCK on start_diagnosis")
+            logger.error(f"   Reason: diagnosis_complete = True")
+            logger.error(f"   Stage: {meta_context.stage}")
+            logger.error(f"   Last tool: {last_tool_called}")
+            logger.error(f"   Forcing: create_work_order")
 
-                # Override to create_work_order instead
+            return OrchestratorOutput(
+                intent="create_work_order",
+                reasoning=f"HARD BLOCK: diagnosis_complete=True, forcing create_work_order",
+                context_updates=ContextUpdates(stage="work_order"),
+                function_call=FunctionCall(
+                    name="create_work_order",
+                    arguments={
+                        "incident_id": meta_context.active_incident_id,
+                        "title": f"Repair work order for incident {meta_context.active_incident_id}",
+                        "estimated_cost": "250.00",
+                    },
+                ),
+                response_to_user=None,
+            )
+
+        # HARD BLOCK #2: If stage is "diagnosing" → NEVER allow start_diagnosis
+        if meta_context.stage == "diagnosing" and output.function_call.name == "start_diagnosis":
+            logger.error(f"🚨🚨🚨 CRITICAL GUARDRAIL ACTIVATED: ABSOLUTE BLOCK on start_diagnosis")
+            logger.error(f"   Reason: Already in diagnosing stage")
+            logger.error(f"   Stage: diagnosing")
+            logger.error(f"   Last tool: {last_tool_called}")
+            logger.error(f"   Forcing: create_work_order")
+
+            return OrchestratorOutput(
+                intent="create_work_order",
+                reasoning=f"HARD BLOCK: stage=diagnosing, forcing create_work_order",
+                context_updates=ContextUpdates(stage="work_order"),
+                function_call=FunctionCall(
+                    name="create_work_order",
+                    arguments={
+                        "incident_id": meta_context.active_incident_id,
+                        "title": f"Repair work order for incident {meta_context.active_incident_id}",
+                        "estimated_cost": "250.00",
+                    },
+                ),
+                response_to_user=None,
+            )
+
+        # HARD BLOCK #3: If last_tool_called was "start_diagnosis" → NEVER allow it again
+        if output.function_call.name == "start_diagnosis" and last_tool_called == "start_diagnosis":
+            logger.error(f"🚨🚨🚨 CRITICAL GUARDRAIL ACTIVATED: ABSOLUTE BLOCK on start_diagnosis")
+            logger.error(f"   Reason: last_tool_called = start_diagnosis (duplicate detected)")
+            logger.error(f"   Forcing: create_work_order")
+
+            return OrchestratorOutput(
+                intent="create_work_order",
+                reasoning=f"HARD BLOCK: Duplicate start_diagnosis detected, forcing create_work_order",
+                context_updates=ContextUpdates(stage="work_order"),
+                function_call=FunctionCall(
+                    name="create_work_order",
+                    arguments={
+                        "incident_id": meta_context.active_incident_id,
+                        "title": f"Repair work order for incident {meta_context.active_incident_id}",
+                        "estimated_cost": "250.00",
+                    },
+                ),
+                response_to_user=None,
+            )
+
+        # HARD BLOCK #4: If diagnosed_incident_id exists and matches active → BLOCK
+        if output.function_call.name == "start_diagnosis" and diagnosed_incident_id:
+            if diagnosed_incident_id == meta_context.active_incident_id:
+                logger.error(f"🚨🚨🚨 CRITICAL GUARDRAIL ACTIVATED: ABSOLUTE BLOCK on start_diagnosis")
+                logger.error(f"   Reason: This incident already diagnosed (incident_id match)")
+                logger.error(f"   Diagnosed incident: {diagnosed_incident_id}")
+                logger.error(f"   Active incident: {meta_context.active_incident_id}")
+                logger.error(f"   Forcing: create_work_order")
+
                 return OrchestratorOutput(
                     intent="create_work_order",
-                    reasoning=f"GUARDRAIL OVERRIDE: Diagnosis already completed, user confirmed work order creation",
+                    reasoning=f"HARD BLOCK: Incident already diagnosed, forcing create_work_order",
                     context_updates=ContextUpdates(stage="work_order"),
                     function_call=FunctionCall(
                         name="create_work_order",
@@ -418,8 +486,9 @@ NEVER mix both modes.
                     response_to_user=None,
                 )
 
-            # 🚨 GUARDRAIL #2C: Detect "yes" pattern and override to create_work_order
-            # When user says "yes" after diagnosis, they're confirming work order creation
+        # 🚨 GUARDRAIL #2C: Detect "yes" pattern and override to create_work_order
+        # When user says "yes" after diagnosis, they're confirming work order creation
+        if meta_context.stage == "diagnosing":
             if output.intent == "general.chat" and output.function_call.name is None:
                 # Check if user message looks like confirmation
                 user_msg = meta_context.last_user_message or ""

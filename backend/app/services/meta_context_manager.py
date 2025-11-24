@@ -67,6 +67,24 @@ class MetaContextManager:
             return [self._normalize_decimals(item) for item in obj]
         return obj
 
+    def _convert_floats_to_decimal(self, obj: Any) -> Any:
+        """
+        🚨 CRITICAL FIX: Recursively convert all float types to Decimal for DynamoDB.
+        DynamoDB does NOT support float types - only Decimal.
+        This prevents: TypeError: Float types are not supported. Use Decimal types instead.
+        """
+        if isinstance(obj, float):
+            # Convert float to Decimal
+            return Decimal(str(obj))
+        elif isinstance(obj, dict):
+            return {k: self._convert_floats_to_decimal(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._convert_floats_to_decimal(item) for item in obj]
+        elif isinstance(obj, tuple):
+            return tuple(self._convert_floats_to_decimal(item) for item in obj)
+        else:
+            return obj
+
     def _deserialize_context(self, raw_context: Dict[str, Any]) -> Dict[str, Any]:
         """Deserialize DynamoDB context into standard format"""
         context = self._normalize_decimals(raw_context)
@@ -191,6 +209,11 @@ class MetaContextManager:
                 "ttl": self._get_ttl(),
                 **context_dict,
             }
+
+            # 🚨 CRITICAL FIX: Convert all floats to Decimal before DynamoDB put_item
+            # DynamoDB does NOT support float types - this prevents:
+            # TypeError: Float types are not supported. Use Decimal types instead.
+            item = self._convert_floats_to_decimal(item)
 
             # Save to DynamoDB
             self.table.put_item(Item=item)
