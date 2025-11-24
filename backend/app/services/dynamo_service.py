@@ -301,9 +301,12 @@ class JobDB:
 
         now = datetime.now(timezone.utc).isoformat()
 
+        # 🚨 CRITICAL FIX: ALWAYS extract user_id from job_data
+        # DynamoDB requires user_id as a key field
         item = {
             "job_id": job_data.get("job_id"),
             "incident_id": job_data.get("incident_id", ""),
+            "user_id": job_data.get("user_id", ""),  # 🚨 FIX: Extract user_id from job_data
             "property_id": job_data.get("property_id", "unknown"),
             "landlord_id": job_data.get("landlord_id", "unknown"),
             "title": job_data.get("title", ""),
