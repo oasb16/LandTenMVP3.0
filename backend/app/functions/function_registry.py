@@ -1416,11 +1416,103 @@ async def get_property_info(property_id: str) -> FunctionResult:
         )
 
 
+# ==================== PHASE OMEGA: DYNAMIC TOOL FUNCTIONS ====================
+
+async def register_dynamic_tool(
+    tool_name: str,
+    code: str,
+    description: Optional[str] = None,
+    category: Optional[str] = None,
+) -> FunctionResult:
+    """
+    Register a new dynamic tool from LLM-generated Python code.
+
+    Args:
+        tool_name: Name of the tool (must be valid Python function name)
+        code: Python source code containing the function
+        description: Description of what the tool does
+        category: Category (plumbing, electrical, etc.)
+
+    Returns:
+        FunctionResult with registration status
+    """
+    logger.info(f"🔧 Registering dynamic tool: {tool_name}")
+
+    try:
+        from ..dynamic_tools.tool_runtime import get_dynamic_tool_runtime
+
+        runtime = get_dynamic_tool_runtime()
+
+        # Register the tool
+        result = runtime.register_tool(
+            tool_name=tool_name,
+            code=code,
+            description=description,
+            category=category,
+            created_by="llm",
+        )
+
+        if result["success"]:
+            return FunctionResult(
+                success=True,
+                data={
+                    "tool_id": result["tool_id"],
+                    "tool_name": tool_name,
+                    "description": result["description"],
+                    "metadata": result.get("metadata", {}),
+                },
+                message=f"✅ Dynamic tool '{tool_name}' registered successfully!",
+            )
+        else:
+            return FunctionResult(
+                success=False,
+                error=str(result.get("errors", [])),
+                message=f"❌ Failed to register tool '{tool_name}': {result.get('errors')}",
+            )
+
+    except Exception as e:
+        logger.error(f"Error registering dynamic tool: {e}", exc_info=True)
+        return FunctionResult(
+            success=False,
+            error=str(e),
+            message=f"Failed to register dynamic tool: {e}",
+        )
+
+
+async def list_dynamic_tools(category: Optional[str] = None) -> FunctionResult:
+    """List all registered dynamic tools"""
+    logger.info(f"📋 Listing dynamic tools (category={category})")
+
+    try:
+        from ..dynamic_tools.tool_runtime import get_dynamic_tool_runtime
+
+        runtime = get_dynamic_tool_runtime()
+        tools = runtime.list_tools(category=category)
+
+        return FunctionResult(
+            success=True,
+            data={
+                "tools": tools,
+                "count": len(tools),
+            },
+            message=f"Found {len(tools)} dynamic tools",
+        )
+
+    except Exception as e:
+        logger.error(f"Error listing dynamic tools: {e}", exc_info=True)
+        return FunctionResult(
+            success=False,
+            error=str(e),
+            message="Failed to list dynamic tools",
+        )
+
+
 # ==================== FUNCTION REGISTRY ====================
 
 def get_function_definitions() -> List[FunctionDefinition]:
-    """Get all function definitions for LLM tool calling"""
-    return [
+    """Get all function definitions for LLM tool calling (built-in + dynamic)"""
+    # Built-in functions
+    built_in_functions = [
         FunctionDefinition(
             name="create_incident",
             description="Create a new maintenance incident. Use when tenant reports a problem.",
@@ -1629,7 +1721,53 @@ def get_function_definitions() -> List[FunctionDefinition]:
                 "required": ["user_id"],
             },
         ),
+        FunctionDefinition(
+            name="register_dynamic_tool",
+            description="Register a new dynamic tool from LLM-generated Python code. Use when user asks to create a diagnostic tool or analyzer.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "tool_name": {"type": "string", "description": "Name of the tool (valid Python function name)"},
+                    "code": {"type": "string", "description": "Python source code containing the function"},
+                    "description": {"type": "string", "description": "Description of what the tool does"},
+                    "category": {
+                        "type": "string",
+                        "enum": ["plumbing", "electrical", "hvac", "appliance", "structural", "general"],
+                        "description": "Category of the tool",
+                    },
+                },
+                "required": ["tool_name", "code"],
+            },
+        ),
+        FunctionDefinition(
+            name="list_dynamic_tools",
+            description="List all registered dynamic tools, optionally filtered by category.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "category": {
+                        "type": "string",
+                        "description": "Optional category filter",
+                    },
+                },
+                "required": [],
+            },
+        ),
     ]
+
+    # 🚀 PHASE OMEGA: Add dynamic tools to function definitions
+    try:
+        from ..dynamic_tools.tool_loader import get_dynamic_tool_loader
+
+        loader = get_dynamic_tool_loader()
+        dynamic_tools = loader.get_dynamic_function_definitions()
+
+        logger.info(f"📦 Loaded {len(dynamic_tools)} dynamic tool definitions")
+
+        return built_in_functions + dynamic_tools
+    except Exception as e:
+        logger.error(f"Error loading dynamic tools: {e}", exc_info=True)
+        return built_in_functions
 
 
 # Function name to implementation mapping
@@ -1655,6 +1793,9 @@ FUNCTION_IMPLEMENTATIONS = {
     "get_user_incidents": get_user_incidents,
     "get_user_jobs": get_user_jobs,
     "get_property_info": get_property_info,
+    # PHASE OMEGA: Dynamic tool management
+    "register_dynamic_tool": register_dynamic_tool,
+    "list_dynamic_tools": list_dynamic_tools,
 }
 
 
@@ -1669,19 +1810,36 @@ async def execute_function(
     if function_name and function_name.startswith("functions."):
         function_name = function_name.replace("functions.", "", 1)
 
+    # 🚀 PHASE OMEGA: Check if this is a dynamic tool
+    try:
+        from ..dynamic_tools.tool_loader import get_dynamic_tool_loader
+        from ..dynamic_tools.tool_runtime import get_dynamic_tool_runtime
+
+        runtime = get_dynamic_tool_runtime()
+        loader = get_dynamic_tool_loader()
+
+        # If tool exists in dynamic registry, execute it
+        if function_name in runtime.tools:
+            logger.info(f"🔧 Executing dynamic tool: {function_name}")
+            return await loader.execute_dynamic_tool(
+                function_name, arguments, context
+            )
+    except Exception as e:
+        logger.error(f"Error checking dynamic tools: {e}", exc_info=True)
+
     # Dynamic tool sandbox: ONLY trigger for explicit dynamic tool patterns
     # Must be VERY specific to avoid treating normal functions as dynamic tools
     if function_name and (
         function_name not in FUNCTION_IMPLEMENTATIONS and (
             function_name.startswith(("run_code", "eval_js", "exec_python", "execute_code",
-                                     "sandbox_", "plugin_", "dynamic_tool_")) or
+                                     "sandbox_", "plugin_", "dynamic_tool_", "analyze_", "check_", "diagnose_")) or
             # Also catch common LLM hallucinations
             function_name.startswith(("get_incident_by_", "search_", "find_",
                                      "query_", "lookup_", "fetch_"))
         )
     ):
         logger.info(f"Dynamic tool sandbox triggered for: {function_name}")
-        logger.warning(f"⚠️ LLM hallucinated unknown function: {function_name}")
+        logger.warning(f"⚠️ LLM requested dynamic tool: {function_name}")
         return FunctionResult(
             success=True,
             data={
@@ -1691,7 +1849,7 @@ async def execute_function(
                 "context": context,
             },
             error=None,
-            message=f"Dynamic tool request captured: {function_name}",
+            message=f"Dynamic tool request captured: {function_name}. System can generate this tool on request.",
         )
 
     if function_name not in FUNCTION_IMPLEMENTATIONS:

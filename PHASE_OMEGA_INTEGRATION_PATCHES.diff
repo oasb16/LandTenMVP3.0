@@ -1,0 +1,265 @@
+--- a/backend/app/services/orchestrator.py
++++ b/backend/app/services/orchestrator.py
+@@ -19,6 +19,7 @@
+ )
+ from ..config.settings import settings
+
+ logger = logging.getLogger(__name__)
+
+
+@@ -596,6 +597,28 @@
+         - JSON with tool call (for maintenance tasks)
+         - Natural language text (for conversation)
+         """
+         try:
++            # 🚀 PHASE OMEGA: Agent Router Integration
++            # Route to specialized agent BEFORE orchestrator for enhanced responses
++            try:
++                from ..agents.agent_router import get_agent_router
++
++                agent_router = get_agent_router()
++                agent_context = {
++                    "stage": meta_context.stage,
++                    "active_incident_id": meta_context.active_incident_id,
++                    "persona": meta_context.persona,
++                    "metadata": meta_context.metadata,
++                }
++
++                agent_response = await agent_router.route(
++                    message=user_message,
++                    context=agent_context,
++                )
++
++                logger.info(f"🤖 Agent router: {agent_response.get('agent_type', 'unknown')}")
++            except Exception as e:
++                logger.error(f"Agent router error: {e}", exc_info=True)
++                agent_response = None
++
+             client = self._get_openai_client()
+
+             # 🚨 CRITICAL PRE-FLIGHT CHECK: Garbage input filter
+@@ -640,6 +663,13 @@
+             # Build user message content
+             user_content_parts = []
+
++            # Add agent response as context enhancement if available
++            if agent_response and agent_response.get("agent_response"):
++                user_content_parts.append(
++                    f"**Agent Analysis ({agent_response.get('agent_type')}):**\n{agent_response.get('agent_response')}\n"
++                )
++
+             # Add meta-context
+             user_content_parts.append(f"**Meta-Context:**\n```json\n{self._format_meta_context(meta_context)}\n```")
+
+
+--- a/backend/app/routes/ai_webhooks_v3.py
++++ b/backend/app/routes/ai_webhooks_v3.py
+@@ -174,6 +174,29 @@
+
+         logger.info(f"Persona: {meta_context.persona}, Stage: {meta_context.stage}")
+
++        # 🚀 PHASE OMEGA: Agent Router Integration
++        # Get specialized agent response based on stage
++        agent_enhanced_context = None
++        try:
++            from ..agents.agent_router import get_agent_router
++
++            agent_router = get_agent_router()
++            agent_response = await agent_router.route(
++                message=message_text,
++                context={
++                    "stage": meta_context.stage,
++                    "active_incident_id": meta_context.active_incident_id,
++                    "persona": meta_context.persona,
++                    "metadata": meta_context.metadata,
++                },
++            )
++
++            if agent_response and agent_response.get("agent_response"):
++                agent_enhanced_context = agent_response.get("agent_response")
++                logger.info(f"🤖 Routed to {agent_response.get('agent_type', 'unknown')} agent")
++        except Exception as e:
++            logger.error(f"Agent routing error: {e}", exc_info=True)
++
+         # Append user message to conversation history
+         await context_manager.append_message(user_id, channel_id, "user", message_text)
+
+
+--- a/backend/app/services/meta_context_manager.py
++++ b/backend/app/services/meta_context_manager.py
+@@ -119,6 +119,40 @@
+         create_if_missing: bool = True,
+     ) -> MetaContext:
+         """Load meta-context from DynamoDB"""
++
++        # 🚀 PHASE OMEGA: Topic Graph Integration
++        # Load incident graph for multi-incident tracking
++        incident_graph = None
++        try:
++            from .incident_topic_graph import get_incident_graph
++
++            incident_graph = get_incident_graph(user_id)
++            logger.debug(f"📊 Loaded incident graph for user {user_id}")
++        except Exception as e:
++            logger.error(f"Error loading incident graph: {e}", exc_info=True)
++
+         try:
+             pk = f"user#{user_id}"
+             sk = f"channel#{channel_id}"
+@@ -141,6 +175,11 @@
+                     **context_data,
+                 )
+
++                # Attach incident graph to metadata
++                if incident_graph:
++                    meta_context.metadata["incident_graph"] = incident_graph.to_dict()
++                    logger.debug(f"📊 Attached incident graph with {len(incident_graph.nodes)} nodes")
++
+                 logger.info(f"Loaded context for user {user_id}, channel {channel_id}")
+                 return meta_context
+
+@@ -183,6 +222,11 @@
+         # Save to DynamoDB
+         await self.save_context(user_id, channel_id, meta_context)
+
++        # Initialize empty incident graph in metadata
++        if incident_graph:
++            meta_context.metadata["incident_graph"] = incident_graph.to_dict()
++
+         logger.info(f"Created new context for user {user_id}, channel {channel_id}")
+         return meta_context
+
+@@ -315,6 +359,38 @@
+         await self.update_context(user_id, channel_id, {"persona": persona})
+
+     async def set_active_incident(
++        self,
++        user_id: str,
++        channel_id: str,
++        incident_id: str,
++    ) -> None:
++        """Set active incident ID with topic graph integration"""
++
++        # 🚀 PHASE OMEGA: Register incident in topic graph
++        try:
++            from .incident_topic_graph import get_incident_graph
++            from ..services.dynamo_service import get_dynamo_service
++
++            incident_graph = get_incident_graph(user_id)
++            dynamo = get_dynamo_service()
++
++            # Get incident details
++            incident = dynamo.get_incident(incident_id, user_id)
++
++            if incident:
++                # Add to graph
++                incident_graph.add_incident(
++                    incident_id=incident_id,
++                    title=incident.get("title", ""),
++                    category=incident.get("category", "general"),
++                    description=incident.get("description", ""),
++                )
++                logger.info(f"📊 Added incident {incident_id} to topic graph")
++        except Exception as e:
++            logger.error(f"Error adding incident to topic graph: {e}", exc_info=True)
++
++        await self.update_context(
++            user_id,
++            channel_id,
++            {
++                "active_incident_id": incident_id,
++                "discovery": {"incident_id": incident_id},
++            },
++        )
++
++    async def detect_topic_shift(
+         self,
+         user_id: str,
+         channel_id: str,
+         incident_id: str,
++        user_message: str,
++    ) -> Dict[str, Any]:
++        """
++        🚀 PHASE OMEGA: Detect if user is switching topics to a different incident.
++
++        Returns:
++            dict with is_shift (bool), similarity_score (float), reason (str)
++        """
++        try:
++            from .incident_topic_graph import get_incident_graph
++
++            incident_graph = get_incident_graph(user_id)
++
++            shift_result = incident_graph.detect_topic_shift(
++                user_message=user_message,
++                current_incident_id=incident_id,
++            )
++
++            logger.info(f"📊 Topic shift detection: {shift_result}")
++            return shift_result
++
++        except Exception as e:
++            logger.error(f"Error detecting topic shift: {e}", exc_info=True)
++            return {"is_shift": False, "similarity_score": 0.0, "reason": "Error"}
++
++    async def set_active_incident_legacy(
++        self,
++        user_id: str,
++        channel_id: str,
++        incident_id: str,
+     ) -> None:
+-        """Set active incident ID"""
++        """Set active incident ID (legacy method without graph)"""
+         await self.update_context(
+             user_id,
+             channel_id,
+
+--- a/backend/app/functions/function_registry.py
++++ b/backend/app/functions/function_registry.py
+@@ -514,6 +514,35 @@
+             severity = severity or incident.get("severity", "medium")
+             user_message = user_message or incident.get("description", "")
+
++        # 🚀 PHASE OMEGA: Dynamic Discovery Integration
++        # Generate category-specific questions using LLM
++        if not questions:
++            try:
++                from ..services.dynamic_discovery import get_dynamic_discovery_generator
++
++                generator = get_dynamic_discovery_generator()
++
++                logger.info(f"🔮 Generating dynamic discovery questions for category={category}, severity={severity}")
++
++                dynamic_questions = await generator.generate_questions(
++                    category=category,
++                    severity=severity,
++                    user_message=user_message,
++                    max_questions=5,
++                )
++
++                if dynamic_questions and len(dynamic_questions) > 0:
++                    questions = dynamic_questions
++                    logger.info(f"✨ Generated {len(questions)} dynamic discovery questions")
++                else:
++                    logger.warning(f"⚠️ Dynamic discovery returned no questions, using defaults")
++                    questions = None
++
++            except Exception as e:
++                logger.error(f"Error generating dynamic discovery questions: {e}", exc_info=True)
++                logger.info(f"Falling back to static discovery questions")
++                questions = None
++
+         # Update incident status to 'discovery' if not already
+         if incident and incident.get("status") not in ["discovery", "discovery_complete", "diagnosing", "work_order", "completed"]:
+             dynamo.update_incident_status(
+@@ -522,10 +551,11 @@
+                 user_id=user_id or incident.get("user_id"),
+             )
+
+-        # Get adaptive questions based on category and severity
++        # Get adaptive questions based on category and severity (fallback if dynamic failed)
++        # This is now only used as fallback if dynamic discovery didn't work
+         discovery_questions = questions or get_discovery_questions(
+             category=category,
+             severity=severity,
+             user_message=user_message or "",
