@@ -270,21 +270,34 @@ NEVER mix both modes.
 
     def _is_garbage_input(self, user_message: str) -> bool:
         """
-        Enhanced garbage input detection for HYBRID MODE.
+        🚨 FIX: Enhanced garbage input detection for HYBRID MODE.
         Returns True if input should be rejected as garbage.
         """
         message_lower = user_message.lower().strip()
+        message_clean = user_message.strip()
 
         # Check for greetings (NOT garbage, but should not trigger incidents)
         greeting_patterns = ["hi", "hello", "hey", "sup", "ok", "thanks", "yes", "no", "k", "lol", "yo"]
         if message_lower in greeting_patterns:
             return False  # Greetings are valid, not garbage
 
-        # Garbage indicators
+        # 🚨 FIX: Enhanced garbage detection patterns
         garbage_checks = [
-            len(user_message.strip()) < 3,  # Too short
-            all(c in "!?.,;:'\"-_()[]{}/" for c in user_message.strip()),  # All punctuation
-            user_message.count(user_message.split()[0]) > 5 if user_message.split() else False,  # Repeated words
+            len(message_clean) < 3,  # Too short
+            all(c in "!?.,;:'\"-_()[]{}/" for c in message_clean),  # All punctuation
+
+            # 🚨 NEW: Detect random keyboard mashing (like "asdafd")
+            len(set(message_clean.lower())) <= 4 and len(message_clean) >= 4,  # Limited char variety
+
+            # 🚨 NEW: Detect repeated patterns ("why why why why")
+            len(message_clean.split()) > 2 and len(set(message_clean.split())) == 1,  # All same word
+
+            # 🚨 NEW: Detect gibberish (no vowels or only vowels)
+            len(message_clean) > 5 and not any(c in 'aeiou' for c in message_lower),  # No vowels
+            len(message_clean) > 5 and all(c in 'aeiou ' for c in message_lower),  # Only vowels
+
+            # 🚨 NEW: Detect single-character spam ("...", "???")
+            len(message_clean) > 3 and len(set(message_clean)) == 1,  # All same char
         ]
 
         # Check for maintenance keywords to override garbage detection
@@ -292,12 +305,13 @@ NEVER mix both modes.
             "leak", "broken", "clog", "drip", "smell", "noise", "crack", "malfunction",
             "issue", "problem", "repair", "fix", "stopped", "won't", "doesn't", "can't",
             "flooding", "sparking", "burning", "sink", "toilet", "fridge", "heater",
-            "ac", "door", "window", "outlet", "breaker", "emergency", "urgent"
+            "ac", "door", "window", "outlet", "breaker", "emergency", "urgent", "garage"
         ]
         has_maintenance_keyword = any(keyword in message_lower for keyword in maintenance_keywords)
 
         # If garbage AND no maintenance keywords → it's garbage
         if any(garbage_checks) and not has_maintenance_keyword:
+            logger.info(f"🗑️ Garbage detected: '{user_message[:50]}'")
             return True
 
         return False
