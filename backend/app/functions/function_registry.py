@@ -748,8 +748,10 @@ async def start_diagnosis(
     channel_id: str,
 ) -> FunctionResult:
     """
-    🚨 NEW FUNCTION: Start diagnosis stage after discovery completion.
+    🚨 CRITICAL FUNCTION: Start diagnosis stage after discovery completion.
     Analyzes discovery answers and provides category-specific diagnosis.
+
+    🚨 FIX: This function should ONLY be called ONCE per incident!
     """
     try:
         dynamo = get_dynamo_service()
@@ -764,8 +766,27 @@ async def start_diagnosis(
                 message=f"Cannot diagnose: incident {incident_id} not found",
             )
 
-        # Validate incident is in correct state
+        # 🚨 CRITICAL FIX: Check if diagnosis already completed
         incident_status = incident.get("status")
+
+        # If already diagnosing, check if we should prevent duplicate
+        if incident_status == "diagnosing":
+            logger.warning(f"⚠️ start_diagnosis called for already-diagnosing incident {incident_id}")
+            logger.warning(f"   This is likely a duplicate call - returning success without re-running")
+
+            # Return success with already_diagnosed flag
+            return FunctionResult(
+                success=True,
+                data={
+                    "incident_id": incident_id,
+                    "status": "diagnosing",
+                    "already_diagnosed": True,
+                    "diagnosis_summary": "Diagnosis already completed for this incident.",
+                },
+                message=f"Diagnosis already completed for incident {incident_id}",
+            )
+
+        # Validate incident is in correct state for NEW diagnosis
         if incident_status not in ["discovery_complete", "diagnosing"]:
             logger.warning(f"⚠️ Attempting diagnosis on incident with status {incident_status}")
             # Allow it but warn
@@ -813,6 +834,8 @@ async def start_diagnosis(
 
         logger.info(f"✅ Started diagnosis for incident {incident_id}")
 
+        # 🚨 CRITICAL FIX: Mark diagnosis as complete to prevent repeated calls
+        # This will be used by orchestrator guardrails
         return FunctionResult(
             success=True,
             data={
@@ -820,8 +843,11 @@ async def start_diagnosis(
                 "status": "diagnosing",
                 "diagnosis_summary": diagnosis_summary,
                 "recommended_action": _get_recommended_action(category, severity),
+                # 🚨 NEW: Flag indicating diagnosis was just completed
+                "diagnosis_complete": True,
+                "diagnosis_timestamp": datetime.utcnow().isoformat(),
             },
-            message=f"Diagnosis started for incident {incident_id}",
+            message=f"Diagnosis completed for incident {incident_id}",
         )
 
     except Exception as e:
@@ -945,6 +971,11 @@ async def create_work_order(
                 message=f"Cannot create work order: incident {incident_id} is already closed.",
             )
 
+        # 🚨 FIX: Validate incident is in diagnosing or discovery_complete stage
+        if incident_status not in ["diagnosing", "discovery_complete", "work_order"]:
+            logger.warning(f"⚠️ Creating work order for incident with status {incident_status}")
+            # Allow it but warn
+
         job_data = {
             "job_id": job_id,
             "incident_id": incident_id,
@@ -1006,6 +1037,8 @@ async def create_work_order(
 
         logger.info(f"✅ Created work order {job_id} for incident {incident_id}")
 
+        # 🚨 CRITICAL FIX: Signal that diagnosis tracking should be cleared
+        # since we've moved past the diagnosis stage
         return FunctionResult(
             success=True,
             data={
@@ -1015,6 +1048,9 @@ async def create_work_order(
                 "title": title,
                 "estimated_cost": estimated_cost,
                 "created_at": now,
+                # 🚨 NEW: Signal to clear diagnosis tracking
+                "clear_diagnosis_tracking": True,
+                "stage_transition": "diagnosing → work_order",
             },
             message=f"Work order {job_id} created successfully",
         )

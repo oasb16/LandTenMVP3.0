@@ -439,6 +439,91 @@ class MetaContextManager:
         except Exception as e:
             logger.error(f"Error deleting context: {e}", exc_info=True)
 
+    # ==================== DIAGNOSIS TRACKING METHODS ====================
+
+    async def set_diagnosis_complete(
+        self,
+        user_id: str,
+        channel_id: str,
+        incident_id: str,
+    ) -> None:
+        """
+        🚨 CRITICAL FIX: Mark diagnosis as completed for an incident.
+        This prevents the orchestrator from calling start_diagnosis multiple times.
+        """
+        await self.update_context(
+            user_id,
+            channel_id,
+            {
+                "metadata": {
+                    "diagnosis_complete": True,
+                    "last_diagnosis_time": datetime.utcnow().isoformat(),
+                    "diagnosed_incident_id": incident_id,
+                }
+            },
+        )
+        logger.info(f"✅ Marked diagnosis complete for incident {incident_id}")
+
+    async def track_function_call(
+        self,
+        user_id: str,
+        channel_id: str,
+        function_name: str,
+    ) -> None:
+        """
+        Track the last function call made by the orchestrator.
+        Used to prevent repeated calls to the same function.
+        """
+        await self.update_context(
+            user_id,
+            channel_id,
+            {
+                "metadata": {
+                    "last_tool_called": function_name,
+                    "last_tool_called_at": datetime.utcnow().isoformat(),
+                }
+            },
+        )
+        logger.info(f"📝 Tracked function call: {function_name}")
+
+    async def get_diagnosis_status(
+        self,
+        user_id: str,
+        channel_id: str,
+    ) -> Dict[str, Any]:
+        """
+        Get diagnosis completion status for current incident.
+        Returns dict with diagnosis_complete, last_tool_called, etc.
+        """
+        meta_context = await self.load_context(user_id, channel_id)
+        return {
+            "diagnosis_complete": meta_context.metadata.get("diagnosis_complete", False),
+            "last_tool_called": meta_context.metadata.get("last_tool_called"),
+            "last_diagnosis_time": meta_context.metadata.get("last_diagnosis_time"),
+            "diagnosed_incident_id": meta_context.metadata.get("diagnosed_incident_id"),
+        }
+
+    async def clear_diagnosis_tracking(
+        self,
+        user_id: str,
+        channel_id: str,
+    ) -> None:
+        """
+        Clear diagnosis tracking when incident is completed or new incident starts.
+        """
+        await self.update_context(
+            user_id,
+            channel_id,
+            {
+                "metadata": {
+                    "diagnosis_complete": False,
+                    "last_diagnosis_time": None,
+                    "diagnosed_incident_id": None,
+                }
+            },
+        )
+        logger.info(f"🧹 Cleared diagnosis tracking")
+
 
 # Singleton instance
 _meta_context_manager = None

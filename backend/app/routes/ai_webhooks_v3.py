@@ -278,6 +278,39 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
                     context_updates["stage"] = "discovery_complete"
                     logger.info("✅ Discovery complete, transitioning to discovery_complete stage")
 
+                # 🚨 CRITICAL FIX: Track diagnosis completion
+                if orchestrator_output.function_call.name == "start_diagnosis":
+                    if function_result.data.get("diagnosis_complete"):
+                        # Mark diagnosis as complete to prevent repeated calls
+                        context_updates["metadata"] = {
+                            **meta_context.metadata,
+                            "diagnosis_complete": True,
+                            "last_tool_called": "start_diagnosis",
+                            "last_diagnosis_time": function_result.data.get("diagnosis_timestamp"),
+                        }
+                        logger.info("✅ Diagnosis complete, marked in metadata to prevent duplicate calls")
+                    elif function_result.data.get("already_diagnosed"):
+                        logger.warning("⚠️ start_diagnosis was called but diagnosis already completed (duplicate blocked)")
+
+                # 🚨 CRITICAL FIX: Clear diagnosis tracking when work order created
+                if orchestrator_output.function_call.name == "create_work_order":
+                    if function_result.data.get("clear_diagnosis_tracking"):
+                        # Clear diagnosis tracking since we've moved to work_order stage
+                        context_updates["metadata"] = {
+                            **meta_context.metadata,
+                            "diagnosis_complete": False,
+                            "last_tool_called": "create_work_order",
+                            "diagnosed_incident_id": None,
+                        }
+                        logger.info("✅ Cleared diagnosis tracking after work order creation")
+
+                # 🚨 Track all function calls for debugging
+                if orchestrator_output.function_call.name:
+                    if "metadata" not in context_updates:
+                        context_updates["metadata"] = {**meta_context.metadata}
+                    context_updates["metadata"]["last_tool_called"] = orchestrator_output.function_call.name
+                    context_updates["metadata"]["last_tool_called_at"] = time.time()
+
                 # Apply all context updates
                 if context_updates:
                     meta_context = await context_manager.update_context(user_id, channel_id, context_updates)

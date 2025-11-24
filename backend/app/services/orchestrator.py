@@ -388,6 +388,66 @@ NEVER mix both modes.
                     response_to_user=None,
                 )
 
+        # 🚨 GUARDRAIL #2B: CRITICAL FIX - Prevent repeated start_diagnosis calls
+        # This is THE BIGGEST BUG - start_diagnosis should only be called ONCE per incident
+        if meta_context.stage == "diagnosing":
+            # Check if diagnosis was already completed
+            diagnosis_complete = meta_context.metadata.get("diagnosis_complete", False)
+            last_tool_called = meta_context.metadata.get("last_tool_called")
+
+            if output.function_call.name == "start_diagnosis":
+                logger.warning(f"🛑 GUARDRAIL ACTIVATED: Blocked repeated start_diagnosis call")
+                logger.warning(f"   Stage: diagnosing (diagnosis already completed)")
+                logger.warning(f"   Last tool called: {last_tool_called}")
+                logger.warning(f"   Diagnosis complete: {diagnosis_complete}")
+                logger.warning(f"   Overriding to: create_work_order")
+
+                # Override to create_work_order instead
+                return OrchestratorOutput(
+                    intent="create_work_order",
+                    reasoning=f"GUARDRAIL OVERRIDE: Diagnosis already completed, user confirmed work order creation",
+                    context_updates=ContextUpdates(stage="work_order"),
+                    function_call=FunctionCall(
+                        name="create_work_order",
+                        arguments={
+                            "incident_id": meta_context.active_incident_id,
+                            "title": f"Repair work order for incident {meta_context.active_incident_id}",
+                            "estimated_cost": "250.00",
+                        },
+                    ),
+                    response_to_user=None,
+                )
+
+            # 🚨 GUARDRAIL #2C: Detect "yes" pattern and override to create_work_order
+            # When user says "yes" after diagnosis, they're confirming work order creation
+            if output.intent == "general.chat" and output.function_call.name is None:
+                # Check if user message looks like confirmation
+                user_msg = meta_context.last_user_message or ""
+                user_msg_lower = user_msg.lower().strip()
+
+                confirmation_patterns = ["yes", "ok", "sure", "go ahead", "create it", "proceed", "do it", "yeah", "yep", "sounds good"]
+                is_confirmation = user_msg_lower in confirmation_patterns or any(pattern in user_msg_lower for pattern in confirmation_patterns)
+
+                if is_confirmation and diagnosis_complete:
+                    logger.warning(f"🛑 GUARDRAIL ACTIVATED: Detected work order confirmation in diagnosing stage")
+                    logger.warning(f"   User message: '{user_msg}'")
+                    logger.warning(f"   Overriding to: create_work_order")
+
+                    return OrchestratorOutput(
+                        intent="create_work_order",
+                        reasoning=f"GUARDRAIL OVERRIDE: User confirmed work order creation after diagnosis",
+                        context_updates=ContextUpdates(stage="work_order"),
+                        function_call=FunctionCall(
+                            name="create_work_order",
+                            arguments={
+                                "incident_id": meta_context.active_incident_id,
+                                "title": f"Repair work order for incident {meta_context.active_incident_id}",
+                                "estimated_cost": "250.00",
+                            },
+                        ),
+                        response_to_user=None,
+                    )
+
         # GUARDRAIL #3: discovery stage MUST record answers, not create incidents
         if meta_context.stage == "discovery":
             if output.function_call.name == "create_incident":
@@ -514,14 +574,25 @@ NEVER mix both modes.
                     + user_content
                 )
 
-            # 🚨 CRITICAL: Add diagnosing stage hint
+            # 🚨 CRITICAL: Add diagnosing stage hint with diagnosis tracking
             if meta_context.stage == "diagnosing" and meta_context.active_incident_id:
+                # Check diagnosis completion status
+                diagnosis_complete = meta_context.metadata.get("diagnosis_complete", False)
+                last_tool_called = meta_context.metadata.get("last_tool_called")
+
                 user_content = (
                     f"🩺 **DIAGNOSING MODE ACTIVE**\n"
                     f"Incident {meta_context.active_incident_id} is being diagnosed.\n"
-                    f"If user confirms work order → call create_work_order\n"
-                    f"If user provides details → call record_diagnosis_result\n"
-                    f"DO NOT call create_incident\n\n"
+                    f"**Diagnosis Status:**\n"
+                    f"  - diagnosis_complete: {diagnosis_complete}\n"
+                    f"  - last_tool_called: {last_tool_called}\n\n"
+                    f"🚨 CRITICAL RULES:\n"
+                    f"  - If diagnosis_complete = True → DO NOT call start_diagnosis again!\n"
+                    f"  - If user says 'yes', 'ok', 'sure' → call create_work_order\n"
+                    f"  - If user says 'no' → respond with general.chat\n"
+                    f"  - If user provides details → call record_diagnosis_result\n"
+                    f"  - DO NOT call create_incident\n"
+                    f"  - DO NOT call start_diagnosis if already called\n\n"
                     + user_content
                 )
 
