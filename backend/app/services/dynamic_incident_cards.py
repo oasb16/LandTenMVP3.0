@@ -241,3 +241,9 @@ def get_dynamic_incident_card_generator() -> DynamicIncidentCardGenerator:
     if _dynamic_incident_card_generator is None:
         _dynamic_incident_card_generator = DynamicIncidentCardGenerator()
     return _dynamic_incident_card_generator
+
+
+# Alias for backward compatibility
+def get_card_generator() -> DynamicIncidentCardGenerator:
+    """Alias for get_dynamic_incident_card_generator() for backward compatibility"""
+    return get_dynamic_incident_card_generator()

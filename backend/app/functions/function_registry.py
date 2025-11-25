@@ -235,18 +235,38 @@ async def create_incident(
 
             card_generator = get_card_generator()
 
-            card_data = await card_generator.generate_incident_card(
-                incident_id=incident_id,
-                title=title,
-                description=description,
-                category=category,
-                severity=severity,
-                urgency=urgency,
-                status="detected",
+            # Build incident dict for card generator
+            incident_dict = {
+                "incident_id": incident_id,
+                "title": title,
+                "description": description,
+                "category": category,
+                "severity": severity,
+                "urgency": urgency,
+                "status": "detected",
+                "created_at": now,
+                "updated_at": now,
+            }
+
+            card_data = card_generator.generate_incident_card(
+                incident=incident_dict,
+                include_discovery=False,
+                include_diagnosis=False,
             )
 
-            if card_data.get("success"):
-                incident_card_text = card_data["card_text"]
+            if card_data.get("type") == "incident_card":
+                # Convert card structure to text representation
+                header = card_data.get("header", {})
+                incident_card_text = (
+                    f"📄 **Incident Reported**\n\n"
+                    f"**Incident ID:** {header.get('incident_id', incident_id)}\n"
+                    f"**Title:** {header.get('title', title)}\n"
+                    f"**Category:** {category}\n"
+                    f"**Severity:** {severity.upper()}\n"
+                    f"**Urgency:** {urgency}\n\n"
+                    f"**Details:**\n{collapse_text(description, limit=300)}\n\n"
+                    f"---\nWe'll gather more details to resolve this quickly."
+                )
                 logger.info(f"✨ Generated dynamic incident card")
             else:
                 collapsed_description = collapse_text(description, limit=300)
