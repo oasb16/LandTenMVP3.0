@@ -109,10 +109,10 @@ NEVER mix both modes.
 
             # Discovery state
             "discovery": {
-                "incident_id": meta_context.discovery.incident_id if hasattr(meta_context.discovery, "incident_id") else None,
-                "question_index": meta_context.discovery.question_index,
-                "questions": meta_context.discovery.questions,
-                "answers": meta_context.discovery.answers,
+                "incident_id": meta_context.discovery.incident_id if (meta_context.discovery and hasattr(meta_context.discovery, "incident_id")) else None,
+                "question_index": meta_context.discovery.question_index if meta_context.discovery else 0,
+                "questions": meta_context.discovery.questions if meta_context.discovery else [],
+                "answers": meta_context.discovery.answers if meta_context.discovery else {},
                 "is_active": meta_context.stage == "discovery" and meta_context.active_incident_id is not None,
             },
 

@@ -1951,30 +1951,34 @@ async def execute_function(
     except Exception as e:
         logger.error(f"Error checking dynamic tools: {e}", exc_info=True)
 
-    # Dynamic tool sandbox: ONLY trigger for explicit dynamic tool patterns
-    # Must be VERY specific to avoid treating normal functions as dynamic tools
-    if function_name and (
-        function_name not in FUNCTION_IMPLEMENTATIONS and (
-            function_name.startswith(("run_code", "eval_js", "exec_python", "execute_code",
-                                     "sandbox_", "plugin_", "dynamic_tool_", "analyze_", "check_", "diagnose_")) or
-            # Also catch common LLM hallucinations
-            function_name.startswith(("get_incident_by_", "search_", "find_",
-                                     "query_", "lookup_", "fetch_"))
-        )
-    ):
-        logger.info(f"Dynamic tool sandbox triggered for: {function_name}")
-        logger.warning(f"⚠️ LLM requested dynamic tool: {function_name}")
-        return FunctionResult(
-            success=True,
-            data={
-                "type": "dynamic_tool_request",
-                "tool_idea": function_name,
-                "arguments": arguments,
-                "context": context,
-            },
-            error=None,
-            message=f"Dynamic tool request captured: {function_name}. System can generate this tool on request.",
-        )
+    # Dynamic tool sandbox: Check if function is registered dynamic tool
+    # STRICT: Only return success for tools that ACTUALLY EXIST
+    # Do NOT mask hallucinations - let them fail properly
+    if function_name and function_name not in FUNCTION_IMPLEMENTATIONS:
+        # Check if it's a registered dynamic tool
+        from ..dynamic_tools.tool_runtime import get_dynamic_tool_runtime
+        runtime = get_dynamic_tool_runtime()
+
+        if function_name in runtime.tools:
+            # Tool exists - this is handled above in the dynamic tools section
+            # If we got here, something went wrong - log and fail
+            logger.error(f"Dynamic tool {function_name} exists but wasn't executed above")
+
+        # Tool doesn't exist - check if it's an explicit tool generation request
+        if function_name.startswith(("generate_tool_", "create_tool_", "register_tool_")):
+            logger.info(f"🔧 Tool generation request: {function_name}")
+            return FunctionResult(
+                success=True,
+                data={
+                    "type": "tool_generation_request",
+                    "tool_name": function_name,
+                    "arguments": arguments,
+                },
+                message=f"Tool generation request captured: {function_name}",
+            )
+
+        # Not a dynamic tool, not a generation request - this is a hallucination
+        # DO NOT return success - let it fail properly
 
     if function_name not in FUNCTION_IMPLEMENTATIONS:
         logger.warning(f"Unknown function requested: {function_name}")
