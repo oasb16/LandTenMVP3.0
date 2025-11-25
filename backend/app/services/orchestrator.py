@@ -659,7 +659,7 @@ NEVER mix both modes.
                     incident_graph = get_incident_graph(meta_context.user_id)
 
                     shift_result = incident_graph.detect_topic_shift(
-                        user_message=user_message,
+                        new_message=user_message,
                         current_incident_id=meta_context.active_incident_id
                     )
 

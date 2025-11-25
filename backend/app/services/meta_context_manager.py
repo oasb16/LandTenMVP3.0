@@ -679,7 +679,7 @@ class MetaContextManager:
             incident_graph = get_incident_graph(user_id)
 
             shift_result = incident_graph.detect_topic_shift(
-                user_message=user_message,
+                new_message=user_message,
                 current_incident_id=incident_id,
             )
 

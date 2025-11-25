@@ -223,7 +223,7 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
                     logger.error(f"Failed to save incident graph: {save_err}")
 
                 shift_result = incident_graph.detect_topic_shift(
-                    user_message=message_text,
+                    new_message=message_text,
                     current_incident_id=meta_context.active_incident_id,
                 )
 
