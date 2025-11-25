@@ -215,6 +215,113 @@ class SkillEvolutionEngine:
             logger.error(f"❌ Failed to generate skill: {result.get('errors')}")
             return None
 
+    async def record_discovery_pattern(
+        self,
+        category: str,
+        severity: str,
+        user_message: str,
+        questions_generated: List[str],
+    ):
+        """
+        Record discovery question pattern for skill evolution.
+
+        Args:
+            category: Incident category
+            severity: Severity level
+            user_message: User's initial message
+            questions_generated: List of generated discovery questions
+        """
+        logger.debug(f"📊 Recording discovery pattern: {category}/{severity}")
+        # Store pattern for future analysis
+        # In production, this would feed into pattern detection
+        pass
+
+    async def record_diagnosis_pattern(
+        self,
+        category: str,
+        severity: str,
+        discovery_answers: Dict[str, str],
+        diagnosis_summary: str,
+    ):
+        """
+        Record diagnosis pattern for skill evolution.
+
+        Args:
+            category: Incident category
+            severity: Severity level
+            discovery_answers: Answers from discovery phase
+            diagnosis_summary: Generated diagnosis summary
+        """
+        logger.debug(f"📊 Recording diagnosis pattern: {category}/{severity}")
+        # Store pattern for future analysis
+        # In production, this would feed into pattern detection
+        pass
+
+    async def suggest_diagnostic_tool(self, category: str) -> Dict[str, Any]:
+        """
+        Suggest creating a diagnostic tool for a category.
+
+        Args:
+            category: Category to analyze
+
+        Returns:
+            Dict with should_create (bool), tool_name (str), reason (str)
+        """
+        # Check if we have enough patterns for this category
+        incidents = self.pattern_detector.incident_patterns.get(category, [])
+
+        if len(incidents) >= self.pattern_detector.threshold_for_skill_creation:
+            pattern = self.pattern_detector._extract_pattern(incidents)
+            if pattern:
+                tool_name = f"diagnose_{category}_{pattern['common_keywords'][0]}"
+                return {
+                    "should_create": True,
+                    "tool_name": tool_name,
+                    "reason": f"Detected {len(incidents)} similar {category} incidents",
+                    "pattern": pattern,
+                }
+
+        return {
+            "should_create": False,
+            "tool_name": None,
+            "reason": "Not enough patterns detected yet",
+        }
+
+    async def record_tool_execution(
+        self,
+        tool_name: str,
+        arguments: Dict[str, Any],
+        result: Any,
+        success: bool,
+        user_id: str,
+    ):
+        """
+        Record dynamic tool execution for tracking and improvement.
+
+        Args:
+            tool_name: Name of executed tool
+            arguments: Arguments passed to tool
+            result: Result returned by tool
+            success: Whether execution succeeded
+            user_id: User who triggered execution
+        """
+        logger.debug(f"📊 Recording tool execution: {tool_name} (success={success})")
+
+        # Update usage stats if tool is in generated_skills
+        if tool_name in self.generated_skills:
+            self.generated_skills[tool_name]["usage_count"] += 1
+            self.generated_skills[tool_name]["last_used_at"] = datetime.utcnow().isoformat()
+
+            if not success:
+                # Track failures for potential improvement
+                if "failures" not in self.generated_skills[tool_name]:
+                    self.generated_skills[tool_name]["failures"] = []
+                self.generated_skills[tool_name]["failures"].append({
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "arguments": arguments,
+                    "user_id": user_id,
+                })
+
     def _generate_skill_code_template(
         self,
         skill_name: str,
@@ -264,3 +371,9 @@ def get_skill_evolution_engine() -> SkillEvolutionEngine:
     if _skill_evolution_engine is None:
         _skill_evolution_engine = SkillEvolutionEngine()
     return _skill_evolution_engine
+
+
+# Alias for backward compatibility
+def get_skills_recorder() -> SkillEvolutionEngine:
+    """Alias for get_skill_evolution_engine() for backward compatibility"""
+    return get_skill_evolution_engine()

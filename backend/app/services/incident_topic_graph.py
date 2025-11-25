@@ -4,9 +4,11 @@ Enables handling of multiple concurrent incidents with automatic topic detection
 """
 import logging
 import uuid
+import json
 from typing import Dict, Any, List, Optional, Set
 from datetime import datetime
 from collections import defaultdict
+from decimal import Decimal
 
 logger = logging.getLogger(__name__)
 
@@ -270,15 +272,103 @@ class IncidentTopicGraph:
     def save(self):
         """
         PHASE OMEGA OBJECTIVE #3: TOPIC GRAPH PERSISTENCE
-        Save graph to persistent storage
+        Save graph to persistent storage (DynamoDB)
         """
         try:
-            # In production, this would save to DynamoDB or Redis
-            # For now, we keep it in memory with logging
-            logger.info(f"💾 Saving incident graph for user {self.user_id} ({len(self.nodes)} nodes, {len(self.edges)} edges)")
-            # TODO: Implement actual persistence to DynamoDB
+            from ..services.dynamo_service import get_dynamo_service
+
+            dynamo = get_dynamo_service()
+            table = dynamo._get_table()
+
+            # Serialize graph to dict
+            graph_data = self.to_dict()
+
+            # Convert to DynamoDB-compatible format (replace floats with Decimal)
+            graph_data_serialized = self._convert_to_dynamo_format(graph_data)
+
+            # Save to DynamoDB with PK/SK pattern
+            item = {
+                "PK": f"USER#{self.user_id}",
+                "SK": "INCIDENT_GRAPH",
+                "user_id": self.user_id,
+                "graph_data": json.dumps(graph_data_serialized),
+                "node_count": len(self.nodes),
+                "edge_count": len(self.edges),
+                "updated_at": datetime.utcnow().isoformat(),
+                "ttl": int((datetime.utcnow().timestamp() + 30 * 24 * 60 * 60)),  # 30 days TTL
+            }
+
+            table.put_item(Item=item)
+
+            logger.info(f"💾 Saved incident graph for user {self.user_id} ({len(self.nodes)} nodes, {len(self.edges)} edges)")
+
         except Exception as e:
-            logger.error(f"Error saving incident graph: {e}", exc_info=True)
+            logger.error(f"Error saving incident graph to DynamoDB: {e}", exc_info=True)
+
+    def _convert_to_dynamo_format(self, data: Any) -> Any:
+        """
+        Recursively convert data to DynamoDB-compatible format.
+        Replaces float with Decimal, handles sets, etc.
+        """
+        if isinstance(data, dict):
+            return {k: self._convert_to_dynamo_format(v) for k, v in data.items()}
+        elif isinstance(data, list):
+            return [self._convert_to_dynamo_format(item) for item in data]
+        elif isinstance(data, set):
+            return list(data)  # Convert sets to lists
+        elif isinstance(data, float):
+            return Decimal(str(data))
+        else:
+            return data
+
+    @classmethod
+    def load_from_dynamodb(cls, user_id: str) -> Optional["IncidentTopicGraph"]:
+        """
+        Load graph from DynamoDB for a user.
+
+        Args:
+            user_id: User ID to load graph for
+
+        Returns:
+            IncidentTopicGraph instance or None if not found
+        """
+        try:
+            from ..services.dynamo_service import get_dynamo_service
+
+            dynamo = get_dynamo_service()
+            table = dynamo._get_table()
+
+            # Query DynamoDB
+            response = table.get_item(
+                Key={
+                    "PK": f"USER#{user_id}",
+                    "SK": "INCIDENT_GRAPH",
+                }
+            )
+
+            if "Item" not in response:
+                logger.debug(f"No saved incident graph found for user {user_id}")
+                return None
+
+            item = response["Item"]
+            graph_data_json = item.get("graph_data")
+
+            if not graph_data_json:
+                return None
+
+            # Deserialize graph data
+            graph_data = json.loads(graph_data_json)
+
+            # Reconstruct graph from dict
+            graph = cls.from_dict(graph_data)
+
+            logger.info(f"📂 Loaded incident graph for user {user_id} ({len(graph.nodes)} nodes, {len(graph.edges)} edges)")
+
+            return graph
+
+        except Exception as e:
+            logger.error(f"Error loading incident graph from DynamoDB: {e}", exc_info=True)
+            return None
 
     def _extract_keywords(self, text: str) -> Set[str]:
         """Extract meaningful keywords from text"""
@@ -371,12 +461,28 @@ class IncidentTopicGraph:
         return graph
 
 
-# In-memory storage (should be persisted to DB in production)
+# In-memory cache for performance (backed by DynamoDB)
 _incident_graphs: Dict[str, IncidentTopicGraph] = {}
 
 
 def get_incident_graph(user_id: str) -> IncidentTopicGraph:
-    """Get or create incident graph for user"""
-    if user_id not in _incident_graphs:
-        _incident_graphs[user_id] = IncidentTopicGraph(user_id)
-    return _incident_graphs[user_id]
+    """
+    Get or create incident graph for user.
+    First checks in-memory cache, then loads from DynamoDB, or creates new.
+    """
+    # Check in-memory cache first
+    if user_id in _incident_graphs:
+        return _incident_graphs[user_id]
+
+    # Try to load from DynamoDB
+    graph = IncidentTopicGraph.load_from_dynamodb(user_id)
+
+    if graph is None:
+        # Create new graph if not found
+        logger.debug(f"Creating new incident graph for user {user_id}")
+        graph = IncidentTopicGraph(user_id)
+
+    # Cache in memory
+    _incident_graphs[user_id] = graph
+
+    return graph
