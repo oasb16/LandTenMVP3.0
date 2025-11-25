@@ -43,7 +43,6 @@ class DynamicToolValidator:
         ast.AsyncFunctionDef: "Async functions not allowed",
         ast.AsyncFor: "Async for loops not allowed",
         ast.AsyncWith: "Async with not allowed",
-        ast.Exec: "Exec statements not allowed",
         ast.Global: "Global variable modification not allowed",
         ast.Nonlocal: "Nonlocal variable modification not allowed",
     }
