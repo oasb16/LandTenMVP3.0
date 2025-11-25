@@ -1,6 +1,12 @@
 """
 Auto-Evolving Skills - System learns from repeated patterns and creates new dynamic tools.
 Makes the agent grow intelligence over time.
+
+ENHANCEMENTS:
+- Metrics tracking for pattern detection
+- Skill pruning for unused tools
+- Performance optimization
+- Health monitoring
 """
 import logging
 from typing import Dict, Any, List, Optional
@@ -10,6 +16,14 @@ from datetime import datetime, timedelta
 from ..dynamic_tools.tool_runtime import get_dynamic_tool_runtime
 
 logger = logging.getLogger(__name__)
+
+# Try to import resilience features (graceful degradation if not available)
+try:
+    from .resilience import get_metrics_collector, monitored
+    RESILIENCE_AVAILABLE = True
+except ImportError:
+    RESILIENCE_AVAILABLE = False
+    logger.warning("Resilience module not available - running without metrics")
 
 
 class PatternDetector:
@@ -147,6 +161,13 @@ class SkillEvolutionEngine:
         self.pattern_detector = PatternDetector()
         self.runtime = get_dynamic_tool_runtime()
         self.generated_skills: Dict[str, Dict[str, Any]] = {}
+        self.skill_usage_threshold = 1  # Minimum usage count to keep skill
+        self.skill_age_threshold_days = 30  # Auto-prune skills older than this
+
+        if RESILIENCE_AVAILABLE:
+            self.metrics = get_metrics_collector()
+        else:
+            self.metrics = None
 
     async def record_and_analyze(
         self,
@@ -321,6 +342,159 @@ class SkillEvolutionEngine:
                     "arguments": arguments,
                     "user_id": user_id,
                 })
+
+    def prune_unused_skills(self, dry_run: bool = False) -> Dict[str, Any]:
+        """
+        Remove skills that haven't been used in a while.
+        Keeps the system lean and efficient.
+
+        Args:
+            dry_run: If True, only report what would be pruned
+
+        Returns:
+            Dict with pruned_count, kept_count, details
+        """
+        logger.info("🔍 Running skill pruning analysis...")
+
+        cutoff_date = datetime.utcnow() - timedelta(days=self.skill_age_threshold_days)
+        skills_to_prune = []
+        skills_to_keep = []
+
+        for skill_name, skill_data in self.generated_skills.items():
+            created_at = datetime.fromisoformat(skill_data["created_at"])
+            usage_count = skill_data.get("usage_count", 0)
+
+            # Prune if: old AND never/rarely used
+            if created_at < cutoff_date and usage_count < self.skill_usage_threshold:
+                skills_to_prune.append({
+                    "name": skill_name,
+                    "age_days": (datetime.utcnow() - created_at).days,
+                    "usage_count": usage_count,
+                    "reason": "Old and unused",
+                })
+            else:
+                skills_to_keep.append(skill_name)
+
+        if not dry_run:
+            for skill_info in skills_to_prune:
+                skill_name = skill_info["name"]
+                # Delete from runtime
+                self.runtime.delete_tool(skill_name)
+                # Remove from tracking
+                del self.generated_skills[skill_name]
+                logger.info(f"🗑️ Pruned skill: {skill_name} ({skill_info['reason']})")
+
+        result = {
+            "pruned_count": len(skills_to_prune),
+            "kept_count": len(skills_to_keep),
+            "skills_pruned": skills_to_prune if dry_run else [s["name"] for s in skills_to_prune],
+            "dry_run": dry_run,
+        }
+
+        if RESILIENCE_AVAILABLE and self.metrics:
+            self.metrics.gauge("skills.pruned_total", len(skills_to_prune))
+            self.metrics.gauge("skills.active_total", len(skills_to_keep))
+
+        logger.info(f"✅ Pruning complete: {len(skills_to_prune)} pruned, {len(skills_to_keep)} kept")
+
+        return result
+
+    def get_skill_performance_report(self) -> Dict[str, Any]:
+        """
+        Generate performance report for all skills.
+        Useful for monitoring and optimization.
+
+        Returns:
+            Dict with performance metrics per skill
+        """
+        report = {
+            "total_skills": len(self.generated_skills),
+            "timestamp": datetime.utcnow().isoformat(),
+            "skills": {},
+        }
+
+        for skill_name, skill_data in self.generated_skills.items():
+            usage_count = skill_data.get("usage_count", 0)
+            failures = skill_data.get("failures", [])
+            created_at = datetime.fromisoformat(skill_data["created_at"])
+            age_days = (datetime.utcnow() - created_at).days
+
+            success_rate = 1.0
+            if usage_count > 0:
+                failure_count = len(failures)
+                success_rate = (usage_count - failure_count) / usage_count
+
+            report["skills"][skill_name] = {
+                "usage_count": usage_count,
+                "failure_count": len(failures),
+                "success_rate": success_rate,
+                "age_days": age_days,
+                "category": skill_data.get("category", "unknown"),
+                "last_used": skill_data.get("last_used_at", "never"),
+                "health_status": self._assess_skill_health(usage_count, success_rate, age_days),
+            }
+
+        return report
+
+    def _assess_skill_health(self, usage_count: int, success_rate: float, age_days: int) -> str:
+        """Assess health status of a skill"""
+        if usage_count == 0:
+            return "unused"
+        elif success_rate < 0.5:
+            return "failing"
+        elif usage_count > 10 and success_rate > 0.9:
+            return "excellent"
+        elif success_rate > 0.7:
+            return "good"
+        else:
+            return "degraded"
+
+    def optimize_skill(self, skill_name: str) -> Dict[str, Any]:
+        """
+        Analyze skill failures and suggest improvements.
+
+        Args:
+            skill_name: Name of skill to optimize
+
+        Returns:
+            Dict with optimization suggestions
+        """
+        if skill_name not in self.generated_skills:
+            return {"error": "Skill not found"}
+
+        skill_data = self.generated_skills[skill_name]
+        failures = skill_data.get("failures", [])
+
+        if not failures:
+            return {
+                "skill_name": skill_name,
+                "status": "healthy",
+                "message": "No failures detected",
+            }
+
+        # Analyze failure patterns
+        failure_patterns = defaultdict(int)
+        for failure in failures:
+            args = failure.get("arguments", {})
+            # Simple pattern: check which arguments appear in failures
+            for arg_name in args.keys():
+                failure_patterns[arg_name] += 1
+
+        suggestions = []
+        if len(failures) > 5:
+            suggestions.append("Consider adding input validation")
+
+        if failure_patterns:
+            most_problematic = max(failure_patterns.items(), key=lambda x: x[1])
+            suggestions.append(f"Parameter '{most_problematic[0]}' appears in most failures")
+
+        return {
+            "skill_name": skill_name,
+            "status": "needs_improvement",
+            "failure_count": len(failures),
+            "suggestions": suggestions,
+            "failure_patterns": dict(failure_patterns),
+        }
 
     def _generate_skill_code_template(
         self,

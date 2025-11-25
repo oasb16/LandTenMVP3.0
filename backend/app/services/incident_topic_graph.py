@@ -269,10 +269,14 @@ class IncidentTopicGraph:
         self.add_edge(incident_id, job_id, "work_order_created")
         logger.info(f"📋 Added work order {job_id} for incident {incident_id}")
 
-    def save(self):
+    def save(self, retry_count: int = 0, max_retries: int = 3):
         """
         PHASE OMEGA OBJECTIVE #3: TOPIC GRAPH PERSISTENCE
-        Save graph to persistent storage (DynamoDB)
+        Save graph to persistent storage (DynamoDB) with retry logic.
+
+        Args:
+            retry_count: Current retry attempt (internal)
+            max_retries: Maximum number of retries
         """
         try:
             from ..services.dynamo_service import get_dynamo_service
@@ -303,7 +307,15 @@ class IncidentTopicGraph:
             logger.info(f"💾 Saved incident graph for user {self.user_id} ({len(self.nodes)} nodes, {len(self.edges)} edges)")
 
         except Exception as e:
-            logger.error(f"Error saving incident graph to DynamoDB: {e}", exc_info=True)
+            if retry_count < max_retries:
+                import time
+                wait_time = 2 ** retry_count  # Exponential backoff: 1s, 2s, 4s
+                logger.warning(f"⚠️ Failed to save graph (attempt {retry_count + 1}/{max_retries}), retrying in {wait_time}s: {e}")
+                time.sleep(wait_time)
+                self.save(retry_count=retry_count + 1, max_retries=max_retries)
+            else:
+                logger.error(f"❌ Failed to save incident graph after {max_retries} retries: {e}", exc_info=True)
+                # Don't raise - gracefully degrade to in-memory only
 
     def _convert_to_dynamo_format(self, data: Any) -> Any:
         """
