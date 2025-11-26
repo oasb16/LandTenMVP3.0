@@ -167,7 +167,8 @@ class MetaContextManager:
 
                     # Sync active incident to graph if missing
                     if meta_context.active_incident_id:
-                        if meta_context.active_incident_id not in [n["incident_id"] for n in graph_dict.get("nodes", [])]:
+                        # graph_dict["nodes"] is a dict {incident_id: node_data}, not a list
+                        if meta_context.active_incident_id not in graph_dict.get("nodes", {}):
                             try:
                                 from ..services.dynamo_service import get_dynamo_service
                                 dynamo = get_dynamo_service()
