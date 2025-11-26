@@ -3,7 +3,7 @@ Dynamic Tool Loader - Loads dynamic tools into the function registry at runtime.
 Bridges dynamic tools with the existing function execution system.
 """
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from ..models.orchestrator_schemas import FunctionDefinition, FunctionResult
 from .tool_runtime import get_dynamic_tool_runtime
