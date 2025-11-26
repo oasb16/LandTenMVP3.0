@@ -438,10 +438,11 @@ class IncidentTopicGraph:
             max_retries: Maximum number of retries
         """
         try:
-            from ..services.dynamo_service import get_dynamo_service
+            from ..services.dynamo_service import get_dynamodb_resource
 
-            dynamo = get_dynamo_service()
-            table = dynamo._get_table()
+            # Get DynamoDB resource and table
+            dynamodb = get_dynamodb_resource()
+            table = dynamodb.Table("landten_incidents")  # Use existing table
 
             # Serialize graph to dict
             graph_data = self.to_dict()
@@ -451,14 +452,19 @@ class IncidentTopicGraph:
 
             # Save to DynamoDB with PK/SK pattern
             item = {
-                "PK": f"USER#{self.user_id}",
-                "SK": "INCIDENT_GRAPH",
-                "user_id": self.user_id,
+                "incident_id": f"GRAPH#{self.user_id}",  # Use incident_id as PK
+                "tenant_id": self.user_id,
                 "graph_data": json.dumps(graph_data_serialized),
                 "node_count": len(self.nodes),
                 "edge_count": len(self.edges),
                 "updated_at": datetime.utcnow().isoformat(),
-                "ttl": int((datetime.utcnow().timestamp() + 30 * 24 * 60 * 60)),  # 30 days TTL
+                "created_at": datetime.utcnow().isoformat(),
+                "status": "active",
+                "title": "Topic Graph Metadata",
+                "description": "Incident topic graph storage",
+                "category": "system",
+                "severity": "low",
+                "urgency": "routine",
             }
 
             table.put_item(Item=item)
@@ -504,16 +510,15 @@ class IncidentTopicGraph:
             IncidentTopicGraph instance or None if not found
         """
         try:
-            from ..services.dynamo_service import get_dynamo_service
+            from ..services.dynamo_service import get_dynamodb_resource
 
-            dynamo = get_dynamo_service()
-            table = dynamo._get_table()
+            dynamodb = get_dynamodb_resource()
+            table = dynamodb.Table("landten_incidents")
 
-            # Query DynamoDB
+            # Query DynamoDB using incident_id as PK
             response = table.get_item(
                 Key={
-                    "PK": f"USER#{user_id}",
-                    "SK": "INCIDENT_GRAPH",
+                    "incident_id": f"GRAPH#{user_id}",
                 }
             )
 
