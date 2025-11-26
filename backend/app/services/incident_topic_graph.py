@@ -172,7 +172,8 @@ class IncidentTopicGraph:
         current_node = self.nodes[current_incident_id]
 
         # PHASE OMEGA: Try semantic similarity first (embeddings)
-        if EMBEDDINGS_AVAILABLE and current_node.embedding is not None:
+        # Skip embeddings for very short messages to reduce API calls
+        if EMBEDDINGS_AVAILABLE and current_node.embedding is not None and len(new_message.strip()) > 10:
             try:
                 embeddings_service = get_embeddings_service()
                 new_message_embedding = embeddings_service.get_embedding(new_message)
@@ -454,7 +455,7 @@ class IncidentTopicGraph:
             item = {
                 "incident_id": f"GRAPH#{self.user_id}",  # Use incident_id as PK
                 "tenant_id": self.user_id,
-                "graph_data": json.dumps(graph_data_serialized),
+                "graph_data": graph_data_serialized,  # Store dict directly, no json.dumps
                 "node_count": len(self.nodes),
                 "edge_count": len(self.edges),
                 "updated_at": datetime.utcnow().isoformat(),
@@ -498,6 +499,21 @@ class IncidentTopicGraph:
         else:
             return data
 
+    @staticmethod
+    def _convert_from_dynamo_format(data: Any) -> Any:
+        """
+        Recursively convert DynamoDB format back to Python native types.
+        Converts Decimal to float, handles nested structures.
+        """
+        if isinstance(data, dict):
+            return {k: IncidentTopicGraph._convert_from_dynamo_format(v) for k, v in data.items()}
+        elif isinstance(data, list):
+            return [IncidentTopicGraph._convert_from_dynamo_format(item) for item in data]
+        elif isinstance(data, Decimal):
+            return float(data)
+        else:
+            return data
+
     @classmethod
     def load_from_dynamodb(cls, user_id: str) -> Optional["IncidentTopicGraph"]:
         """
@@ -527,13 +543,18 @@ class IncidentTopicGraph:
                 return None
 
             item = response["Item"]
-            graph_data_json = item.get("graph_data")
+            graph_data_raw = item.get("graph_data")
 
-            if not graph_data_json:
+            if not graph_data_raw:
                 return None
 
-            # Deserialize graph data
-            graph_data = json.loads(graph_data_json)
+            # Handle both old format (JSON string) and new format (dict)
+            if isinstance(graph_data_raw, str):
+                # Old format: JSON-encoded string
+                graph_data = json.loads(graph_data_raw)
+            else:
+                # New format: dict with Decimals, convert Decimals back to floats
+                graph_data = cls._convert_from_dynamo_format(graph_data_raw)
 
             # Reconstruct graph from dict
             graph = cls.from_dict(graph_data)
