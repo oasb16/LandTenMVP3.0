@@ -244,18 +244,44 @@ class SkillEvolutionEngine:
         questions_generated: List[str],
     ):
         """
-        Record discovery question pattern for skill evolution.
-
-        Args:
-            category: Incident category
-            severity: Severity level
-            user_message: User's initial message
-            questions_generated: List of generated discovery questions
+        PHASE OMEGA: Record discovery question pattern for skill evolution.
+        Analyzes which questions work best for different incident types.
         """
         logger.debug(f"📊 Recording discovery pattern: {category}/{severity}")
-        # Store pattern for future analysis
-        # In production, this would feed into pattern detection
-        pass
+
+        # Create pattern key
+        pattern_key = f"{category}_{severity}"
+
+        # Initialize pattern storage if needed
+        if "discovery_patterns" not in self.generated_skills:
+            self.generated_skills["discovery_patterns"] = {}
+
+        if pattern_key not in self.generated_skills["discovery_patterns"]:
+            self.generated_skills["discovery_patterns"][pattern_key] = {
+                "category": category,
+                "severity": severity,
+                "questions": [],
+                "user_messages": [],
+                "frequency": 0,
+                "created_at": datetime.utcnow().isoformat(),
+            }
+
+        # Record the pattern
+        pattern = self.generated_skills["discovery_patterns"][pattern_key]
+        pattern["frequency"] += 1
+        pattern["user_messages"].append(user_message)
+        pattern["questions"].extend(questions_generated)
+        pattern["last_seen_at"] = datetime.utcnow().isoformat()
+
+        # Track metrics if available
+        if RESILIENCE_AVAILABLE:
+            metrics = get_metrics_collector()
+            metrics.increment(f"discovery_patterns.{pattern_key}")
+
+        # Check if we should create a specialized question generator tool
+        if pattern["frequency"] >= 5:
+            logger.info(f"🎯 Discovery pattern reached threshold for {pattern_key} - could generate specialized tool")
+            # Future: Auto-generate discovery question tool for this pattern
 
     async def record_diagnosis_pattern(
         self,
@@ -265,18 +291,53 @@ class SkillEvolutionEngine:
         diagnosis_summary: str,
     ):
         """
-        Record diagnosis pattern for skill evolution.
-
-        Args:
-            category: Incident category
-            severity: Severity level
-            discovery_answers: Answers from discovery phase
-            diagnosis_summary: Generated diagnosis summary
+        PHASE OMEGA: Record diagnosis pattern for learning loop.
+        Builds knowledge base of symptoms → diagnosis mappings.
         """
         logger.debug(f"📊 Recording diagnosis pattern: {category}/{severity}")
-        # Store pattern for future analysis
-        # In production, this would feed into pattern detection
-        pass
+
+        # Initialize diagnosis storage if needed
+        if "diagnosis_patterns" not in self.generated_skills:
+            self.generated_skills["diagnosis_patterns"] = {}
+
+        pattern_key = f"{category}_{severity}"
+
+        if pattern_key not in self.generated_skills["diagnosis_patterns"]:
+            self.generated_skills["diagnosis_patterns"][pattern_key] = {
+                "category": category,
+                "severity": severity,
+                "diagnoses": [],
+                "symptom_maps": {},
+                "frequency": 0,
+                "created_at": datetime.utcnow().isoformat(),
+            }
+
+        # Record diagnosis
+        pattern = self.generated_skills["diagnosis_patterns"][pattern_key]
+        pattern["frequency"] += 1
+        pattern["diagnoses"].append({
+            "diagnosis": diagnosis_summary,
+            "answers": discovery_answers,
+            "timestamp": datetime.utcnow().isoformat(),
+        })
+        pattern["last_updated_at"] = datetime.utcnow().isoformat()
+
+        # Build symptom → diagnosis mapping (for future pattern detection)
+        for question, answer in discovery_answers.items():
+            if answer and len(str(answer)) > 3:  # Skip empty or very short answers
+                symptom_key = f"{question}:{str(answer)[:50]}"  # Truncate for key
+                if symptom_key not in pattern["symptom_maps"]:
+                    pattern["symptom_maps"][symptom_key] = []
+                pattern["symptom_maps"][symptom_key].append(diagnosis_summary)
+
+        # Track metrics
+        if RESILIENCE_AVAILABLE:
+            metrics = get_metrics_collector()
+            metrics.increment(f"diagnosis_patterns.{pattern_key}")
+
+        # Check if we should create a diagnostic tool
+        if pattern["frequency"] >= 10:
+            logger.info(f"🎯 Diagnosis pattern reached threshold for {pattern_key} - could generate diagnostic tool")
 
     async def suggest_diagnostic_tool(self, category: str) -> Dict[str, Any]:
         """
