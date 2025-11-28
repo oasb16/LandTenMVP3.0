@@ -18,18 +18,24 @@ export default async function LandingPage() {
           A unified command center for landlords, tenants, and contractors. Coordinate maintenance,
           chat in real time, and automate follow-ups with AI assistance.
         </p>
-        <div className="flex flex-col sm:flex-row gap-4 justify-center">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl mx-auto">
           <Link
-            href="/property-ai"
+            href="/ai-support"
             className="inline-flex items-center justify-center rounded-md bg-gradient-to-r from-blue-600 to-purple-600 px-6 py-3 font-semibold text-white hover:from-blue-700 hover:to-purple-700 transition shadow-lg"
           >
-            Try PropertyAI (New UI)
+            🤖 AI Support Experience
+          </Link>
+          <Link
+            href="/property-ai"
+            className="inline-flex items-center justify-center rounded-md bg-gradient-to-r from-purple-600 to-pink-600 px-6 py-3 font-semibold text-white hover:from-purple-700 hover:to-pink-700 transition shadow-lg"
+          >
+            💬 PropertyAI Chat
           </Link>
           <Link
             href={hasSession ? "/dashboard" : "/dashboard"}
             className="inline-flex items-center justify-center rounded-md bg-emerald-500 px-6 py-3 font-semibold text-slate-900 hover:bg-emerald-400 transition"
           >
-            {hasSession ? "Continue to dashboard" : "Classic Dashboard"}
+            {hasSession ? "📊 Continue to Dashboard" : "📊 Classic Dashboard"}
           </Link>
           <a
             href="https://github.com/oasb16/LandTenMVP2.0"
@@ -37,21 +43,21 @@ export default async function LandingPage() {
             rel="noreferrer"
             className="inline-flex items-center justify-center rounded-md border border-slate-500 px-6 py-3 font-semibold text-slate-100 hover:bg-slate-800 transition"
           >
-            View Legacy MVP2.0
+            📚 View Legacy MVP2.0
           </a>
         </div>
         <div className="grid sm:grid-cols-3 gap-6 text-left">
           <div className="rounded-lg border border-slate-700 p-4 bg-slate-900/60">
-            <h2 className="font-semibold text-lg">Real-time Chat</h2>
+            <h2 className="font-semibold text-lg">🤖 AI Support</h2>
+            <p className="text-sm text-slate-400">Amazon-style guided support with intelligent issue resolution and automated workflows.</p>
+          </div>
+          <div className="rounded-lg border border-slate-700 p-4 bg-slate-900/60">
+            <h2 className="font-semibold text-lg">💬 Real-time Chat</h2>
             <p className="text-sm text-slate-400">Stream-powered messaging keeps every persona in sync across devices.</p>
           </div>
           <div className="rounded-lg border border-slate-700 p-4 bg-slate-900/60">
-            <h2 className="font-semibold text-lg">AI Summaries</h2>
-            <p className="text-sm text-slate-400">Generate recap cards and actions with a single click.</p>
-          </div>
-          <div className="rounded-lg border border-slate-700 p-4 bg-slate-900/60">
-            <h2 className="font-semibold text-lg">Task Orchestration</h2>
-            <p className="text-sm text-slate-400">Assign, track, and complete maintenance tasks seamlessly.</p>
+            <h2 className="font-semibold text-lg">⚡ Task Orchestration</h2>
+            <p className="text-sm text-slate-400">Assign, track, and complete maintenance tasks seamlessly with AI assistance.</p>
           </div>
         </div>
       </div>

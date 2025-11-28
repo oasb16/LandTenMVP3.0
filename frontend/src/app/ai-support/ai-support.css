@@ -1,0 +1,212 @@
+/**
+ * AI Support Experience - Custom Styles
+ *
+ * Enhances Stream Chat UI with custom branding and animations
+ */
+
+/* ============================================================================
+   STREAM CHAT OVERRIDES
+   ============================================================================ */
+
+/* Message List Container */
+.str-chat__list {
+  @apply bg-gray-50 dark:bg-gray-900;
+  padding: 1rem;
+}
+
+/* Individual Messages */
+.str-chat__message-simple {
+  @apply mb-3;
+}
+
+/* AI Messages - Special styling for assistant messages */
+.str-chat__message-simple--me {
+  @apply flex-row-reverse;
+}
+
+.str-chat__message-simple--other .str-chat__message-simple__text {
+  @apply bg-blue-600 text-white rounded-2xl rounded-tl-sm;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.2);
+}
+
+.str-chat__message-simple--me .str-chat__message-simple__text {
+  @apply bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-2xl rounded-tr-sm border border-gray-200 dark:border-gray-700;
+}
+
+/* Message Input */
+.str-chat__input-flat {
+  @apply bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700;
+}
+
+.str-chat__textarea textarea {
+  @apply bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 border-gray-300 dark:border-gray-600 rounded-lg;
+  resize: none !important;
+  max-height: 120px;
+}
+
+.str-chat__textarea textarea:focus {
+  @apply ring-2 ring-blue-500 border-blue-500;
+}
+
+/* Send Button */
+.str-chat__send-button {
+  @apply bg-blue-600 hover:bg-blue-700 text-white rounded-lg;
+  transition: all 0.2s;
+}
+
+.str-chat__send-button:disabled {
+  @apply bg-gray-300 dark:bg-gray-700 cursor-not-allowed;
+}
+
+/* ============================================================================
+   TYPING INDICATOR
+   ============================================================================ */
+
+.str-chat__typing-indicator {
+  @apply px-4 py-2;
+}
+
+.str-chat__typing-indicator__avatars {
+  @apply hidden;
+}
+
+.str-chat__typing-indicator__dots {
+  @apply flex items-center gap-1;
+}
+
+.str-chat__typing-indicator__dot {
+  @apply w-2 h-2 bg-blue-600 dark:bg-blue-400 rounded-full;
+  animation: typing-pulse 1.4s infinite;
+}
+
+.str-chat__typing-indicator__dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.str-chat__typing-indicator__dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes typing-pulse {
+  0%, 60%, 100% {
+    opacity: 0.4;
+    transform: scale(0.8);
+  }
+  30% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* ============================================================================
+   CUSTOM ANIMATIONS
+   ============================================================================ */
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(59, 130, 246, 0);
+  }
+}
+
+/* ============================================================================
+   SCROLLBAR STYLING
+   ============================================================================ */
+
+.str-chat__list::-webkit-scrollbar,
+.str-chat__message-list-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.str-chat__list::-webkit-scrollbar-track,
+.str-chat__message-list-scroll::-webkit-scrollbar-track {
+  @apply bg-gray-100 dark:bg-gray-800;
+}
+
+.str-chat__list::-webkit-scrollbar-thumb,
+.str-chat__message-list-scroll::-webkit-scrollbar-thumb {
+  @apply bg-gray-300 dark:bg-gray-600 rounded-full;
+}
+
+.str-chat__list::-webkit-scrollbar-thumb:hover,
+.str-chat__message-list-scroll::-webkit-scrollbar-thumb:hover {
+  @apply bg-gray-400 dark:bg-gray-500;
+}
+
+/* ============================================================================
+   RESPONSIVE ADJUSTMENTS
+   ============================================================================ */
+
+@media (max-width: 768px) {
+  .str-chat__list {
+    padding: 0.75rem;
+  }
+
+  .str-chat__message-simple {
+    @apply mb-2;
+  }
+
+  .str-chat__message-simple__text {
+    @apply text-sm;
+  }
+}
+
+/* ============================================================================
+   DARK MODE ENHANCEMENTS
+   ============================================================================ */
+
+@media (prefers-color-scheme: dark) {
+  .str-chat__channel {
+    @apply bg-gray-900;
+  }
+
+  .str-chat__list {
+    @apply bg-gray-900;
+  }
+
+  .str-chat__message-simple--other .str-chat__message-simple__text {
+    box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+  }
+}
+
+/* ============================================================================
+   ACCESSIBILITY
+   ============================================================================ */
+
+.str-chat__message-simple:focus-visible,
+button:focus-visible {
+  @apply outline-none ring-2 ring-blue-500 ring-offset-2;
+}
+
+/* Reduce motion for users who prefer it */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

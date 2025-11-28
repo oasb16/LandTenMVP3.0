@@ -1,0 +1,341 @@
+/**
+ * useAISupportFlow Hook
+ *
+ * Manages the AI Support Experience state machine and Stream Chat integration
+ */
+
+"use client";
+
+import { useEffect, useState, useCallback, useRef } from "react";
+import { useSession } from "next-auth/react";
+import type { Channel, Event, StreamChat } from "stream-chat";
+import {
+  type UIMode,
+  type IntentType,
+  type FlowState,
+  type AISupportFlowHook,
+  type Persona,
+  isValidUIMode,
+} from "@/types/ai-support";
+
+interface UseAISupportFlowOptions {
+  mode: "guided";
+  autoInit?: boolean;
+}
+
+const DEFAULT_UI_MODE: UIMode = "idle";
+const DEFAULT_PAYLOAD: Record<string, unknown> = {};
+
+/**
+ * Main hook for AI Support Experience
+ */
+export default function useAISupportFlow({
+  mode,
+  autoInit = true,
+}: UseAISupportFlowOptions): AISupportFlowHook {
+  const { data: session, status } = useSession();
+
+  // Stream Chat client (will be passed from parent)
+  const [client, setClient] = useState<StreamChat | null>(null);
+  const [channel, setChannel] = useState<Channel | null>(null);
+
+  // UI State
+  const [uiMode, setUiMode] = useState<UIMode>(DEFAULT_UI_MODE);
+  const [payload, setPayload] = useState<Record<string, unknown>>(DEFAULT_PAYLOAD);
+
+  // Flow State
+  const [flowState, setFlowState] = useState<FlowState | null>(null);
+
+  // Loading & Error States
+  const [loading, setLoading] = useState<boolean>(false);
+  const [initializing, setInitializing] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Refs for cleanup
+  const eventListenersRef = useRef<Array<() => void>>([]);
+  const isInitializedRef = useRef<boolean>(false);
+  const channelIdRef = useRef<string | null>(null);
+
+  /**
+   * Initialize Stream Chat client
+   */
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (status === "loading") return;
+    if (!session?.user?.email) {
+      console.log("[AI Support] No session, skipping client init");
+      return;
+    }
+
+    const initClient = async () => {
+      try {
+        // Dynamically import StreamChat to avoid SSR issues
+        const { StreamChat } = await import("stream-chat");
+
+        // Get API key from env
+        const apiKey = process.env.NEXT_PUBLIC_STREAM_KEY;
+        if (!apiKey) {
+          throw new Error("Stream API key not configured");
+        }
+
+        // Fetch token from our API
+        const tokenRes = await fetch("/api/chat/token");
+        if (!tokenRes.ok) {
+          throw new Error("Failed to fetch Stream token");
+        }
+
+        const tokenData = await tokenRes.json();
+        const { token, user_id } = tokenData;
+
+        if (!token || !user_id) {
+          throw new Error("Invalid token response");
+        }
+
+        // Create or get singleton client
+        const streamClient = StreamChat.getInstance(apiKey);
+
+        // Connect user if not already connected
+        if (!streamClient.userID) {
+          await streamClient.connectUser(
+            {
+              id: user_id,
+              name: session.user.email,
+            },
+            token
+          );
+          console.log("[AI Support] Stream client connected");
+        }
+
+        setClient(streamClient);
+      } catch (err) {
+        console.error("[AI Support] Failed to initialize Stream client:", err);
+        setError(err instanceof Error ? err.message : "Failed to initialize chat");
+      }
+    };
+
+    initClient();
+  }, [session, status]);
+
+  /**
+   * Initialize AI Support channel
+   */
+  useEffect(() => {
+    if (!client || !session?.user?.email) return;
+    if (isInitializedRef.current) return;
+    if (!autoInit) return;
+
+    const initChannel = async () => {
+      setInitializing(true);
+      setError(null);
+
+      try {
+        const persona = (session.user.persona as Persona) || "tenant";
+        const userId = session.user.email;
+
+        // Create unique channel for this AI support session
+        const channelId = `ai-support-${userId}-${Date.now()}`;
+        channelIdRef.current = channelId;
+
+        console.log("[AI Support] Creating channel:", channelId);
+
+        const ch = client.channel("messaging", channelId, {
+          name: "AI Support Session",
+          ai_mode: mode,
+          persona,
+          created_by: userId,
+        });
+
+        await ch.watch();
+        setChannel(ch);
+
+        // Initialize flow state
+        setFlowState({
+          session_id: channelId,
+          incident_id: null,
+          persona,
+          current_mode: "idle",
+          selected_item: null,
+          selected_reason: null,
+          resolution_data: null,
+          chat_channel_id: channelId,
+        });
+
+        // Send init event to backend
+        await ch.sendEvent({
+          type: "ai_intent",
+          intent: "session_init",
+          payload: {
+            persona,
+            mode: "guided",
+          },
+        });
+
+        console.log("[AI Support] Session initialized");
+        isInitializedRef.current = true;
+        setInitializing(false);
+      } catch (err) {
+        console.error("[AI Support] Failed to initialize channel:", err);
+        setError(err instanceof Error ? err.message : "Failed to initialize session");
+        setInitializing(false);
+      }
+    };
+
+    initChannel();
+  }, [client, session, autoInit, mode]);
+
+  /**
+   * Attach event listeners to channel
+   */
+  useEffect(() => {
+    if (!channel) return;
+
+    console.log("[AI Support] Attaching event listeners");
+
+    // Cleanup previous listeners
+    eventListenersRef.current.forEach((cleanup) => cleanup());
+    eventListenersRef.current = [];
+
+    // Listen for AI state updates
+    const aiStateListener = channel.on("ai_state", (event: Event) => {
+      console.log("[AI Support] Received ai_state event:", event);
+
+      const uiModeValue = (event as any).ui_mode;
+      const payloadValue = (event as any).payload || {};
+
+      if (isValidUIMode(uiModeValue)) {
+        setUiMode(uiModeValue);
+        setPayload(payloadValue);
+
+        // Update flow state
+        setFlowState((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            current_mode: uiModeValue,
+          };
+        });
+      }
+    });
+
+    // Listen for custom flow updates
+    const flowUpdateListener = channel.on("custom.flow_update", (event: Event) => {
+      console.log("[AI Support] Received flow_update event:", event);
+
+      const flowData = (event as any).payload || {};
+
+      setFlowState((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          ...flowData,
+        };
+      });
+    });
+
+    // Listen for errors
+    const errorListener = channel.on("custom.error", (event: Event) => {
+      console.error("[AI Support] Received error event:", event);
+
+      const errorMessage = (event as any).message || "An error occurred";
+      setError(errorMessage);
+    });
+
+    // Store cleanup functions
+    eventListenersRef.current = [
+      () => aiStateListener.unsubscribe(),
+      () => flowUpdateListener.unsubscribe(),
+      () => errorListener.unsubscribe(),
+    ];
+
+    // Cleanup on unmount
+    return () => {
+      eventListenersRef.current.forEach((cleanup) => cleanup());
+      eventListenersRef.current = [];
+    };
+  }, [channel]);
+
+  /**
+   * Send an intent to the backend
+   */
+  const sendIntent = useCallback(
+    async (intent: IntentType, intentPayload: Record<string, unknown> = {}) => {
+      if (!channel) {
+        console.error("[AI Support] Cannot send intent: no channel");
+        return;
+      }
+
+      setLoading(true);
+      setError(null);
+
+      try {
+        console.log("[AI Support] Sending intent:", intent, intentPayload);
+
+        await channel.sendEvent({
+          type: "ai_intent",
+          intent,
+          payload: intentPayload,
+        });
+
+        console.log("[AI Support] Intent sent successfully");
+      } catch (err) {
+        console.error("[AI Support] Failed to send intent:", err);
+        setError(err instanceof Error ? err.message : "Failed to send message");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [channel]
+  );
+
+  /**
+   * Reset the session
+   */
+  const resetSession = useCallback(async () => {
+    console.log("[AI Support] Resetting session");
+
+    // Clear state
+    setUiMode(DEFAULT_UI_MODE);
+    setPayload(DEFAULT_PAYLOAD);
+    setFlowState(null);
+    setError(null);
+
+    // Cleanup event listeners
+    eventListenersRef.current.forEach((cleanup) => cleanup());
+    eventListenersRef.current = [];
+
+    // Stop watching channel
+    if (channel) {
+      try {
+        await channel.stopWatching();
+      } catch (err) {
+        console.warn("[AI Support] Error stopping channel watch:", err);
+      }
+    }
+
+    setChannel(null);
+    isInitializedRef.current = false;
+    channelIdRef.current = null;
+  }, [channel]);
+
+  /**
+   * Cleanup on unmount
+   */
+  useEffect(() => {
+    return () => {
+      eventListenersRef.current.forEach((cleanup) => cleanup());
+      eventListenersRef.current = [];
+    };
+  }, []);
+
+  return {
+    channel,
+    uiMode,
+    payload,
+    flowState,
+    loading,
+    initializing,
+    error,
+    sendIntent,
+    resetSession,
+  };
+}
