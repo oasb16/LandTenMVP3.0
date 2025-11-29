@@ -111,7 +111,7 @@ export default function AIChatContainer({ mode }: AIChatContainerProps) {
     };
   }, [session, status]);
 
-  // Use AI Support Flow hook
+  // Use AI Support Flow hook (pass client to avoid duplicate token requests)
   const {
     channel,
     uiMode,
@@ -119,7 +119,7 @@ export default function AIChatContainer({ mode }: AIChatContainerProps) {
     sendIntent,
     initializing,
     error: flowError,
-  } = useAISupportFlow({ mode, autoInit: true });
+  } = useAISupportFlow({ mode, autoInit: true, client });
 
   const error = clientError || flowError;
 

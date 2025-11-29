@@ -5,7 +5,8 @@
  *
  * AUTHENTICATION:
  * Uses the same Stream Chat authentication as Classic Dashboard:
- * - Fetches per-user tokens from /api/chat/token backend endpoint
+ * - Receives pre-initialized client from AIChatContainer (avoids duplicate token requests)
+ * - AIChatContainer fetches tokens from /api/chat/token backend endpoint
  * - Uses actual user identity from session.user.email
  * - Tokens are generated server-side with STREAM_CHAT_API_KEY/SECRET
  * - No client-side env vars required
@@ -28,6 +29,7 @@ import {
 interface UseAISupportFlowOptions {
   mode: "guided";
   autoInit?: boolean;
+  client?: StreamChat | null; // Accept client from parent to avoid duplicate token requests
 }
 
 const DEFAULT_UI_MODE: UIMode = "idle";
@@ -39,11 +41,12 @@ const DEFAULT_PAYLOAD: Record<string, unknown> = {};
 export default function useAISupportFlow({
   mode,
   autoInit = true,
+  client: externalClient,
 }: UseAISupportFlowOptions): AISupportFlowHook {
   const { data: session, status } = useSession();
 
-  // Stream Chat client (will be passed from parent)
-  const [client, setClient] = useState<StreamChat | null>(null);
+  // Use client from parent (AIChatContainer) to avoid duplicate token requests
+  const [client, setClient] = useState<StreamChat | null>(externalClient ?? null);
   const [channel, setChannel] = useState<Channel | null>(null);
 
   // UI State
@@ -64,72 +67,14 @@ export default function useAISupportFlow({
   const channelIdRef = useRef<string | null>(null);
 
   /**
-   * Initialize Stream Chat client using same pattern as Classic Dashboard
+   * Sync client from parent (AIChatContainer owns client initialization)
    */
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (status === "loading") return;
-    if (!session?.user?.email) {
-      console.log("[AI Support] No session, skipping client init");
-      return;
+    if (externalClient) {
+      console.log("[AI Support Flow] Using client from parent container");
+      setClient(externalClient);
     }
-
-    const initClient = async () => {
-      try {
-        // Fetch token from backend (same as Classic Dashboard)
-        console.log("[AI Support] Fetching token from /api/chat/token");
-        const tokenRes = await fetch("/api/chat/token");
-
-        if (!tokenRes.ok) {
-          const error = await tokenRes.json().catch(() => ({}));
-          throw new Error(error.error || "Unable to fetch Stream token");
-        }
-
-        const tokenData = await tokenRes.json();
-        const { api_key, token, user_id, display_user_id } = tokenData;
-
-        if (!api_key || !token || !user_id) {
-          throw new Error("Stream credentials incomplete");
-        }
-
-        const { StreamChat } = await import("stream-chat");
-
-        // Create or get singleton client (same pattern as Classic Dashboard)
-        const streamClient = StreamChat.getInstance(api_key);
-
-        // Connect with actual user identity (not fixed "prod-user")
-        if (!streamClient.userID) {
-          console.log("[AI Support] Connecting as", user_id);
-          await streamClient.connectUser(
-            {
-              id: user_id,
-              name: display_user_id ?? session.user.email ?? user_id,
-            },
-            token
-          );
-          console.log("[AI Support] ✅ Stream client connected");
-        } else if (streamClient.userID !== user_id) {
-          console.log("[AI Support] User changed, reconnecting:", user_id);
-          await streamClient.disconnectUser();
-          await streamClient.connectUser(
-            {
-              id: user_id,
-              name: display_user_id ?? session.user.email ?? user_id,
-            },
-            token
-          );
-          console.log("[AI Support] ✅ Stream client reconnected");
-        }
-
-        setClient(streamClient);
-      } catch (err) {
-        console.error("[AI Support] Failed to initialize Stream client:", err);
-        setError(err instanceof Error ? err.message : "Failed to initialize chat");
-      }
-    };
-
-    initClient();
-  }, [session, status]);
+  }, [externalClient]);
 
   /**
    * Initialize AI Support channel
