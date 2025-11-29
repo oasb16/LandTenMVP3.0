@@ -66,13 +66,18 @@ export default function useAISupportFlow({
   const isInitializedRef = useRef<boolean>(false);
   const channelIdRef = useRef<string | null>(null);
 
+  console.log("[AI Support Flow] 🔵 Hook called - externalClient:", !!externalClient, "client:", !!client, "channel:", !!channel);
+
   /**
    * Sync client from parent (AIChatContainer owns client initialization)
    */
   useEffect(() => {
+    console.log("[AI Support Flow] 🟡 Client sync effect fired - externalClient:", !!externalClient);
     if (externalClient) {
-      console.log("[AI Support Flow] Using client from parent container");
+      console.log("[AI Support Flow] ✅ Using client from parent container");
       setClient(externalClient);
+    } else {
+      console.log("[AI Support Flow] ⚠️ No external client yet");
     }
   }, [externalClient]);
 
@@ -80,9 +85,29 @@ export default function useAISupportFlow({
    * Initialize AI Support channel
    */
   useEffect(() => {
-    if (!client || !session?.user?.email) return;
-    if (isInitializedRef.current) return;
-    if (!autoInit) return;
+    console.log("[AI Support Flow] 🟡 Channel init effect fired - checking conditions");
+
+    if (!client) {
+      console.log("[AI Support Flow] ⚠️ Skipping: no client");
+      return;
+    }
+
+    if (!session?.user?.email) {
+      console.log("[AI Support Flow] ⚠️ Skipping: no session/email");
+      return;
+    }
+
+    if (isInitializedRef.current) {
+      console.log("[AI Support Flow] ⚠️ Skipping: already initialized");
+      return;
+    }
+
+    if (!autoInit) {
+      console.log("[AI Support Flow] ⚠️ Skipping: autoInit disabled");
+      return;
+    }
+
+    console.log("[AI Support Flow] ✅ All conditions met, starting channel init");
 
     const initChannel = async () => {
       setInitializing(true);
@@ -92,25 +117,33 @@ export default function useAISupportFlow({
         const persona = (session.user.persona as Persona) || "tenant";
         const userId = session.user.email;
 
+        console.log("[AI Support Flow] 📡 Step 1: Sanitizing email for channel ID");
         // Sanitize email for channel ID (Stream only allows letters, numbers, and !-_)
         const sanitizedEmail = userId.toLowerCase().replace(/[^a-z0-9-_]/g, "-");
+        console.log("[AI Support Flow] ✅ Step 1 COMPLETE: Email sanitized:", sanitizedEmail);
 
         // Create unique channel for this AI support session
         const channelId = `ai-support-${sanitizedEmail}-${Date.now()}`;
         channelIdRef.current = channelId;
 
-        console.log("[AI Support] Creating channel:", channelId);
+        console.log("[AI Support Flow] 📡 Step 2: Creating channel:", channelId);
 
         const ch = client.channel("messaging", channelId, {
           name: "AI Support Session",
           ai_mode: mode,
           persona,
         });
+        console.log("[AI Support Flow] ✅ Step 2 COMPLETE: Channel object created");
 
-        // Create channel (watch will auto-create if it doesn't exist)
+        console.log("[AI Support Flow] 📡 Step 3: Watching channel (creates if doesn't exist)");
         await ch.watch();
-        setChannel(ch);
+        console.log("[AI Support Flow] ✅ Step 3 COMPLETE: Channel watch successful");
 
+        console.log("[AI Support Flow] 📡 Step 4: Setting channel state");
+        setChannel(ch);
+        console.log("[AI Support Flow] ✅ Step 4 COMPLETE: Channel state updated");
+
+        console.log("[AI Support Flow] 📡 Step 5: Initializing flow state");
         // Initialize flow state
         setFlowState({
           session_id: channelId,
@@ -122,7 +155,9 @@ export default function useAISupportFlow({
           resolution_data: null,
           chat_channel_id: channelId,
         });
+        console.log("[AI Support Flow] ✅ Step 5 COMPLETE: Flow state initialized");
 
+        console.log("[AI Support Flow] 📡 Step 6: Sending session_init event to backend");
         // Send init event to backend
         await ch.sendEvent({
           type: "ai_intent",
@@ -132,12 +167,13 @@ export default function useAISupportFlow({
             mode: "guided",
           },
         });
+        console.log("[AI Support Flow] ✅ Step 6 COMPLETE: Session init event sent");
 
-        console.log("[AI Support] Session initialized");
+        console.log("[AI Support Flow] 🎉 ALL STEPS COMPLETE - AI Support session initialized");
         isInitializedRef.current = true;
         setInitializing(false);
       } catch (err) {
-        console.error("[AI Support] Failed to initialize channel:", err);
+        console.error("[AI Support Flow] ❌ CHANNEL INITIALIZATION FAILED:", err);
         setError(err instanceof Error ? err.message : "Failed to initialize session");
         setInitializing(false);
       }

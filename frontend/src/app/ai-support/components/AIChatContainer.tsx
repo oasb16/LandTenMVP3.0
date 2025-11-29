@@ -34,44 +34,69 @@ export default function AIChatContainer({ mode }: AIChatContainerProps) {
   const [client, setClient] = useState<StreamChat | null>(null);
   const [clientError, setClientError] = useState<string | null>(null);
 
+  console.log("[AI Support Container] 🔵 Component render - status:", status, "session:", !!session, "client:", !!client);
+
   // Initialize Stream Chat client using same pattern as Classic Dashboard
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (status === "loading") return;
+    console.log("[AI Support Container] 🟡 useEffect fired - checking conditions");
 
-    if (!session?.user?.email) {
-      console.log("[AI Support Container] No session, skipping client init");
+    if (typeof window === "undefined") {
+      console.log("[AI Support Container] ⚠️ Skipping: not in browser");
       return;
     }
 
+    if (status === "loading") {
+      console.log("[AI Support Container] ⚠️ Skipping: auth still loading");
+      return;
+    }
+
+    if (!session?.user?.email) {
+      console.log("[AI Support Container] ⚠️ Skipping: no session/email");
+      return;
+    }
+
+    console.log("[AI Support Container] ✅ All conditions met, starting client init");
     let mounted = true;
 
     const initClient = async () => {
       try {
-        // Fetch token from backend (same as Classic Dashboard)
-        console.log("[AI Support Container] Fetching token from /api/chat/token");
+        console.log("[AI Support Container] 📡 Step 1: Fetching token from /api/chat/token");
         const tokenRes = await fetch("/api/chat/token");
 
         if (!tokenRes.ok) {
           const error = await tokenRes.json().catch(() => ({}));
+          console.error("[AI Support Container] ❌ Step 1 FAILED: Token fetch error:", error);
           throw new Error(error.error || "Unable to fetch Stream token");
         }
+
+        console.log("[AI Support Container] ✅ Step 1 COMPLETE: Token fetched successfully");
 
         const tokenData = await tokenRes.json();
         const { api_key, token, user_id, display_user_id } = tokenData;
 
+        console.log("[AI Support Container] 📋 Token data received:", {
+          has_api_key: !!api_key,
+          has_token: !!token,
+          user_id,
+          display_user_id
+        });
+
         if (!api_key || !token || !user_id) {
+          console.error("[AI Support Container] ❌ Incomplete credentials:", { api_key: !!api_key, token: !!token, user_id });
           throw new Error("Stream credentials incomplete");
         }
 
+        console.log("[AI Support Container] 📡 Step 2: Importing StreamChat SDK");
         const { StreamChat } = await import("stream-chat");
+        console.log("[AI Support Container] ✅ Step 2 COMPLETE: StreamChat SDK imported");
 
-        // Create singleton client (same pattern as Classic Dashboard)
+        console.log("[AI Support Container] 📡 Step 3: Creating StreamChat instance");
         const streamClient = StreamChat.getInstance(api_key, { timeout: 8000 });
+        console.log("[AI Support Container] ✅ Step 3 COMPLETE: StreamChat instance created");
 
         // Connect with actual user identity (not fixed "prod-user")
         if (!streamClient.userID) {
-          console.log("[AI Support Container] Connecting as", user_id);
+          console.log("[AI Support Container] 📡 Step 4: Connecting user:", user_id);
           await streamClient.connectUser(
             {
               id: user_id,
@@ -79,9 +104,9 @@ export default function AIChatContainer({ mode }: AIChatContainerProps) {
             },
             token
           );
-          console.log("[AI Support Container] ✅ Stream client connected successfully");
+          console.log("[AI Support Container] ✅ Step 4 COMPLETE: User connected successfully");
         } else if (streamClient.userID !== user_id) {
-          console.log("[AI Support Container] User changed, reconnecting:", user_id);
+          console.log("[AI Support Container] 📡 Step 4: User changed, reconnecting from", streamClient.userID, "to", user_id);
           await streamClient.disconnectUser();
           await streamClient.connectUser(
             {
@@ -90,14 +115,21 @@ export default function AIChatContainer({ mode }: AIChatContainerProps) {
             },
             token
           );
-          console.log("[AI Support Container] ✅ Stream client reconnected");
+          console.log("[AI Support Container] ✅ Step 4 COMPLETE: User reconnected successfully");
+        } else {
+          console.log("[AI Support Container] ℹ️ Step 4 SKIPPED: Already connected as", streamClient.userID);
         }
 
         if (mounted) {
+          console.log("[AI Support Container] 📡 Step 5: Setting client state");
           setClient(streamClient);
+          console.log("[AI Support Container] ✅ Step 5 COMPLETE: Client state updated");
+          console.log("[AI Support Container] 🎉 ALL STEPS COMPLETE - Stream Chat initialized successfully");
+        } else {
+          console.log("[AI Support Container] ⚠️ Component unmounted, skipping state update");
         }
       } catch (err) {
-        console.error("[AI Support Container] Failed to initialize Stream client:", err);
+        console.error("[AI Support Container] ❌ INITIALIZATION FAILED:", err);
         if (mounted) {
           setClientError(err instanceof Error ? err.message : "Failed to initialize chat");
         }
@@ -107,6 +139,7 @@ export default function AIChatContainer({ mode }: AIChatContainerProps) {
     initClient();
 
     return () => {
+      console.log("[AI Support Container] 🔴 Component unmounting, cleanup");
       mounted = false;
     };
   }, [session, status]);
