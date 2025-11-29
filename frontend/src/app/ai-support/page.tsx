@@ -30,6 +30,7 @@ export default function AISupportPage() {
   // AI Support flow state machine (for guided flow panels)
   const {
     uiMode,
+    stage,
     payload,
     flowState,
     loading: flowLoading,
@@ -160,7 +161,7 @@ export default function AISupportPage() {
             </span>
           </div>
           <div className="text-slate-500 text-xs">
-            Mode: {uiMode} {flowState?.persona && `• ${flowState.persona}`}
+            Stage: {stage} • Mode: {uiMode} {flowState?.persona && `• ${flowState.persona}`}
           </div>
         </footer>
 
