@@ -16,6 +16,7 @@ from ..config.settings import settings
 from ..services.stream_bot import get_bot
 from ..services.meta_context_manager import get_meta_context_manager
 from ..services.orchestrator import get_orchestrator
+from ..services.ai_support_orchestrator import get_ai_support_orchestrator
 from ..functions.function_registry import (
     get_function_definitions,
     execute_function,
@@ -116,6 +117,10 @@ async def handle_stream_webhook(
     elif event_type == "reaction.new":
         logger.info("Routing to handle_reaction()")
         return await handle_reaction(payload)
+
+    elif event_type == "ai_intent":
+        logger.info("Routing to handle_ai_intent() - Amazon-style flow")
+        return await handle_ai_intent(payload)
 
     elif event_type == "health.check":
         logger.info("Health check received - responding healthy")
@@ -589,6 +594,112 @@ async def _detect_persona(channel_id: str, bot) -> str:
     except Exception as e:
         logger.error(f"Error detecting persona: {e}", exc_info=True)
         return "tenant"
+
+
+async def handle_ai_intent(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Handle AI Support intent events - Amazon-style guided flow.
+
+    Frontend sends: ai_intent event with { intent, payload }
+    Backend responds: ai_state event with { stage, ui_mode, payload }
+    """
+    try:
+        start_time = time.time()
+
+        # Extract event details
+        user = payload.get("user", {})
+        channel_id = payload.get("channel_id", "unknown")
+        user_id = user.get("id", "unknown")
+
+        # Extract intent and payload from custom event data
+        intent = payload.get("intent")
+        intent_payload = payload.get("payload", {}) or {}
+
+        logger.info(f"========== AI Intent Event ==========")
+        logger.info(f"Channel: {channel_id}")
+        logger.info(f"User: {user_id}")
+        logger.info(f"Intent: {intent}")
+        logger.info(f"Payload: {intent_payload}")
+
+        # Ignore bot messages
+        if user.get("is_bot"):
+            logger.debug(f"Ignoring bot intent from: {user_id}")
+            return {"status": "ignored", "reason": "bot_message"}
+
+        # Get persona from payload or detect from channel
+        persona = intent_payload.get("persona")
+        if not persona:
+            bot = get_bot()
+            persona = await _detect_persona(channel_id, bot) or "tenant"
+
+        # Initialize AI Support orchestrator
+        orchestrator = get_ai_support_orchestrator()
+
+        # Process intent through orchestrator
+        logger.info(f"Processing intent '{intent}' with orchestrator")
+        state_result = await orchestrator.handle_intent(
+            intent=intent,
+            payload=intent_payload,
+            channel_id=channel_id,
+            user_id=user_id,
+            persona=persona
+        )
+
+        logger.info(f"Orchestrator result: stage={state_result.get('stage')}, ui_mode={state_result.get('ui_mode')}")
+
+        # Send ai_state event back to channel
+        bot = get_bot()
+        from stream_chat import StreamChat
+
+        # Get Stream client from bot
+        stream_client = bot.client
+        channel = stream_client.channel("messaging", channel_id)
+
+        # Send ai_state custom event
+        ai_state_event = {
+            "type": "ai_state",
+            **state_result
+        }
+
+        logger.info(f"Sending ai_state event: {ai_state_event}")
+        channel.send_event(ai_state_event, user_id=user_id)
+
+        # Log performance
+        duration = (time.time() - start_time) * 1000
+        logger.info(f"AI Intent processing completed in {duration:.2f}ms")
+
+        return {
+            "status": "success",
+            "intent": intent,
+            "stage": state_result.get("stage"),
+            "ui_mode": state_result.get("ui_mode"),
+            "duration_ms": duration,
+        }
+
+    except Exception as e:
+        logger.error(f"Error handling AI intent: {e}", exc_info=True)
+
+        # Send fallback state to channel
+        try:
+            bot = get_bot()
+            from stream_chat import StreamChat
+            stream_client = bot.client
+            channel = stream_client.channel("messaging", channel_id)
+
+            fallback_event = {
+                "type": "ai_state",
+                "stage": "intro",
+                "ui_mode": "fallback",
+                "payload": {
+                    "error": f"An error occurred: {str(e)}"
+                }
+            }
+
+            channel.send_event(fallback_event, user_id=user_id)
+        except:
+            pass
+
+        return {"status": "error", "error": str(e)}
 
 
 # ==================== ADDITIONAL ENDPOINTS ====================

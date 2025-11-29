@@ -1,7 +1,8 @@
 /**
  * ActionPanel (CTA Panel)
  *
- * Initial "How can we help?" panel with action options
+ * Amazon Spec: Stage "intro" → UI Mode "cta_panel"
+ * Large button menu: "What do you need help with?"
  */
 
 "use client";
@@ -11,12 +12,14 @@ import type { ActionPanelProps } from "@/types/ai-support";
 
 export default function ActionPanel({
   options,
-  title = "How can we help?",
-  subtitle,
   onSelect,
 }: ActionPanelProps) {
   if (!options || options.length === 0) {
-    return null;
+    return (
+      <div className="flex items-center justify-center p-8 text-slate-500">
+        <p>No options available</p>
+      </div>
+    );
   }
 
   return (
@@ -25,28 +28,26 @@ export default function ActionPanel({
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -20 }}
       transition={{ duration: 0.3 }}
-      className="p-4 border-t bg-gradient-to-b from-gray-50 to-white dark:from-gray-900 dark:to-gray-950"
+      className="flex flex-col h-full"
     >
       <div className="mb-4">
-        <h3 className="font-semibold text-lg text-gray-900 dark:text-gray-100">
-          {title}
+        <h3 className="text-lg font-semibold text-slate-100">
+          How can we help you today?
         </h3>
-        {subtitle && (
-          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-            {subtitle}
-          </p>
-        )}
+        <p className="text-sm text-slate-400 mt-1">
+          Select the option that best describes what you need
+        </p>
       </div>
 
-      <div className="grid grid-cols-1 gap-3">
+      <div className="flex-1 space-y-3 overflow-y-auto">
         {options.map((option, index) => (
           <motion.button
             key={option.id}
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: index * 0.1 }}
+            transition={{ delay: index * 0.08 }}
             onClick={() => onSelect(option.id)}
-            className="group relative p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm text-left hover:shadow-md hover:border-blue-300 dark:hover:border-blue-600 transition-all duration-200"
+            className="group w-full p-4 bg-slate-800/60 hover:bg-slate-700/60 border border-slate-700/60 hover:border-emerald-500/40 rounded-xl shadow-sm text-left transition-all duration-200"
           >
             <div className="flex items-start gap-3">
               {option.icon && (
@@ -54,18 +55,18 @@ export default function ActionPanel({
                   {option.icon}
                 </span>
               )}
-              <div className="flex-1">
-                <div className="font-medium text-gray-900 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-slate-100 group-hover:text-emerald-400 transition-colors">
                   {option.label}
                 </div>
                 {option.description && (
-                  <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                  <div className="text-sm text-slate-400 mt-1">
                     {option.description}
                   </div>
                 )}
               </div>
               <svg
-                className="w-5 h-5 text-gray-400 group-hover:text-blue-500 group-hover:translate-x-1 transition-all"
+                className="w-5 h-5 text-slate-500 group-hover:text-emerald-500 group-hover:translate-x-1 transition-all flex-shrink-0"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"

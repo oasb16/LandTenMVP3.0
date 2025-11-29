@@ -19,11 +19,13 @@ import { useSession } from "next-auth/react";
 import type { Channel, Event, StreamChat } from "stream-chat";
 import {
   type UIMode,
+  type Stage,
   type IntentType,
   type FlowState,
   type AISupportFlowHook,
   type Persona,
   isValidUIMode,
+  isValidStage,
 } from "@/types/ai-support";
 
 interface UseAISupportFlowOptions {
@@ -32,7 +34,8 @@ interface UseAISupportFlowOptions {
   client?: StreamChat | null; // Accept client from parent to avoid duplicate token requests
 }
 
-const DEFAULT_UI_MODE: UIMode = "idle";
+const DEFAULT_UI_MODE: UIMode = "cta_panel";  // Amazon spec: start with CTA panel
+const DEFAULT_STAGE: Stage = "intro";         // Amazon spec: start with intro stage
 const DEFAULT_PAYLOAD: Record<string, unknown> = {};
 
 /**
@@ -49,8 +52,9 @@ export default function useAISupportFlow({
   const [client, setClient] = useState<StreamChat | null>(externalClient ?? null);
   const [channel, setChannel] = useState<Channel | null>(null);
 
-  // UI State
+  // UI State (Amazon spec)
   const [uiMode, setUiMode] = useState<UIMode>(DEFAULT_UI_MODE);
+  const [stage, setStage] = useState<Stage>(DEFAULT_STAGE);
   const [payload, setPayload] = useState<Record<string, unknown>>(DEFAULT_PAYLOAD);
 
   // Flow State
@@ -144,30 +148,30 @@ export default function useAISupportFlow({
         console.log("[AI Support Flow] ✅ Step 4 COMPLETE: Channel state updated");
 
         console.log("[AI Support Flow] 📡 Step 5: Initializing flow state");
-        // Initialize flow state
+        // Initialize flow state (Amazon spec)
         setFlowState({
           session_id: channelId,
           incident_id: null,
           persona,
-          current_mode: "idle",
+          current_stage: "intro",     // Amazon spec
+          current_mode: "cta_panel",  // Amazon spec
           selected_item: null,
           selected_reason: null,
-          resolution_data: null,
           chat_channel_id: channelId,
         });
         console.log("[AI Support Flow] ✅ Step 5 COMPLETE: Flow state initialized");
 
-        console.log("[AI Support Flow] 📡 Step 6: Sending session_init event to backend");
-        // Send init event to backend
+        console.log("[AI Support Flow] 📡 Step 6: Sending ai_init event to backend");
+        // Send init event to backend (Amazon spec: ai_init)
         await ch.sendEvent({
           type: "ai_intent",
-          intent: "session_init",
+          intent: "ai_init",
           payload: {
             persona,
             mode: "guided",
           },
         });
-        console.log("[AI Support Flow] ✅ Step 6 COMPLETE: Session init event sent");
+        console.log("[AI Support Flow] ✅ Step 6 COMPLETE: ai_init event sent");
 
         console.log("[AI Support Flow] 🎉 ALL STEPS COMPLETE - AI Support session initialized");
         isInitializedRef.current = true;
@@ -194,14 +198,27 @@ export default function useAISupportFlow({
     eventListenersRef.current.forEach((cleanup) => cleanup());
     eventListenersRef.current = [];
 
-    // Listen for AI state updates
+    // Listen for AI state updates (Amazon spec: ai_state events)
     const aiStateListener = channel.on("ai_state", (event: Event) => {
-      console.log("[AI Support] Received ai_state event:", event);
+      console.log("[AI Support] 🎯 Received ai_state event:", event);
 
+      const stageValue = (event as any).stage;
       const uiModeValue = (event as any).ui_mode;
       const payloadValue = (event as any).payload || {};
 
+      console.log("[AI Support] 📋 Parsing ai_state - stage:", stageValue, "ui_mode:", uiModeValue);
+
+      // Validate and update stage (Amazon spec)
+      if (isValidStage(stageValue)) {
+        console.log("[AI Support] ✅ Valid stage:", stageValue);
+        setStage(stageValue);
+      } else {
+        console.warn("[AI Support] ⚠️ Invalid stage:", stageValue);
+      }
+
+      // Validate and update UI mode (Amazon spec)
       if (isValidUIMode(uiModeValue)) {
+        console.log("[AI Support] ✅ Valid ui_mode:", uiModeValue);
         setUiMode(uiModeValue);
         setPayload(payloadValue);
 
@@ -210,9 +227,14 @@ export default function useAISupportFlow({
           if (!prev) return prev;
           return {
             ...prev,
+            current_stage: stageValue,
             current_mode: uiModeValue,
           };
         });
+
+        console.log("[AI Support] ✅ State updated - stage:", stageValue, "mode:", uiModeValue);
+      } else {
+        console.warn("[AI Support] ⚠️ Invalid ui_mode:", uiModeValue);
       }
     });
 
@@ -329,6 +351,7 @@ export default function useAISupportFlow({
   return {
     channel,
     uiMode,
+    stage,      // Amazon spec: return stage
     payload,
     flowState,
     loading,

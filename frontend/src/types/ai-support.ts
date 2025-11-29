@@ -2,227 +2,161 @@
  * AI Support Experience - Type Definitions
  *
  * Complete type system for the Amazon-style guided support flow
+ *
+ * OFFICIAL SPECIFICATION:
+ * - Stages: intro → item_select → issue_select → diagnosis → resolution
+ * - UI Modes: cta_panel, gallery, selector, chat, resolution, fallback
+ * - Event Protocol: ai_intent (frontend→backend), ai_state (backend→frontend)
  */
 
 // ============================================================================
-// CORE TYPES
+// AMAZON-STYLE FLOW - CORE TYPES
 // ============================================================================
 
 /**
- * User persona types
+ * User personas - determines vocabulary, actions, and routing
  */
-export type Persona = "tenant" | "landlord" | "contractor";
+export type Persona = "tenant" | "landlord" | "property_manager" | "contractor";
 
 /**
- * UI Mode - determines which panel is currently displayed
+ * Amazon-style flow stages (backbone of flow)
+ */
+export type Stage =
+  | "intro"         // Determine persona, show welcome + options
+  | "item_select"   // Show items (appliances, incidents, jobs, etc.)
+  | "issue_select"  // Choose what's wrong with the item
+  | "diagnosis"     // Multi-turn troubleshooting
+  | "resolution";   // Final actions
+
+/**
+ * UI Modes - determines which panel is displayed
+ * These are the ONLY valid UI modes (Amazon spec)
  */
 export type UIMode =
-  | "idle"           // No active panel
-  | "cta_panel"      // Initial "How can we help?" panel
-  | "gallery"        // Item picker (properties, units, etc.)
-  | "selector"       // Reason picker (issue selection)
-  | "diagnosis"      // AI is analyzing the issue
-  | "resolution"     // Final resolution options
-  | "escalation"     // Human escalation form
-  | "complete";      // Session complete
+  | "cta_panel"    // Large button menu (What do you need help with?)
+  | "gallery"      // Scrollable list of items (orders, maintenance, etc.)
+  | "selector"     // List of issue reasons
+  | "chat"         // Pure conversational messages (diagnosis)
+  | "resolution"   // Final actions user can take
+  | "fallback";    // Chat unavailable
 
 /**
- * Intent types - user actions that trigger backend processing
+ * Intent types - user/system actions (Amazon spec)
  */
 export type IntentType =
-  | "user_message"       // Free-form text message
-  | "item_selected"      // User selected an item from gallery
-  | "reason_selected"    // User selected a reason/issue
-  | "resolution_action"  // User chose a resolution action
-  | "escalate_human"     // User requested human support
-  | "session_init";      // Session initialization
+  // User-initiated intents
+  | "user_message"       // Plain chat text
+  | "select_cta"         // Selected main option from CTA panel
+  | "item_selected"      // Selected item from gallery
+  | "reason_selected"    // Selected reason from selector
+  | "diagnosis_answer"   // Answer during diagnosis
+  | "resolution_action"  // Final action chosen
+
+  // System-initiated intents
+  | "ai_init"            // Initialize session
+  | "ai_continue"        // Continue flow
+  | "ai_escalate"        // Escalate to human
+  | "ai_close_session";  // Close session
 
 // ============================================================================
 // PAYLOAD TYPES
 // ============================================================================
 
 /**
- * CTA Panel Options
+ * CTA Panel (Stage: intro, UI Mode: cta_panel)
  */
 export interface CTAOption {
   id: string;
   label: string;
   description?: string;
   icon?: string;
-  persona_specific?: boolean;
 }
 
 export interface CTAPanelPayload {
-  title?: string;
-  subtitle?: string;
   options: CTAOption[];
 }
 
 /**
- * Gallery/Item Picker
+ * Gallery/Item Picker (Stage: item_select, UI Mode: gallery)
  */
 export interface GalleryItem {
   id: string;
   title: string;
   subtitle?: string;
-  description?: string;
   image?: string;
   metadata?: Record<string, unknown>;
 }
 
 export interface GalleryPayload {
-  title?: string;
-  subtitle?: string;
   items: GalleryItem[];
-  allow_skip?: boolean;
 }
 
 /**
- * Reason Selector
+ * Reason Selector (Stage: issue_select, UI Mode: selector)
  */
-export interface ReasonOption {
-  id: string;
-  label: string;
-  description?: string;
-  severity?: "low" | "medium" | "high" | "urgent";
-}
-
 export interface ReasonSelectorPayload {
-  title?: string;
-  subtitle?: string;
-  reasons: ReasonOption[];
-  selected_item?: GalleryItem;
+  reasons: string[];  // Simple string array per Amazon spec
+  itemId?: string;    // Optional reference to selected item
 }
 
 /**
- * Diagnosis State
+ * Chat/Diagnosis (Stage: diagnosis, UI Mode: chat)
  */
-export interface DiagnosisPayload {
-  status: "analyzing" | "complete" | "error";
-  message?: string;
-  progress?: number;
+export interface ChatPayload {
+  agent_prompt?: string;  // AI's response/question
+  reason?: string;        // Issue reason being diagnosed
+  summary?: string;       // Current understanding
 }
 
 /**
- * Resolution Panel
+ * Resolution (Stage: resolution, UI Mode: resolution)
  */
 export interface ResolutionAction {
   id: string;
   label: string;
-  description?: string;
-  type: "primary" | "secondary" | "danger";
-  icon?: string;
-  requires_confirmation?: boolean;
 }
 
 export interface ResolutionPayload {
   summary: string;
-  diagnosis?: string;
-  severity?: "low" | "medium" | "high" | "urgent";
   actions: ResolutionAction[];
-  estimated_time?: string;
-  estimated_cost?: string;
 }
 
 /**
- * Escalation Form
+ * Fallback (UI Mode: fallback)
  */
-export interface EscalationPayload {
-  reason?: string;
-  context?: Record<string, unknown>;
-  message_placeholder?: string;
+export interface FallbackPayload {
+  error: string;
 }
 
 // ============================================================================
-// EVENT PAYLOADS (Frontend → Backend)
+// BACKEND PROTOCOL
 // ============================================================================
 
 /**
- * Intent payload structures
- */
-export interface UserMessageIntent {
-  intent: "user_message";
-  payload: {
-    text: string;
-    metadata?: Record<string, unknown>;
-  };
-}
-
-export interface ItemSelectedIntent {
-  intent: "item_selected";
-  payload: {
-    item_id: string;
-    item_data?: GalleryItem;
-  };
-}
-
-export interface ReasonSelectedIntent {
-  intent: "reason_selected";
-  payload: {
-    reason_id: string;
-    reason_label?: string;
-  };
-}
-
-export interface ResolutionActionIntent {
-  intent: "resolution_action";
-  payload: {
-    action_id: string;
-    confirmation?: boolean;
-    metadata?: Record<string, unknown>;
-  };
-}
-
-export interface EscalateHumanIntent {
-  intent: "escalate_human";
-  payload: {
-    message: string;
-    context?: Record<string, unknown>;
-  };
-}
-
-export interface SessionInitIntent {
-  intent: "session_init";
-  payload: {
-    persona: Persona;
-    mode: "guided";
-  };
-}
-
-/**
- * Union type for all intents
- */
-export type AIIntent =
-  | UserMessageIntent
-  | ItemSelectedIntent
-  | ReasonSelectedIntent
-  | ResolutionActionIntent
-  | EscalateHumanIntent
-  | SessionInitIntent;
-
-// ============================================================================
-// STATE EVENTS (Backend → Frontend)
-// ============================================================================
-
-/**
- * UI State event structure
+ * Backend Response (ai_state event)
  */
 export interface AIStateEvent {
   type: "ai_state";
+  stage: Stage;
   ui_mode: UIMode;
+  persona?: Persona;
   payload:
     | CTAPanelPayload
     | GalleryPayload
     | ReasonSelectorPayload
-    | DiagnosisPayload
+    | ChatPayload
     | ResolutionPayload
-    | EscalationPayload
+    | FallbackPayload
     | Record<string, unknown>;
-  metadata?: {
-    session_id?: string;
-    incident_id?: string;
-    timestamp?: string;
-  };
+}
+
+/**
+ * Frontend Intent (ai_intent event)
+ */
+export interface AIIntentEvent {
+  type: "ai_intent";
+  intent: IntentType;
+  payload: Record<string, unknown>;
 }
 
 // ============================================================================
@@ -236,109 +170,40 @@ export interface FlowState {
   session_id: string | null;
   incident_id: string | null;
   persona: Persona;
+  current_stage: Stage;
   current_mode: UIMode;
   selected_item: GalleryItem | null;
-  selected_reason: ReasonOption | null;
-  resolution_data: ResolutionPayload | null;
+  selected_reason: string | null;
   chat_channel_id: string | null;
-}
-
-// ============================================================================
-// API TYPES
-// ============================================================================
-
-/**
- * API Request/Response types
- */
-export interface InitSessionRequest {
-  user_id: string;
-  persona: Persona;
-  mode: "guided";
-}
-
-export interface InitSessionResponse {
-  success: boolean;
-  session_id: string;
-  channel_id: string;
-  initial_state?: AIStateEvent;
-  error?: string;
-}
-
-export interface SendIntentRequest {
-  channel_id: string;
-  session_id: string;
-  intent: AIIntent;
-}
-
-export interface SendIntentResponse {
-  success: boolean;
-  acknowledged: boolean;
-  error?: string;
-}
-
-// ============================================================================
-// STREAM CHAT CUSTOM EVENTS
-// ============================================================================
-
-/**
- * Custom Stream Chat event types
- */
-export interface StreamAIStateEvent {
-  type: "ai_state";
-  ui_mode: UIMode;
-  payload: Record<string, unknown>;
-  user_id?: string;
-  created_at?: string;
-}
-
-export interface StreamAIIntentEvent {
-  type: "ai_intent";
-  intent: IntentType;
-  payload: Record<string, unknown>;
-  user_id?: string;
-  created_at?: string;
 }
 
 // ============================================================================
 // COMPONENT PROPS
 // ============================================================================
 
-/**
- * Props for dynamic panel components
- */
-export interface DynamicPanelProps {
-  uiMode: UIMode;
-  payload: Record<string, unknown>;
-  onAction: (intent: IntentType, payload: Record<string, unknown>) => Promise<void>;
-}
-
 export interface ActionPanelProps {
   options: CTAOption[];
-  title?: string;
-  subtitle?: string;
   onSelect: (optionId: string) => void;
 }
 
 export interface ItemPickerProps {
   items: GalleryItem[];
-  title?: string;
-  subtitle?: string;
-  allowSkip?: boolean;
-  onSelect: (itemId: string, itemData?: GalleryItem) => void;
-  onSkip?: () => void;
+  onSelect: (itemId: string) => void;
 }
 
 export interface ReasonPickerProps {
-  reasons: ReasonOption[];
-  title?: string;
-  subtitle?: string;
-  selectedItem?: GalleryItem;
-  onSelect: (reasonId: string, reason?: ReasonOption) => void;
+  reasons: string[];
+  onSelect: (reason: string) => void;
 }
 
 export interface ResolutionPanelProps {
-  data: ResolutionPayload;
-  onAction: (actionId: string, metadata?: Record<string, unknown>) => void;
+  summary: string;
+  actions: ResolutionAction[];
+  onAction: (actionId: string) => void;
+}
+
+export interface FallbackPanelProps {
+  error: string;
 }
 
 // ============================================================================
@@ -350,10 +215,11 @@ export interface ResolutionPanelProps {
  */
 export interface AISupportFlowHook {
   // Stream Chat
-  channel: any | null; // Channel from stream-chat
+  channel: any | null;
 
   // State
   uiMode: UIMode;
+  stage: Stage;
   payload: Record<string, unknown>;
   flowState: FlowState | null;
 
@@ -370,27 +236,30 @@ export interface AISupportFlowHook {
 }
 
 // ============================================================================
-// VALIDATION SCHEMAS
+// VALIDATION
 // ============================================================================
 
-/**
- * Type guards for runtime validation
- */
 export const isValidUIMode = (mode: unknown): mode is UIMode => {
   return typeof mode === "string" && [
-    "idle", "cta_panel", "gallery", "selector",
-    "diagnosis", "resolution", "escalation", "complete"
+    "cta_panel", "gallery", "selector", "chat", "resolution", "fallback"
   ].includes(mode);
+};
+
+export const isValidStage = (stage: unknown): stage is Stage => {
+  return typeof stage === "string" && [
+    "intro", "item_select", "issue_select", "diagnosis", "resolution"
+  ].includes(stage);
 };
 
 export const isValidIntentType = (type: unknown): type is IntentType => {
   return typeof type === "string" && [
-    "user_message", "item_selected", "reason_selected",
-    "resolution_action", "escalate_human", "session_init"
+    "user_message", "select_cta", "item_selected", "reason_selected",
+    "diagnosis_answer", "resolution_action", "ai_init", "ai_continue",
+    "ai_escalate", "ai_close_session"
   ].includes(type);
 };
 
 export const isValidPersona = (persona: unknown): persona is Persona => {
   return typeof persona === "string" &&
-    ["tenant", "landlord", "contractor"].includes(persona);
+    ["tenant", "landlord", "property_manager", "contractor"].includes(persona);
 };
