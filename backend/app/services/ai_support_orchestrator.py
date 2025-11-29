@@ -10,10 +10,105 @@ Event Protocol:
 """
 import logging
 from typing import Dict, Any, Optional, List
+from datetime import datetime, timezone
 from ..services.stream_bot import get_bot
 from ..services.dynamo_service import IncidentDB, JobDB, PropertyDB
 
 logger = logging.getLogger(__name__)
+
+
+class SessionState:
+    """
+    Maintains state for an AI Support session.
+    Tracks selected items, reasons, and context across flow stages.
+    """
+    def __init__(self, session_id: str, user_id: str, channel_id: str, persona: str):
+        self.session_id = session_id
+        self.user_id = user_id
+        self.channel_id = channel_id
+        self.persona = persona
+        self.created_at = datetime.now(timezone.utc).isoformat()
+        self.updated_at = self.created_at
+
+        # Flow tracking
+        self.current_stage: str = "intro"
+        self.current_mode: str = "cta_panel"
+
+        # User selections
+        self.selected_cta: Optional[str] = None
+        self.selected_item_id: Optional[str] = None
+        self.selected_item_title: Optional[str] = None
+        self.selected_reason: Optional[str] = None
+
+        # Diagnosis context
+        self.diagnosis_messages: List[str] = []
+
+        # Metadata
+        self.metadata: Dict[str, Any] = {}
+
+    def update_stage(self, stage: str, mode: str):
+        """Update current stage and mode."""
+        self.current_stage = stage
+        self.current_mode = mode
+        self.updated_at = datetime.now(timezone.utc).isoformat()
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize state to dictionary."""
+        return {
+            "session_id": self.session_id,
+            "user_id": self.user_id,
+            "channel_id": self.channel_id,
+            "persona": self.persona,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "current_stage": self.current_stage,
+            "current_mode": self.current_mode,
+            "selected_cta": self.selected_cta,
+            "selected_item_id": self.selected_item_id,
+            "selected_item_title": self.selected_item_title,
+            "selected_reason": self.selected_reason,
+            "diagnosis_messages": self.diagnosis_messages,
+            "metadata": self.metadata
+        }
+
+
+class SessionStateManager:
+    """
+    In-memory session state manager.
+
+    In production, this would be backed by DynamoDB or Redis for persistence.
+    For now, uses in-memory dict keyed by channel_id.
+    """
+    def __init__(self):
+        self._sessions: Dict[str, SessionState] = {}
+
+    def get_or_create(self, channel_id: str, user_id: str, persona: str) -> SessionState:
+        """Get existing session or create new one."""
+        if channel_id not in self._sessions:
+            session_id = f"sess-{channel_id}-{int(datetime.now().timestamp())}"
+            self._sessions[channel_id] = SessionState(
+                session_id=session_id,
+                user_id=user_id,
+                channel_id=channel_id,
+                persona=persona
+            )
+            logger.info(f"Created new session: {session_id}")
+
+        return self._sessions[channel_id]
+
+    def get(self, channel_id: str) -> Optional[SessionState]:
+        """Get session by channel ID."""
+        return self._sessions.get(channel_id)
+
+    def clear(self, channel_id: str):
+        """Clear session state."""
+        if channel_id in self._sessions:
+            del self._sessions[channel_id]
+            logger.info(f"Cleared session for channel: {channel_id}")
+
+
+# Global session manager instance
+_session_manager = SessionStateManager()
 
 
 class AISupportOrchestrator:
@@ -24,6 +119,7 @@ class AISupportOrchestrator:
 
     def __init__(self):
         self.bot = get_bot()
+        self.session_manager = _session_manager
 
     async def handle_intent(
         self,
@@ -104,6 +200,11 @@ class AISupportOrchestrator:
         cta_id = payload.get("cta_id")
         logger.info(f"[AI Support] CTA selected: {cta_id}")
 
+        # Get or create session and update state
+        session = self.session_manager.get_or_create(channel_id, user_id, persona)
+        session.selected_cta = cta_id
+        session.update_stage("item_select", "gallery")
+
         # Get items based on persona and CTA selection
         items = await self._get_items(persona, cta_id, user_id)
 
@@ -129,6 +230,11 @@ class AISupportOrchestrator:
         """
         item_id = payload.get("item_id")
         logger.info(f"[AI Support] Item selected: {item_id}")
+
+        # Update session state
+        session = self.session_manager.get_or_create(channel_id, user_id, persona)
+        session.selected_item_id = item_id
+        session.update_stage("issue_select", "selector")
 
         # Get reasons based on persona and item
         reasons = self._get_issue_reasons(persona, item_id)
@@ -156,6 +262,11 @@ class AISupportOrchestrator:
         """
         reason = payload.get("reason")
         logger.info(f"[AI Support] Reason selected: {reason}")
+
+        # Update session state
+        session = self.session_manager.get_or_create(channel_id, user_id, persona)
+        session.selected_reason = reason
+        session.update_stage("diagnosis", "chat")
 
         # Send initial diagnosis message
         bot_id = self.bot.get_bot_id(persona)
@@ -356,25 +467,62 @@ class AISupportOrchestrator:
     ) -> bool:
         """
         Create an incident record from the AI Support session.
-        Extracts data from session context and creates DB record.
+        Uses session state to populate incident details with user selections.
         """
         try:
             import time
-            from datetime import datetime, timezone
+
+            # Get session state to populate incident
+            session = self.session_manager.get(channel_id)
 
             # Generate incident ID
             incident_id = f"INC-AI-{int(time.time())}"
 
-            # Build incident data from session
-            # In production, this would pull from stored session state
+            # Build title from session selections
+            title_parts = []
+            if session and session.selected_reason:
+                title_parts.append(session.selected_reason)
+            if session and session.selected_item_title:
+                title_parts.append(f"({session.selected_item_title})")
+
+            title = " - ".join(title_parts) if title_parts else "Maintenance Issue (AI Support)"
+
+            # Build description from session context
+            description_parts = ["Issue reported via AI Support chat."]
+            if session:
+                if session.selected_cta:
+                    description_parts.append(f"Category: {session.selected_cta}")
+                if session.selected_item_id:
+                    description_parts.append(f"Item: {session.selected_item_id}")
+                if session.selected_reason:
+                    description_parts.append(f"Issue: {session.selected_reason}")
+                if session.diagnosis_messages:
+                    description_parts.append(f"User provided {len(session.diagnosis_messages)} additional details in chat.")
+
+            description = "\n".join(description_parts)
+
+            # Infer category from selections
+            category = "general"
+            if session and session.selected_item_id:
+                item_lower = session.selected_item_id.lower()
+                if "kitchen" in item_lower or "sink" in item_lower or "dishwasher" in item_lower:
+                    category = "plumbing"
+                elif "bathroom" in item_lower or "toilet" in item_lower or "shower" in item_lower:
+                    category = "plumbing"
+                elif "hvac" in item_lower or "heating" in item_lower or "cooling" in item_lower:
+                    category = "hvac"
+                elif "electric" in item_lower:
+                    category = "electrical"
+
+            # Build incident data
             incident_data = {
                 "incident_id": incident_id,
                 "user_id": user_id,
                 "tenant_id": user_id,
                 "property_id": "unknown",  # Would come from user profile
-                "title": payload.get("title", "Maintenance Issue (AI Support)"),
-                "description": payload.get("description", "Issue reported via AI Support chat"),
-                "category": payload.get("category", "general"),
+                "title": title,
+                "description": description,
+                "category": category,
                 "severity": payload.get("severity", "medium"),
                 "urgency": payload.get("urgency", "routine"),
                 "status": "detected",
@@ -382,14 +530,18 @@ class AISupportOrchestrator:
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "metadata": {
                     "source": "ai_support",
-                    "session_channel": channel_id
+                    "session_id": session.session_id if session else None,
+                    "session_channel": channel_id,
+                    "selected_cta": session.selected_cta if session else None,
+                    "selected_item": session.selected_item_id if session else None,
+                    "selected_reason": session.selected_reason if session else None
                 }
             }
 
             # Create incident in DynamoDB
             IncidentDB.create_incident(incident_data)
 
-            logger.info(f"Created incident {incident_id} from AI Support session")
+            logger.info(f"Created incident {incident_id} from AI Support session with context: {title}")
             return True
 
         except Exception as e:
