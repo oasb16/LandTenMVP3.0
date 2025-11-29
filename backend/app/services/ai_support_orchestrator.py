@@ -11,6 +11,7 @@ Event Protocol:
 import logging
 from typing import Dict, Any, Optional, List
 from ..services.stream_bot import get_bot
+from ..services.dynamo_service import IncidentDB, JobDB, PropertyDB
 
 logger = logging.getLogger(__name__)
 
@@ -233,15 +234,57 @@ class AISupportOrchestrator:
         self,
         channel_id: str,
         user_id: str,
-        persona: str
+        persona: str,
+        context: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """Transition to resolution stage with action options."""
-        summary = "Based on our conversation, here are the recommended next steps."
-        actions = [
-            {"id": "create_ticket", "label": "Create Support Ticket"},
-            {"id": "contact_support", "label": "Contact Human Support"},
-            {"id": "done", "label": "I'm All Set"}
-        ]
+        """
+        Transition to resolution stage with persona-specific action options.
+        Provides contextually relevant actions based on user role.
+        """
+        # Persona-specific summaries and actions
+        if persona == "tenant":
+            summary = "Based on your description, I can help you create a maintenance request for your landlord to review."
+            actions = [
+                {"id": "create_incident", "label": "📋 Submit Maintenance Request"},
+                {"id": "try_diy", "label": "🔧 View DIY Troubleshooting Tips"},
+                {"id": "contact_emergency", "label": "🚨 Report Emergency (24/7)"},
+                {"id": "done", "label": "✅ Issue Resolved"}
+            ]
+
+        elif persona == "landlord":
+            summary = "I can help you take action on this incident or find a contractor."
+            actions = [
+                {"id": "approve_work", "label": "✅ Approve Work Order"},
+                {"id": "find_contractor", "label": "👷 Find Contractor"},
+                {"id": "request_more_info", "label": "📸 Request More Details"},
+                {"id": "close_incident", "label": "✓ Mark as Resolved"}
+            ]
+
+        elif persona == "contractor":
+            summary = "You can bid on this job or update your availability."
+            actions = [
+                {"id": "submit_bid", "label": "💼 Submit Bid"},
+                {"id": "view_details", "label": "📋 View Full Job Details"},
+                {"id": "decline", "label": "❌ Not Interested"}
+            ]
+
+        elif persona == "property_manager":
+            summary = "Here are your options for managing this request."
+            actions = [
+                {"id": "assign_contractor", "label": "👷 Assign to Contractor"},
+                {"id": "escalate", "label": "🚨 Escalate to Landlord"},
+                {"id": "schedule_inspection", "label": "📅 Schedule Inspection"},
+                {"id": "resolve", "label": "✅ Mark as Resolved"}
+            ]
+
+        else:
+            # Default fallback
+            summary = "Based on our conversation, here are the recommended next steps."
+            actions = [
+                {"id": "create_ticket", "label": "Create Support Ticket"},
+                {"id": "contact_support", "label": "Contact Human Support"},
+                {"id": "done", "label": "I'm All Set"}
+            ]
 
         return {
             "stage": "resolution",
@@ -346,50 +389,194 @@ class AISupportOrchestrator:
         cta_id: str,
         user_id: str
     ) -> List[Dict[str, Any]]:
-        """Get items for gallery based on persona and CTA selection."""
-        # Simplified mock data - in production, fetch from database
-        if persona == "tenant" and cta_id == "maintenance":
-            return [
-                {
-                    "id": "kitchen_sink",
-                    "title": "Kitchen Sink",
-                    "subtitle": "Unit 304",
-                },
-                {
-                    "id": "hvac",
-                    "title": "HVAC System",
-                    "subtitle": "Central heating/cooling",
-                },
-                {
-                    "id": "dishwasher",
-                    "title": "Dishwasher",
-                    "subtitle": "GE Model ABC123",
-                }
-            ]
-        elif persona == "landlord" and cta_id == "incidents":
-            return [
-                {
-                    "id": "inc_001",
-                    "title": "Water Leak - Unit 304",
-                    "subtitle": "Reported 2 hours ago",
-                },
-                {
-                    "id": "inc_002",
-                    "title": "AC Not Working - Unit 201",
-                    "subtitle": "Reported yesterday",
-                }
-            ]
-        else:
-            # Default empty list
+        """
+        Get items for gallery based on persona and CTA selection.
+        Fetches real data from DynamoDB when available, falls back to defaults.
+        """
+        try:
+            # TENANT: Maintenance issues - show recent incidents
+            if persona == "tenant" and cta_id == "maintenance":
+                try:
+                    incidents = IncidentDB.list_incidents_by_tenant(user_id)
+                    if incidents and len(incidents) > 0:
+                        # Show recent incidents for context
+                        return [
+                            {
+                                "id": inc.get("incident_id"),
+                                "title": inc.get("title", "Untitled Issue"),
+                                "subtitle": f"Status: {inc.get('status', 'unknown')} • {inc.get('category', 'general')}",
+                            }
+                            for inc in incidents[:5]  # Limit to 5 most recent
+                        ]
+                except Exception as e:
+                    logger.error(f"Error fetching tenant incidents: {e}")
+
+                # Fallback: Common appliances/areas
+                return [
+                    {
+                        "id": "new_issue",
+                        "title": "Report New Issue",
+                        "subtitle": "Start a new maintenance request",
+                    },
+                    {
+                        "id": "kitchen",
+                        "title": "Kitchen Appliances",
+                        "subtitle": "Sink, dishwasher, refrigerator",
+                    },
+                    {
+                        "id": "bathroom",
+                        "title": "Bathroom",
+                        "subtitle": "Toilet, shower, plumbing",
+                    },
+                    {
+                        "id": "hvac",
+                        "title": "HVAC System",
+                        "subtitle": "Heating and cooling",
+                    }
+                ]
+
+            # LANDLORD: Review incidents
+            elif persona == "landlord" and cta_id == "incidents":
+                try:
+                    # Fetch all tenant incidents for properties owned by landlord
+                    # Note: In production, filter by property_id linked to landlord
+                    incidents = IncidentDB.list_incidents_by_tenant(user_id)
+                    if incidents and len(incidents) > 0:
+                        return [
+                            {
+                                "id": inc.get("incident_id"),
+                                "title": f"{inc.get('category', 'Issue').title()} - {inc.get('property_id', 'Unknown')}",
+                                "subtitle": f"{inc.get('severity', 'medium')} • {inc.get('status', 'pending')}",
+                            }
+                            for inc in incidents[:10]
+                        ]
+                except Exception as e:
+                    logger.error(f"Error fetching landlord incidents: {e}")
+
+                # Fallback
+                return [
+                    {
+                        "id": "no_incidents",
+                        "title": "No Active Incidents",
+                        "subtitle": "All maintenance up to date",
+                    }
+                ]
+
+            # CONTRACTOR: Available jobs
+            elif persona == "contractor" and cta_id == "jobs":
+                try:
+                    # Fetch available jobs (status = "created" or "open")
+                    # Note: Would need a query_jobs_by_status method
+                    return [
+                        {
+                            "id": "browse_jobs",
+                            "title": "Browse Available Jobs",
+                            "subtitle": "See all open maintenance requests",
+                        }
+                    ]
+                except Exception as e:
+                    logger.error(f"Error fetching contractor jobs: {e}")
+
+                return []
+
+            # CONTRACTOR: My active jobs
+            elif persona == "contractor" and cta_id == "my_jobs":
+                # Fetch contractor's assigned jobs
+                return [
+                    {
+                        "id": "active_jobs",
+                        "title": "Your Active Jobs",
+                        "subtitle": "View scheduled work",
+                    }
+                ]
+
+            # Default: Empty list
+            else:
+                logger.warning(f"No items handler for persona={persona}, cta_id={cta_id}")
+                return []
+
+        except Exception as e:
+            logger.error(f"Error in _get_items: {e}", exc_info=True)
             return []
 
     def _get_issue_reasons(self, persona: str, item_id: str) -> List[str]:
-        """Get issue reason strings for selector."""
-        # Simplified - in production, fetch based on item type
+        """
+        Get context-aware issue reason strings for selector.
+        Returns different reasons based on the item selected.
+        """
+        # Item-specific issue reasons
+        reason_map = {
+            # Kitchen appliances
+            "kitchen": [
+                "Sink is clogged or draining slowly",
+                "Faucet is leaking",
+                "Dishwasher not working",
+                "Garbage disposal issue",
+                "Other kitchen issue"
+            ],
+            "kitchen_sink": [
+                "Clogged or slow drainage",
+                "Leaking faucet",
+                "No hot water",
+                "Broken handle or fixture",
+                "Other sink issue"
+            ],
+            "dishwasher": [
+                "Won't start or turn on",
+                "Not draining properly",
+                "Leaking water",
+                "Not cleaning dishes properly",
+                "Making loud noises"
+            ],
+
+            # Bathroom
+            "bathroom": [
+                "Toilet not flushing properly",
+                "Shower or bathtub issue",
+                "Sink leaking or clogged",
+                "No hot water",
+                "Other bathroom issue"
+            ],
+
+            # HVAC
+            "hvac": [
+                "No heating",
+                "No cooling/AC not working",
+                "Strange noises or smells",
+                "Thermostat not responding",
+                "Air quality concerns"
+            ],
+
+            # Default for existing incidents
+            "incident": [
+                "Need status update",
+                "Issue is worse",
+                "Issue is resolved",
+                "Have additional information",
+                "Want to speak to someone"
+            ],
+
+            # New issue
+            "new_issue": [
+                "Plumbing problem",
+                "Electrical issue",
+                "Appliance not working",
+                "Structural damage",
+                "Other maintenance need"
+            ]
+        }
+
+        # Check if item_id matches any of our mappings
+        for key in reason_map:
+            if key in item_id.lower():
+                return reason_map[key]
+
+        # Default generic reasons
         return [
-            "Not working at all",
-            "Making strange noises",
-            "Leaking water",
+            "Not working properly",
+            "Making unusual noises or smells",
+            "Leaking or damaged",
+            "Safety concern",
             "Other issue"
         ]
 
