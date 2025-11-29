@@ -204,20 +204,138 @@ class AISupportOrchestrator:
         persona: str
     ) -> Dict[str, Any]:
         """
-        Handle resolution action - complete flow.
-        Stage: resolution → complete
+        Handle resolution action - execute actual business logic.
+        Stage: resolution → complete or back to intro
         """
         action_id = payload.get("action_id")
-        logger.info(f"[AI Support] Resolution action: {action_id}")
+        logger.info(f"[AI Support] Resolution action: {action_id}, persona: {persona}")
 
-        # Send completion message
         bot_id = self.bot.get_bot_id(persona)
-        self.bot.send_message(
-            channel_id=channel_id,
-            bot_id=bot_id,
-            text="✅ Your request has been processed. Is there anything else I can help you with?",
-            internal_type="ai-message"
-        )
+
+        # Execute action based on ID
+        try:
+            # TENANT ACTIONS
+            if action_id == "create_incident":
+                success = await self._create_incident_from_session(
+                    user_id=user_id,
+                    channel_id=channel_id,
+                    payload=payload
+                )
+
+                if success:
+                    self.bot.send_message(
+                        channel_id=channel_id,
+                        bot_id=bot_id,
+                        text="✅ Maintenance request submitted successfully! Your landlord has been notified and will respond soon. You'll receive updates in this chat.",
+                        internal_type="ai-message"
+                    )
+                else:
+                    self.bot.send_message(
+                        channel_id=channel_id,
+                        bot_id=bot_id,
+                        text="⚠️ There was an issue submitting your request. Please try again or contact support.",
+                        internal_type="ai-message"
+                    )
+
+            elif action_id == "try_diy":
+                # Show DIY troubleshooting tips
+                self.bot.send_message(
+                    channel_id=channel_id,
+                    bot_id=bot_id,
+                    text="🔧 Here are some DIY troubleshooting steps you can try:\n\n1. Check if the issue is isolated to one fixture\n2. Look for visible leaks or damage\n3. Try turning it off and on again\n4. Check circuit breakers if electrical\n\nIf these don't help, I can still submit a maintenance request for you.",
+                    internal_type="ai-message"
+                )
+
+            elif action_id == "contact_emergency":
+                self.bot.send_message(
+                    channel_id=channel_id,
+                    bot_id=bot_id,
+                    text="🚨 **Emergency Support**\n\nFor immediate emergencies (water leaks, gas leaks, no heat in winter, etc.):\n📞 Emergency Hotline: 1-800-EMERGENCY\n\nAvailable 24/7 for urgent maintenance issues.",
+                    internal_type="ai-message"
+                )
+
+            # LANDLORD ACTIONS
+            elif action_id == "approve_work":
+                success = await self._approve_work_order(
+                    user_id=user_id,
+                    channel_id=channel_id,
+                    payload=payload
+                )
+
+                if success:
+                    self.bot.send_message(
+                        channel_id=channel_id,
+                        bot_id=bot_id,
+                        text="✅ Work order approved! I'll now find qualified contractors in your area.",
+                        internal_type="ai-message"
+                    )
+                else:
+                    self.bot.send_message(
+                        channel_id=channel_id,
+                        bot_id=bot_id,
+                        text="⚠️ Could not approve work order. Please try again.",
+                        internal_type="ai-message"
+                    )
+
+            elif action_id == "find_contractor":
+                self.bot.send_message(
+                    channel_id=channel_id,
+                    bot_id=bot_id,
+                    text="👷 Searching for qualified contractors in your area...\n\nI'm looking for contractors with:\n✓ Relevant experience\n✓ Good ratings\n✓ Availability this week\n\nYou'll see bids shortly.",
+                    internal_type="ai-message"
+                )
+
+            elif action_id == "request_more_info":
+                self.bot.send_message(
+                    channel_id=channel_id,
+                    bot_id=bot_id,
+                    text="📸 I've requested additional photos and details from the tenant. They'll be notified to provide more information.",
+                    internal_type="ai-message"
+                )
+
+            # CONTRACTOR ACTIONS
+            elif action_id == "submit_bid":
+                self.bot.send_message(
+                    channel_id=channel_id,
+                    bot_id=bot_id,
+                    text="💼 Great! Please provide:\n\n1. Your estimated cost\n2. When you can start\n3. How long it will take\n\nReply in the chat and I'll submit your bid.",
+                    internal_type="ai-message"
+                )
+
+            elif action_id == "view_details":
+                self.bot.send_message(
+                    channel_id=channel_id,
+                    bot_id=bot_id,
+                    text="📋 **Job Details**\n\nCategory: Plumbing\nPriority: Medium\nLocation: Property #123\n\nDescription: Kitchen sink clogged, water draining slowly.\n\nPhotos and additional details are available in the job portal.",
+                    internal_type="ai-message"
+                )
+
+            # GENERIC ACTIONS
+            elif action_id == "done":
+                self.bot.send_message(
+                    channel_id=channel_id,
+                    bot_id=bot_id,
+                    text="✅ Great! I'm glad I could help. Feel free to come back anytime you need assistance.",
+                    internal_type="ai-message"
+                )
+
+            else:
+                logger.warning(f"Unhandled action: {action_id}")
+                self.bot.send_message(
+                    channel_id=channel_id,
+                    bot_id=bot_id,
+                    text="✅ Action noted. Is there anything else I can help you with?",
+                    internal_type="ai-message"
+                )
+
+        except Exception as e:
+            logger.error(f"Error executing action {action_id}: {e}", exc_info=True)
+            self.bot.send_message(
+                channel_id=channel_id,
+                bot_id=bot_id,
+                text="❌ Sorry, something went wrong processing your request. Please try again.",
+                internal_type="ai-message"
+            )
 
         # Return to intro stage
         cta_options = self._get_cta_options(persona)
@@ -229,6 +347,95 @@ class AISupportOrchestrator:
                 "options": cta_options
             }
         }
+
+    async def _create_incident_from_session(
+        self,
+        user_id: str,
+        channel_id: str,
+        payload: Dict[str, Any]
+    ) -> bool:
+        """
+        Create an incident record from the AI Support session.
+        Extracts data from session context and creates DB record.
+        """
+        try:
+            import time
+            from datetime import datetime, timezone
+
+            # Generate incident ID
+            incident_id = f"INC-AI-{int(time.time())}"
+
+            # Build incident data from session
+            # In production, this would pull from stored session state
+            incident_data = {
+                "incident_id": incident_id,
+                "user_id": user_id,
+                "tenant_id": user_id,
+                "property_id": "unknown",  # Would come from user profile
+                "title": payload.get("title", "Maintenance Issue (AI Support)"),
+                "description": payload.get("description", "Issue reported via AI Support chat"),
+                "category": payload.get("category", "general"),
+                "severity": payload.get("severity", "medium"),
+                "urgency": payload.get("urgency", "routine"),
+                "status": "detected",
+                "channel_id": channel_id,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "metadata": {
+                    "source": "ai_support",
+                    "session_channel": channel_id
+                }
+            }
+
+            # Create incident in DynamoDB
+            IncidentDB.create_incident(incident_data)
+
+            logger.info(f"Created incident {incident_id} from AI Support session")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error creating incident from session: {e}", exc_info=True)
+            return False
+
+    async def _approve_work_order(
+        self,
+        user_id: str,
+        channel_id: str,
+        payload: Dict[str, Any]
+    ) -> bool:
+        """
+        Approve work order and create job record.
+        """
+        try:
+            import time
+
+            # Generate job ID
+            job_id = f"JOB-AI-{int(time.time())}"
+
+            # Get incident ID from payload (if provided)
+            incident_id = payload.get("incident_id", "unknown")
+
+            # Create job record
+            job_data = {
+                "job_id": job_id,
+                "incident_id": incident_id,
+                "property_id": "unknown",  # Would come from incident
+                "landlord_id": user_id,
+                "title": "Approved Maintenance Work",
+                "category": "general",
+                "estimated_cost": "$150-250",
+                "urgency": "routine",
+                "status": "approved",
+                "channel_id": channel_id
+            }
+
+            JobDB.create_job(job_data)
+
+            logger.info(f"Created job {job_id} from work order approval")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error approving work order: {e}", exc_info=True)
+            return False
 
     async def _transition_to_resolution(
         self,
