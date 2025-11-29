@@ -105,9 +105,9 @@ export default function useAISupportFlow({
           name: "AI Support Session",
           ai_mode: mode,
           persona,
-          created_by: userId,
         });
 
+        // Create channel (watch will auto-create if it doesn't exist)
         await ch.watch();
         setChannel(ch);
 
