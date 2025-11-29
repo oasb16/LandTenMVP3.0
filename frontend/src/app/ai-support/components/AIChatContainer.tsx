@@ -3,9 +3,12 @@
  *
  * Main container that provides Stream Chat context and orchestrates the AI Support flow
  *
- * PRODUCTION MODE:
- * Uses fixed user ID "prod-user" with NEXT_PUBLIC_STREAM_USER_TOKEN for authentication.
- * Confidently attempts connection when credentials are provided.
+ * AUTHENTICATION:
+ * Uses the same Stream Chat authentication as Classic Dashboard:
+ * - Fetches per-user tokens from /api/chat/token backend endpoint
+ * - Uses actual user identity from session.user.email
+ * - Tokens are generated server-side with STREAM_CHAT_API_KEY/SECRET
+ * - No client-side env vars required
  */
 
 "use client";
@@ -31,7 +34,7 @@ export default function AIChatContainer({ mode }: AIChatContainerProps) {
   const [client, setClient] = useState<StreamChat | null>(null);
   const [clientError, setClientError] = useState<string | null>(null);
 
-  // Initialize Stream Chat client with fixed prod-user
+  // Initialize Stream Chat client using same pattern as Classic Dashboard
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (status === "loading") return;
@@ -45,33 +48,49 @@ export default function AIChatContainer({ mode }: AIChatContainerProps) {
 
     const initClient = async () => {
       try {
-        const apiKey = process.env.NEXT_PUBLIC_STREAM_KEY;
-        const userToken = process.env.NEXT_PUBLIC_STREAM_USER_TOKEN;
+        // Fetch token from backend (same as Classic Dashboard)
+        console.log("[AI Support Container] Fetching token from /api/chat/token");
+        const tokenRes = await fetch("/api/chat/token");
 
-        // Check for required credentials
-        if (!apiKey || !userToken) {
-          const missing = [];
-          if (!apiKey) missing.push("NEXT_PUBLIC_STREAM_KEY");
-          if (!userToken) missing.push("NEXT_PUBLIC_STREAM_USER_TOKEN");
-          throw new Error(`Missing required environment variables: ${missing.join(", ")}`);
+        if (!tokenRes.ok) {
+          const error = await tokenRes.json().catch(() => ({}));
+          throw new Error(error.error || "Unable to fetch Stream token");
+        }
+
+        const tokenData = await tokenRes.json();
+        const { api_key, token, user_id, display_user_id } = tokenData;
+
+        if (!api_key || !token || !user_id) {
+          throw new Error("Stream credentials incomplete");
         }
 
         const { StreamChat } = await import("stream-chat");
 
-        // Create singleton client
-        const streamClient = StreamChat.getInstance(apiKey, { timeout: 8000 });
+        // Create singleton client (same pattern as Classic Dashboard)
+        const streamClient = StreamChat.getInstance(api_key, { timeout: 8000 });
 
-        // Connect with fixed production user ID
+        // Connect with actual user identity (not fixed "prod-user")
         if (!streamClient.userID) {
-          console.log("[AI Support Container] Connecting as prod-user");
+          console.log("[AI Support Container] Connecting as", user_id);
           await streamClient.connectUser(
             {
-              id: "prod-user",
-              name: "Production User",
+              id: user_id,
+              name: display_user_id ?? session.user.email ?? user_id,
             },
-            userToken
+            token
           );
           console.log("[AI Support Container] ✅ Stream client connected successfully");
+        } else if (streamClient.userID !== user_id) {
+          console.log("[AI Support Container] User changed, reconnecting:", user_id);
+          await streamClient.disconnectUser();
+          await streamClient.connectUser(
+            {
+              id: user_id,
+              name: display_user_id ?? session.user.email ?? user_id,
+            },
+            token
+          );
+          console.log("[AI Support Container] ✅ Stream client reconnected");
         }
 
         if (mounted) {
