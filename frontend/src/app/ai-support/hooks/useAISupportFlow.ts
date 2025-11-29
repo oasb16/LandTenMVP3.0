@@ -92,8 +92,11 @@ export default function useAISupportFlow({
         const persona = (session.user.persona as Persona) || "tenant";
         const userId = session.user.email;
 
+        // Sanitize email for channel ID (Stream only allows letters, numbers, and !-_)
+        const sanitizedEmail = userId.toLowerCase().replace(/[^a-z0-9-_]/g, "-");
+
         // Create unique channel for this AI support session
-        const channelId = `ai-support-${userId}-${Date.now()}`;
+        const channelId = `ai-support-${sanitizedEmail}-${Date.now()}`;
         channelIdRef.current = channelId;
 
         console.log("[AI Support] Creating channel:", channelId);
