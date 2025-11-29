@@ -13,6 +13,7 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
 from ..services.stream_bot import get_bot
 from ..services.dynamo_service import IncidentDB, JobDB, PropertyDB
+from ..services.ai_diagnosis_agent import get_diagnosis_agent
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +121,7 @@ class AISupportOrchestrator:
     def __init__(self):
         self.bot = get_bot()
         self.session_manager = _session_manager
+        self.diagnosis_agent = get_diagnosis_agent()
 
     async def handle_intent(
         self,
@@ -257,7 +259,7 @@ class AISupportOrchestrator:
         persona: str
     ) -> Dict[str, Any]:
         """
-        Handle reason selection - start diagnosis chat.
+        Handle reason selection - start diagnosis chat with LLM agent.
         Stage: issue_select → diagnosis, UI Mode: selector → chat
         """
         reason = payload.get("reason")
@@ -268,12 +270,34 @@ class AISupportOrchestrator:
         session.selected_reason = reason
         session.update_stage("diagnosis", "chat")
 
-        # Send initial diagnosis message
+        # Start AI diagnosis conversation
+        session_context = {
+            "selected_cta": session.selected_cta,
+            "selected_item_id": session.selected_item_id,
+            "selected_reason": session.selected_reason
+        }
+
+        initial_message = self.diagnosis_agent.start_diagnosis(
+            channel_id=channel_id,
+            persona=persona,
+            session_context=session_context
+        )
+
+        # Send initial diagnosis message from AI agent
         bot_id = self.bot.get_bot_id(persona)
         self.bot.send_message(
             channel_id=channel_id,
             bot_id=bot_id,
-            text=f"I understand you're having an issue with: {reason}. Let me ask you a few questions to help diagnose the problem.",
+            text=initial_message,
+            internal_type="ai-message"
+        )
+
+        # Follow up with first diagnostic question
+        first_question = "When did this issue first start? Is it constant or intermittent?"
+        self.bot.send_message(
+            channel_id=channel_id,
+            bot_id=bot_id,
+            text=first_question,
             internal_type="ai-message"
         )
 
@@ -282,7 +306,7 @@ class AISupportOrchestrator:
             "ui_mode": "chat",
             "persona": persona,
             "payload": {
-                "agent_prompt": "Please describe the issue in more detail.",
+                "agent_prompt": first_question,
                 "reason": reason
             }
         }
@@ -295,17 +319,70 @@ class AISupportOrchestrator:
         persona: str
     ) -> Dict[str, Any]:
         """
-        Handle diagnosis chat answer - continue chat or move to resolution.
-        Stage: diagnosis (stay), UI Mode: chat
+        Handle diagnosis chat answer - use LLM to continue conversation or move to resolution.
+        Stage: diagnosis (stay or → resolution), UI Mode: chat (or → resolution)
         """
         answer = payload.get("answer")
         logger.info(f"[AI Support] Diagnosis answer: {answer}")
 
-        # For now, after a few exchanges, move to resolution
-        # In production, this would use LLM to determine when diagnosis is complete
+        # Get session for context
+        session = self.session_manager.get_or_create(channel_id, user_id, persona)
 
-        # Simplified logic: after any answer, show resolution
-        return await self._transition_to_resolution(channel_id, user_id, persona)
+        # Store user message in session
+        session.diagnosis_messages.append(answer)
+
+        # Build session context for LLM
+        session_context = {
+            "selected_cta": session.selected_cta,
+            "selected_item_id": session.selected_item_id,
+            "selected_reason": session.selected_reason
+        }
+
+        # Get AI response
+        ai_response, is_complete = await self.diagnosis_agent.send_message(
+            channel_id=channel_id,
+            user_message=answer,
+            persona=persona,
+            session_context=session_context
+        )
+
+        # Send AI response back to user
+        bot_id = self.bot.get_bot_id(persona)
+        self.bot.send_message(
+            channel_id=channel_id,
+            bot_id=bot_id,
+            text=ai_response,
+            internal_type="ai-message"
+        )
+
+        # If diagnosis is complete, transition to resolution
+        if is_complete:
+            logger.info(f"[AI Support] Diagnosis complete for {channel_id}, moving to resolution")
+
+            # Store diagnosis summary in session
+            session.metadata["diagnosis_summary"] = ai_response
+
+            # Clear diagnosis conversation
+            self.diagnosis_agent.clear_conversation(channel_id)
+
+            # Transition to resolution
+            return await self._transition_to_resolution(
+                channel_id=channel_id,
+                user_id=user_id,
+                persona=persona,
+                context={"diagnosis_summary": ai_response}
+            )
+
+        # Otherwise, stay in diagnosis stage
+        return {
+            "stage": "diagnosis",
+            "ui_mode": "chat",
+            "persona": persona,
+            "payload": {
+                "agent_prompt": ai_response,
+                "continue": True
+            }
+        }
 
     async def _handle_resolution_action(
         self,
@@ -491,13 +568,17 @@ class AISupportOrchestrator:
             description_parts = ["Issue reported via AI Support chat."]
             if session:
                 if session.selected_cta:
-                    description_parts.append(f"Category: {session.selected_cta}")
+                    description_parts.append(f"\nCategory: {session.selected_cta}")
                 if session.selected_item_id:
                     description_parts.append(f"Item: {session.selected_item_id}")
                 if session.selected_reason:
                     description_parts.append(f"Issue: {session.selected_reason}")
-                if session.diagnosis_messages:
-                    description_parts.append(f"User provided {len(session.diagnosis_messages)} additional details in chat.")
+
+                # Include AI diagnosis summary if available
+                if "diagnosis_summary" in session.metadata:
+                    description_parts.append(f"\n**AI Diagnosis:**\n{session.metadata['diagnosis_summary']}")
+                elif session.diagnosis_messages:
+                    description_parts.append(f"\nUser provided {len(session.diagnosis_messages)} additional details in chat.")
 
             description = "\n".join(description_parts)
 
@@ -598,11 +679,26 @@ class AISupportOrchestrator:
     ) -> Dict[str, Any]:
         """
         Transition to resolution stage with persona-specific action options.
-        Provides contextually relevant actions based on user role.
+        Uses diagnosis summary from LLM if available.
         """
-        # Persona-specific summaries and actions
+        # Get diagnosis summary from context or session
+        diagnosis_summary = None
+        if context and "diagnosis_summary" in context:
+            diagnosis_summary = context["diagnosis_summary"]
+        else:
+            # Try to get from session metadata
+            session = self.session_manager.get(channel_id)
+            if session and "diagnosis_summary" in session.metadata:
+                diagnosis_summary = session.metadata["diagnosis_summary"]
+
+        # Persona-specific actions and summaries
         if persona == "tenant":
-            summary = "Based on your description, I can help you create a maintenance request for your landlord to review."
+            # Use LLM summary if available, otherwise default
+            if diagnosis_summary:
+                summary = f"**Diagnosis Summary:** {diagnosis_summary}\n\nI can help you proceed with the next steps."
+            else:
+                summary = "Based on your description, I can help you create a maintenance request for your landlord to review."
+
             actions = [
                 {"id": "create_incident", "label": "📋 Submit Maintenance Request"},
                 {"id": "try_diy", "label": "🔧 View DIY Troubleshooting Tips"},
@@ -611,7 +707,11 @@ class AISupportOrchestrator:
             ]
 
         elif persona == "landlord":
-            summary = "I can help you take action on this incident or find a contractor."
+            if diagnosis_summary:
+                summary = f"**Issue Analysis:** {diagnosis_summary}\n\nRecommended actions:"
+            else:
+                summary = "I can help you take action on this incident or find a contractor."
+
             actions = [
                 {"id": "approve_work", "label": "✅ Approve Work Order"},
                 {"id": "find_contractor", "label": "👷 Find Contractor"},
@@ -620,7 +720,11 @@ class AISupportOrchestrator:
             ]
 
         elif persona == "contractor":
-            summary = "You can bid on this job or update your availability."
+            if diagnosis_summary:
+                summary = f"**Job Details:** {diagnosis_summary}\n\nYour options:"
+            else:
+                summary = "You can bid on this job or update your availability."
+
             actions = [
                 {"id": "submit_bid", "label": "💼 Submit Bid"},
                 {"id": "view_details", "label": "📋 View Full Job Details"},
@@ -628,7 +732,11 @@ class AISupportOrchestrator:
             ]
 
         elif persona == "property_manager":
-            summary = "Here are your options for managing this request."
+            if diagnosis_summary:
+                summary = f"**Assessment:** {diagnosis_summary}\n\nManagement options:"
+            else:
+                summary = "Here are your options for managing this request."
+
             actions = [
                 {"id": "assign_contractor", "label": "👷 Assign to Contractor"},
                 {"id": "escalate", "label": "🚨 Escalate to Landlord"},
@@ -638,7 +746,7 @@ class AISupportOrchestrator:
 
         else:
             # Default fallback
-            summary = "Based on our conversation, here are the recommended next steps."
+            summary = diagnosis_summary or "Based on our conversation, here are the recommended next steps."
             actions = [
                 {"id": "create_ticket", "label": "Create Support Ticket"},
                 {"id": "contact_support", "label": "Contact Human Support"},
