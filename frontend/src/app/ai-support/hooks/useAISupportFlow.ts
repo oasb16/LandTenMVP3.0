@@ -3,9 +3,8 @@
  *
  * Manages the AI Support Experience state machine and Stream Chat integration
  *
- * FALLBACK MODE:
- * This hook gracefully degrades when disabled or when Stream Chat fails.
- * Returns safe no-op functions instead of crashing.
+ * PRODUCTION MODE:
+ * Uses fixed user ID "prod-user" with client-side token authentication.
  */
 
 "use client";
@@ -25,16 +24,10 @@ import {
 interface UseAISupportFlowOptions {
   mode: "guided";
   autoInit?: boolean;
-  disabled?: boolean; // NEW: Allows parent to disable this hook entirely
 }
 
 const DEFAULT_UI_MODE: UIMode = "idle";
 const DEFAULT_PAYLOAD: Record<string, unknown> = {};
-
-// Safe no-op function for when hook is disabled
-const noopAsync = async () => {
-  console.warn("[AI Support Flow] Hook is disabled - action ignored");
-};
 
 /**
  * Main hook for AI Support Experience
@@ -42,7 +35,6 @@ const noopAsync = async () => {
 export default function useAISupportFlow({
   mode,
   autoInit = true,
-  disabled = false,
 }: UseAISupportFlowOptions): AISupportFlowHook {
   const { data: session, status } = useSession();
 
@@ -68,15 +60,9 @@ export default function useAISupportFlow({
   const channelIdRef = useRef<string | null>(null);
 
   /**
-   * Initialize Stream Chat client
-   * SKIP if disabled
+   * Initialize Stream Chat client with fixed prod-user
    */
   useEffect(() => {
-    if (disabled) {
-      console.log("[AI Support Flow] Hook is disabled, skipping client init");
-      return;
-    }
-
     if (typeof window === "undefined") return;
     if (status === "loading") return;
     if (!session?.user?.email) {
@@ -86,43 +72,32 @@ export default function useAISupportFlow({
 
     const initClient = async () => {
       try {
-        // Dynamically import StreamChat to avoid SSR issues
         const { StreamChat } = await import("stream-chat");
 
-        // Get API key from env
         const apiKey = process.env.NEXT_PUBLIC_STREAM_KEY;
-        if (!apiKey) {
-          console.warn("[AI Support Flow] Stream API key not configured - gracefully degrading");
-          setError("Stream Chat is not configured");
-          return;
-        }
+        const userToken = process.env.NEXT_PUBLIC_STREAM_USER_TOKEN;
 
-        // Fetch token from our API
-        const tokenRes = await fetch("/api/chat/token");
-        if (!tokenRes.ok) {
-          throw new Error("Failed to fetch Stream token");
-        }
-
-        const tokenData = await tokenRes.json();
-        const { token, user_id } = tokenData;
-
-        if (!token || !user_id) {
-          throw new Error("Invalid token response");
+        if (!apiKey || !userToken) {
+          const missing = [];
+          if (!apiKey) missing.push("NEXT_PUBLIC_STREAM_KEY");
+          if (!userToken) missing.push("NEXT_PUBLIC_STREAM_USER_TOKEN");
+          throw new Error(`Missing required environment variables: ${missing.join(", ")}`);
         }
 
         // Create or get singleton client
         const streamClient = StreamChat.getInstance(apiKey);
 
-        // Connect user if not already connected
+        // Connect with fixed production user ID
         if (!streamClient.userID) {
+          console.log("[AI Support] Connecting as prod-user");
           await streamClient.connectUser(
             {
-              id: user_id,
-              name: session.user.email,
+              id: "prod-user",
+              name: "Production User",
             },
-            token
+            userToken
           );
-          console.log("[AI Support] Stream client connected");
+          console.log("[AI Support] ✅ Stream client connected");
         }
 
         setClient(streamClient);
@@ -133,14 +108,12 @@ export default function useAISupportFlow({
     };
 
     initClient();
-  }, [session, status, disabled]);
+  }, [session, status]);
 
   /**
    * Initialize AI Support channel
-   * SKIP if disabled or no client
    */
   useEffect(() => {
-    if (disabled) return;
     if (!client || !session?.user?.email) return;
     if (isInitializedRef.current) return;
     if (!autoInit) return;
@@ -202,14 +175,12 @@ export default function useAISupportFlow({
     };
 
     initChannel();
-  }, [client, session, autoInit, mode, disabled]);
+  }, [client, session, autoInit, mode]);
 
   /**
    * Attach event listeners to channel
-   * SKIP if disabled
    */
   useEffect(() => {
-    if (disabled) return;
     if (!channel) return;
 
     console.log("[AI Support] Attaching event listeners");
@@ -275,19 +246,13 @@ export default function useAISupportFlow({
       eventListenersRef.current.forEach((cleanup) => cleanup());
       eventListenersRef.current = [];
     };
-  }, [channel, disabled]);
+  }, [channel]);
 
   /**
    * Send an intent to the backend
-   * SAFE NO-OP if disabled or no channel
    */
   const sendIntent = useCallback(
     async (intent: IntentType, intentPayload: Record<string, unknown> = {}) => {
-      if (disabled) {
-        console.warn("[AI Support] Hook is disabled - cannot send intent");
-        return;
-      }
-
       if (!channel) {
         console.error("[AI Support] Cannot send intent: no channel available");
         return;
@@ -313,19 +278,13 @@ export default function useAISupportFlow({
         setLoading(false);
       }
     },
-    [channel, disabled]
+    [channel]
   );
 
   /**
    * Reset the session
-   * SAFE NO-OP if disabled
    */
   const resetSession = useCallback(async () => {
-    if (disabled) {
-      console.warn("[AI Support] Hook is disabled - cannot reset session");
-      return;
-    }
-
     console.log("[AI Support] Resetting session");
 
     // Clear state
@@ -350,7 +309,7 @@ export default function useAISupportFlow({
     setChannel(null);
     isInitializedRef.current = false;
     channelIdRef.current = null;
-  }, [channel, disabled]);
+  }, [channel]);
 
   /**
    * Cleanup on unmount
@@ -362,22 +321,6 @@ export default function useAISupportFlow({
     };
   }, []);
 
-  // FALLBACK MODE: Return safe no-op values if disabled
-  if (disabled) {
-    return {
-      channel: null,
-      uiMode: DEFAULT_UI_MODE,
-      payload: DEFAULT_PAYLOAD,
-      flowState: null,
-      loading: false,
-      initializing: false,
-      error: "AI Support is currently unavailable",
-      sendIntent: noopAsync,
-      resetSession: noopAsync,
-    };
-  }
-
-  // Normal operation
   return {
     channel,
     uiMode,
