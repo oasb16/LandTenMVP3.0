@@ -19,6 +19,7 @@ from .routes import (
     property,
     ai_webhooks,     # ✅ V2 FALLBACK
     ai_webhooks_v3,  # ✅ V3 ORCHESTRATOR
+    ai_analytics,    # ✅ ANALYTICS DASHBOARD
 )
 from starlette.middleware.base import BaseHTTPMiddleware
 import time, uuid, logging
@@ -250,6 +251,9 @@ try:
 except Exception as e:
     logging.warning(f"[STARTUP] ⚠️ Could not register V3 routes: {e}")
     logging.warning("[STARTUP] Using V2 fallback only")
+
+# Register analytics dashboard
+app.include_router(ai_analytics.router, tags=["analytics"])
 
 
 # Health Check Endpoints
