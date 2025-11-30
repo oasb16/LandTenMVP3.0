@@ -466,6 +466,7 @@ class IncidentTopicGraph:
                 "category": "system",
                 "severity": "low",
                 "urgency": "routine",
+                "user_id": self.user_id
             }
 
             table.put_item(Item=item)

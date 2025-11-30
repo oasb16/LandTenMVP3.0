@@ -17,6 +17,7 @@ backend/.env.local
 backend/.env.example
 backend/.venv
 .venv
+*.zip
 
 # next.js
 /.next/
