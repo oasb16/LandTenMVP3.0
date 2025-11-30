@@ -451,6 +451,8 @@ class IncidentTopicGraph:
             # Convert to DynamoDB-compatible format (replace floats with Decimal)
             graph_data_serialized = self._convert_to_dynamo_format(graph_data)
 
+            print("===== user_id: ========", self.user_id)
+
             # Save to DynamoDB with PK/SK pattern
             item = {
                 "incident_id": f"GRAPH#{self.user_id}",  # Use incident_id as PK
