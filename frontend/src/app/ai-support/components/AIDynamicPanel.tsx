@@ -13,6 +13,7 @@ import type { UIMode, IntentType, FlowState } from "@/types/ai-support";
 import ActionPanel from "../panels/ActionPanel";
 import ItemPicker from "../panels/ItemPicker";
 import ReasonPicker from "../panels/ReasonPicker";
+import SummaryPanel from "../panels/SummaryPanel";
 import ResolutionPanel from "../panels/ResolutionPanel";
 import FallbackPanel from "../panels/FallbackPanel";
 
@@ -53,7 +54,11 @@ export default function AIDynamicPanel({
           key="gallery"
           items={getPayload({ items: [] }).items}
           onSelect={async (itemId) => {
-            await sendIntent("item_selected", { item_id: itemId });
+            const selectedItem = getPayload<any>({ items: [] }).items.find((item: any) => item.id === itemId);
+            await sendIntent("item_selected", {
+              item_id: itemId,
+              item_title: selectedItem?.title || itemId
+            });
           }}
         />
       )}
@@ -65,6 +70,26 @@ export default function AIDynamicPanel({
           reasons={getPayload({ reasons: [] }).reasons}
           onSelect={async (reason) => {
             await sendIntent("reason_selected", { reason });
+          }}
+        />
+      )}
+
+      {/* Summary - Stage: summary */}
+      {uiMode === "summary" && (
+        <SummaryPanel
+          key="summary"
+          summary={getPayload<any>({
+            selected_cta: "",
+            selected_cta_label: "",
+            selected_item_id: "",
+            selected_item_title: "",
+            selected_reason: "",
+          })}
+          onConfirm={async () => {
+            await sendIntent("confirm_summary", {});
+          }}
+          onEdit={async () => {
+            await sendIntent("edit_summary", {});
           }}
         />
       )}

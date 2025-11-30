@@ -1,16 +1,18 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Loader2, WifiOff, Bot, BotOff } from "lucide-react";
+import { Loader2, WifiOff, Bot, BotOff, UserPlus } from "lucide-react";
 import { useStreamChat } from "@/hooks/chat/StreamChatContext";
 import { Chat, Channel, ChannelHeader, MessageList, MessageInput, Window, Thread } from "stream-chat-react";
 import "stream-chat-react/dist/css/v2/index.css";
 
 type Props = {
   className?: string;
+  showEscalation?: boolean;
+  onEscalate?: () => void;
 };
 
-export default function StreamChatPane({ className }: Props) {
+export default function StreamChatPane({ className, showEscalation, onEscalate }: Props) {
   const {
     client,
     activeChannel,
@@ -182,6 +184,19 @@ export default function StreamChatPane({ className }: Props) {
               className="flex flex-col border-t border-slate-800/70 bg-slate-950/80"
               style={{ flexShrink: 0 }}
             >
+              {/* Escalation Button - shows during diagnosis */}
+              {showEscalation && onEscalate && (
+                <div className="px-4 py-2 border-b border-slate-700">
+                  <button
+                    onClick={onEscalate}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 hover:border-amber-500/60 rounded-lg text-amber-300 font-medium transition-all duration-200"
+                  >
+                    <UserPlus className="w-4 h-4" />
+                    <span>Connect me to a human agent</span>
+                  </button>
+                </div>
+              )}
+
               {/* Agent Toggle Bar */}
               <div className="flex items-center justify-between px-4 py-2 border-b border-slate-800/50">
                 <div className="flex items-center gap-2">

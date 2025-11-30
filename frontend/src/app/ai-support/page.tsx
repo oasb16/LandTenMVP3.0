@@ -128,7 +128,16 @@ export default function AISupportPage() {
           {/* Chat Panel (Classic Dashboard component reused) */}
           <section className="col-span-12 lg:col-span-7 rounded-2xl border border-slate-800/60 bg-slate-950/70 backdrop-blur-lg flex flex-col h-full min-h-0">
             <div className="flex flex-1 flex-col min-h-0">
-              <StreamChatPane className="h-full" />
+              <StreamChatPane
+                className="h-full"
+                showEscalation={stage === "diagnosis"}
+                onEscalate={async () => {
+                  await sendIntent("ai_escalate", {
+                    reason: "user_requested",
+                    current_stage: stage,
+                  });
+                }}
+              />
             </div>
           </section>
 

@@ -157,8 +157,14 @@ class AISupportOrchestrator:
             return await self._handle_item_selection(payload, channel_id, user_id, persona)
         elif intent == "reason_selected":
             return await self._handle_reason_selection(payload, channel_id, user_id, persona)
+        elif intent == "confirm_summary":
+            return await self._handle_confirm_summary(payload, channel_id, user_id, persona)
+        elif intent == "edit_summary":
+            return await self._handle_edit_summary(payload, channel_id, user_id, persona)
         elif intent == "diagnosis_answer":
             return await self._handle_diagnosis_answer(payload, channel_id, user_id, persona)
+        elif intent == "ai_escalate":
+            return await self._handle_escalation(payload, channel_id, user_id, persona)
         elif intent == "resolution_action":
             return await self._handle_resolution_action(payload, channel_id, user_id, persona)
         else:
@@ -280,6 +286,15 @@ class AISupportOrchestrator:
         # Update session state
         session = self.session_manager.get_or_create(channel_id, user_id, persona)
         session.selected_item_id = item_id
+
+        # Extract item title from payload if provided
+        item_title = payload.get("item_title")
+        if item_title:
+            session.selected_item_title = item_title
+        else:
+            # Fallback: use item_id as title if not provided
+            session.selected_item_title = item_id
+
         session.update_stage("issue_select", "selector")
 
         # Get reasons based on persona and item
@@ -303,8 +318,8 @@ class AISupportOrchestrator:
         persona: str
     ) -> Dict[str, Any]:
         """
-        Handle reason selection - start diagnosis chat with LLM agent.
-        Stage: issue_select → diagnosis, UI Mode: selector → chat
+        Handle reason selection - show summary confirmation.
+        Stage: issue_select → summary, UI Mode: selector → summary
         """
         reason = payload.get("reason")
         logger.info(f"[AI Support] Reason selected: {reason}")
@@ -323,28 +338,79 @@ class AISupportOrchestrator:
             user_id=user_id,
             persona=persona,
             from_stage="issue_select",
+            to_stage="summary"
+        )
+
+        # Update session state
+        session = self.session_manager.get_or_create(channel_id, user_id, persona)
+        session.selected_reason = reason
+        session.update_stage("summary", "summary")
+
+        # Build summary payload with all user selections
+        summary_payload = {
+            "selected_cta": session.selected_cta or "unknown",
+            "selected_cta_label": self._get_cta_label(session.selected_cta, persona),
+            "selected_item_id": session.selected_item_id or "unknown",
+            "selected_item_title": session.selected_item_title or "Unknown Item",
+            "selected_reason": reason,
+            "severity": "medium",
+            "urgency": "routine",
+        }
+
+        return {
+            "stage": "summary",
+            "ui_mode": "summary",
+            "persona": persona,
+            "payload": summary_payload
+        }
+
+    async def _handle_confirm_summary(
+        self,
+        payload: Dict[str, Any],
+        channel_id: str,
+        user_id: str,
+        persona: str
+    ) -> Dict[str, Any]:
+        """
+        Handle summary confirmation - transition to diagnosis.
+        Stage: summary → diagnosis, UI Mode: summary → chat
+        """
+        logger.info(f"[AI Support] Summary confirmed for {channel_id}")
+
+        # Track confirmation and transitions
+        self.analytics.track_event(
+            event_type="summary_confirmed",
+            channel_id=channel_id,
+            user_id=user_id,
+            persona=persona
+        )
+        self.analytics.track_event(
+            event_type="stage_transition",
+            channel_id=channel_id,
+            user_id=user_id,
+            persona=persona,
+            from_stage="summary",
             to_stage="diagnosis"
         )
         self.analytics.track_event(
             event_type="diagnosis_started",
             channel_id=channel_id,
             user_id=user_id,
-            persona=persona,
-            reason=reason
+            persona=persona
         )
 
-        # Update session state
+        # Get session for context
         session = self.session_manager.get_or_create(channel_id, user_id, persona)
-        session.selected_reason = reason
         session.update_stage("diagnosis", "chat")
 
-        # Start AI diagnosis conversation
+        # Build session context for diagnosis agent
         session_context = {
             "selected_cta": session.selected_cta,
             "selected_item_id": session.selected_item_id,
             "selected_reason": session.selected_reason
         }
 
+        # Start AI diagnosis conversation
         initial_message = self.diagnosis_agent.start_diagnosis(
             channel_id=channel_id,
             persona=persona,
@@ -375,9 +441,133 @@ class AISupportOrchestrator:
             "persona": persona,
             "payload": {
                 "agent_prompt": first_question,
-                "reason": reason
+                "reason": session.selected_reason
             }
         }
+
+    async def _handle_edit_summary(
+        self,
+        payload: Dict[str, Any],
+        channel_id: str,
+        user_id: str,
+        persona: str
+    ) -> Dict[str, Any]:
+        """
+        Handle edit summary - go back to issue selection.
+        Stage: summary → issue_select, UI Mode: summary → selector
+        """
+        logger.info(f"[AI Support] User wants to edit summary for {channel_id}")
+
+        # Track edit action
+        self.analytics.track_event(
+            event_type="summary_edited",
+            channel_id=channel_id,
+            user_id=user_id,
+            persona=persona
+        )
+
+        # Get session
+        session = self.session_manager.get_or_create(channel_id, user_id, persona)
+
+        # Go back to issue selection
+        session.update_stage("issue_select", "selector")
+
+        # Get reasons again
+        reasons = self._get_issue_reasons(persona, session.selected_item_id or "")
+
+        return {
+            "stage": "issue_select",
+            "ui_mode": "selector",
+            "persona": persona,
+            "payload": {
+                "reasons": reasons,
+                "itemId": session.selected_item_id
+            }
+        }
+
+    async def _handle_escalation(
+        self,
+        payload: Dict[str, Any],
+        channel_id: str,
+        user_id: str,
+        persona: str
+    ) -> Dict[str, Any]:
+        """
+        Handle AI → Human escalation request.
+        User wants to speak to a human agent.
+        """
+        from datetime import datetime, timezone
+
+        reason = payload.get("reason", "user_requested")
+        logger.info(f"[AI Support] Escalation requested: {reason} for {channel_id}")
+
+        # Track escalation
+        self.analytics.track_event(
+            event_type="escalation_requested",
+            channel_id=channel_id,
+            user_id=user_id,
+            persona=persona,
+            reason=reason
+        )
+
+        # Get session
+        session = self.session_manager.get_or_create(channel_id, user_id, persona)
+
+        # Send notification to AI agent
+        bot_id = self.bot.get_bot_id(persona)
+        self.bot.send_message(
+            channel_id=channel_id,
+            bot_id=bot_id,
+            text="I understand you'd like to speak with a human agent. Let me connect you...",
+            internal_type="ai-message"
+        )
+
+        # Send handoff message
+        self.bot.send_message(
+            channel_id=channel_id,
+            bot_id=bot_id,
+            text=(
+                "🤝 **Connecting you to a human agent**\n\n"
+                "A support specialist will join this conversation shortly. "
+                "In the meantime, feel free to provide any additional details about your issue.\n\n"
+                "**Your context:**\n"
+                f"• Category: {session.selected_cta}\n"
+                f"• Item: {session.selected_item_title or session.selected_item_id}\n"
+                f"• Issue: {session.selected_reason}\n\n"
+                "Average wait time: 2-5 minutes"
+            ),
+            internal_type="ai-message"
+        )
+
+        # Mark session as escalated
+        session.metadata["escalated"] = True
+        session.metadata["escalation_reason"] = reason
+        session.metadata["escalated_at"] = datetime.now(timezone.utc).isoformat()
+
+        return {
+            "stage": "diagnosis",
+            "ui_mode": "chat",
+            "persona": persona,
+            "payload": {
+                "escalated": True,
+                "agent_prompt": "A human agent will join shortly. Feel free to provide more details."
+            }
+        }
+
+    def _get_cta_label(self, cta_id: str, persona: str) -> str:
+        """Get human-readable label for CTA ID."""
+        cta_map = {
+            "maintenance": "Report Maintenance Issue",
+            "billing": "Billing Question",
+            "amenities": "Amenities & Services",
+            "incidents": "Review Incidents",
+            "contractors": "Manage Contractors",
+            "properties": "Property Overview",
+            "jobs": "Available Jobs",
+            "my_jobs": "My Active Jobs",
+            "payments": "Payments & Invoices",
+        }
+        return cta_map.get(cta_id, cta_id.title())
 
     async def _handle_diagnosis_answer(
         self,

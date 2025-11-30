@@ -25,6 +25,7 @@ export type Stage =
   | "intro"         // Determine persona, show welcome + options
   | "item_select"   // Show items (appliances, incidents, jobs, etc.)
   | "issue_select"  // Choose what's wrong with the item
+  | "summary"       // Confirmation summary before diagnosis
   | "diagnosis"     // Multi-turn troubleshooting
   | "resolution";   // Final actions
 
@@ -36,6 +37,7 @@ export type UIMode =
   | "cta_panel"    // Large button menu (What do you need help with?)
   | "gallery"      // Scrollable list of items (orders, maintenance, etc.)
   | "selector"     // List of issue reasons
+  | "summary"      // Confirmation summary panel
   | "chat"         // Pure conversational messages (diagnosis)
   | "resolution"   // Final actions user can take
   | "fallback";    // Chat unavailable
@@ -49,6 +51,8 @@ export type IntentType =
   | "select_cta"         // Selected main option from CTA panel
   | "item_selected"      // Selected item from gallery
   | "reason_selected"    // Selected reason from selector
+  | "confirm_summary"    // Confirmed summary, proceed to diagnosis
+  | "edit_summary"       // Edit summary, go back to selection
   | "diagnosis_answer"   // Answer during diagnosis
   | "resolution_action"  // Final action chosen
 
@@ -106,6 +110,25 @@ export interface ChatPayload {
   agent_prompt?: string;  // AI's response/question
   reason?: string;        // Issue reason being diagnosed
   summary?: string;       // Current understanding
+}
+
+/**
+ * Summary (Stage: summary, UI Mode: summary)
+ */
+export interface SummaryPayload {
+  selected_cta: string;
+  selected_cta_label: string;
+  selected_item_id: string;
+  selected_item_title: string;
+  selected_reason: string;
+  severity?: string;
+  urgency?: string;
+}
+
+export interface SummaryPanelProps {
+  summary: SummaryPayload;
+  onConfirm: () => void;
+  onEdit: () => void;
 }
 
 /**
@@ -241,19 +264,20 @@ export interface AISupportFlowHook {
 
 export const isValidUIMode = (mode: unknown): mode is UIMode => {
   return typeof mode === "string" && [
-    "cta_panel", "gallery", "selector", "chat", "resolution", "fallback"
+    "cta_panel", "gallery", "selector", "summary", "chat", "resolution", "fallback"
   ].includes(mode);
 };
 
 export const isValidStage = (stage: unknown): stage is Stage => {
   return typeof stage === "string" && [
-    "intro", "item_select", "issue_select", "diagnosis", "resolution"
+    "intro", "item_select", "issue_select", "summary", "diagnosis", "resolution"
   ].includes(stage);
 };
 
 export const isValidIntentType = (type: unknown): type is IntentType => {
   return typeof type === "string" && [
     "user_message", "select_cta", "item_selected", "reason_selected",
+    "confirm_summary", "edit_summary",
     "diagnosis_answer", "resolution_action", "ai_init", "ai_continue",
     "ai_escalate", "ai_close_session"
   ].includes(type);
