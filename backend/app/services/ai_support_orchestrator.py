@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from ..services.stream_bot import get_bot
 from ..services.dynamo_service import IncidentDB, JobDB, PropertyDB
 from ..services.ai_diagnosis_agent import get_diagnosis_agent
+from ..services.ai_support_analytics import get_analytics_tracker
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +123,7 @@ class AISupportOrchestrator:
         self.bot = get_bot()
         self.session_manager = _session_manager
         self.diagnosis_agent = get_diagnosis_agent()
+        self.analytics = get_analytics_tracker()
 
     async def handle_intent(
         self,
@@ -176,6 +178,14 @@ class AISupportOrchestrator:
         """
         logger.info(f"[AI Support] Initializing session for persona: {persona}")
 
+        # Track session start
+        self.analytics.track_event(
+            event_type="session_start",
+            channel_id=channel_id,
+            user_id=user_id,
+            persona=persona
+        )
+
         # Persona-specific CTA options
         cta_options = self._get_cta_options(persona)
 
@@ -201,6 +211,23 @@ class AISupportOrchestrator:
         """
         cta_id = payload.get("cta_id")
         logger.info(f"[AI Support] CTA selected: {cta_id}")
+
+        # Track CTA selection and stage transition
+        self.analytics.track_event(
+            event_type="cta_selected",
+            channel_id=channel_id,
+            user_id=user_id,
+            persona=persona,
+            cta_id=cta_id
+        )
+        self.analytics.track_event(
+            event_type="stage_transition",
+            channel_id=channel_id,
+            user_id=user_id,
+            persona=persona,
+            from_stage="intro",
+            to_stage="item_select"
+        )
 
         # Get or create session and update state
         session = self.session_manager.get_or_create(channel_id, user_id, persona)
@@ -233,6 +260,23 @@ class AISupportOrchestrator:
         item_id = payload.get("item_id")
         logger.info(f"[AI Support] Item selected: {item_id}")
 
+        # Track item selection and stage transition
+        self.analytics.track_event(
+            event_type="item_selected",
+            channel_id=channel_id,
+            user_id=user_id,
+            persona=persona,
+            item_id=item_id
+        )
+        self.analytics.track_event(
+            event_type="stage_transition",
+            channel_id=channel_id,
+            user_id=user_id,
+            persona=persona,
+            from_stage="item_select",
+            to_stage="issue_select"
+        )
+
         # Update session state
         session = self.session_manager.get_or_create(channel_id, user_id, persona)
         session.selected_item_id = item_id
@@ -264,6 +308,30 @@ class AISupportOrchestrator:
         """
         reason = payload.get("reason")
         logger.info(f"[AI Support] Reason selected: {reason}")
+
+        # Track reason selection and transitions
+        self.analytics.track_event(
+            event_type="reason_selected",
+            channel_id=channel_id,
+            user_id=user_id,
+            persona=persona,
+            reason=reason
+        )
+        self.analytics.track_event(
+            event_type="stage_transition",
+            channel_id=channel_id,
+            user_id=user_id,
+            persona=persona,
+            from_stage="issue_select",
+            to_stage="diagnosis"
+        )
+        self.analytics.track_event(
+            event_type="diagnosis_started",
+            channel_id=channel_id,
+            user_id=user_id,
+            persona=persona,
+            reason=reason
+        )
 
         # Update session state
         session = self.session_manager.get_or_create(channel_id, user_id, persona)
@@ -359,6 +427,15 @@ class AISupportOrchestrator:
         if is_complete:
             logger.info(f"[AI Support] Diagnosis complete for {channel_id}, moving to resolution")
 
+            # Track diagnosis completion
+            self.analytics.track_event(
+                event_type="diagnosis_completed",
+                channel_id=channel_id,
+                user_id=user_id,
+                persona=persona,
+                num_messages=len(session.diagnosis_messages)
+            )
+
             # Store diagnosis summary in session
             session.metadata["diagnosis_summary"] = ai_response
 
@@ -397,6 +474,15 @@ class AISupportOrchestrator:
         """
         action_id = payload.get("action_id")
         logger.info(f"[AI Support] Resolution action: {action_id}, persona: {persona}")
+
+        # Track action taken
+        self.analytics.track_event(
+            event_type="action_taken",
+            channel_id=channel_id,
+            user_id=user_id,
+            persona=persona,
+            action_id=action_id
+        )
 
         bot_id = self.bot.get_bot_id(persona)
 
@@ -524,6 +610,18 @@ class AISupportOrchestrator:
                 text="❌ Sorry, something went wrong processing your request. Please try again.",
                 internal_type="ai-message"
             )
+
+        # Track session completion
+        self.analytics.track_event(
+            event_type="session_completed",
+            channel_id=channel_id,
+            user_id=user_id,
+            persona=persona,
+            final_action=action_id
+        )
+
+        # Clear session state
+        self.session_manager.clear(channel_id)
 
         # Return to intro stage
         cta_options = self._get_cta_options(persona)
@@ -681,6 +779,22 @@ class AISupportOrchestrator:
         Transition to resolution stage with persona-specific action options.
         Uses diagnosis summary from LLM if available.
         """
+        # Track resolution shown and stage transition
+        self.analytics.track_event(
+            event_type="resolution_shown",
+            channel_id=channel_id,
+            user_id=user_id,
+            persona=persona
+        )
+        self.analytics.track_event(
+            event_type="stage_transition",
+            channel_id=channel_id,
+            user_id=user_id,
+            persona=persona,
+            from_stage="diagnosis",
+            to_stage="resolution"
+        )
+
         # Get diagnosis summary from context or session
         diagnosis_summary = None
         if context and "diagnosis_summary" in context:
