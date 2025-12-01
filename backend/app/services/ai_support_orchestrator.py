@@ -366,13 +366,13 @@ class AISupportOrchestrator:
         persona: str
     ) -> Dict[str, Any]:
         """
-        Handle reason selection - show summary confirmation.
-        Stage: issue_select → summary, UI Mode: selector → summary
+        Handle reason selection - route to photo upload for tenants, summary for others.
+        Stage: issue_select → photo_upload (tenant) or summary (others)
         """
         reason = payload.get("reason")
         logger.info(f"[AI Support] Reason selected: {reason}")
 
-        # Track reason selection and transitions
+        # Track reason selection
         self.analytics.track_event(
             event_type="reason_selected",
             channel_id=channel_id,
@@ -380,6 +380,36 @@ class AISupportOrchestrator:
             persona=persona,
             reason=reason
         )
+
+        # Update session state
+        session = self.session_manager.get_or_create(channel_id, user_id, persona)
+        session.selected_reason = reason
+
+        # For tenants reporting issues, offer photo upload
+        if persona == "tenant" and session.selected_cta in ["maintenance", "report_issue", "new_issue"]:
+            self.analytics.track_event(
+                event_type="stage_transition",
+                channel_id=channel_id,
+                user_id=user_id,
+                persona=persona,
+                from_stage="issue_select",
+                to_stage="photo_upload"
+            )
+
+            session.update_stage("photo_upload", "photo_uploader")
+
+            return {
+                "stage": "photo_upload",
+                "ui_mode": "photo_uploader",
+                "persona": persona,
+                "payload": {
+                    "max_photos": 5,
+                    "required": False,
+                    "existing_photos": []
+                }
+            }
+
+        # For other personas or non-maintenance flows, go to summary
         self.analytics.track_event(
             event_type="stage_transition",
             channel_id=channel_id,
@@ -389,9 +419,6 @@ class AISupportOrchestrator:
             to_stage="summary"
         )
 
-        # Update session state
-        session = self.session_manager.get_or_create(channel_id, user_id, persona)
-        session.selected_reason = reason
         session.update_stage("summary", "summary")
 
         # Build summary payload with all user selections

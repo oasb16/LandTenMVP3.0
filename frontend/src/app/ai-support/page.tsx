@@ -20,7 +20,10 @@ import { useStreamChat } from "@/hooks/chat/StreamChatContext";
 import StreamChatPane from "@/components/StreamChatPane";
 import AIDynamicPanel from "./components/AIDynamicPanel";
 import AIChatAssistantLauncher from "./components/AIChatAssistantLauncher";
-import LandingPage from "./components/LandingPage";
+import HelpHub from "./components/amazon-style/HelpHub";
+import ItemReasonPanel from "./components/amazon-style/ItemReasonPanel";
+import RufusWelcome from "./components/amazon-style/RufusWelcome";
+import HelpArticles from "./components/amazon-style/HelpArticles";
 import useAISupportFlow from "./hooks/useAISupportFlow";
 import "./ai-support.css";
 
@@ -28,6 +31,13 @@ export default function AISupportPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [view, setView] = useState<"hub" | "item_reason">("hub");
+  const [selectedItem, setSelectedItem] = useState<{
+    id: string;
+    type: string;
+    title: string;
+    subtitle?: string;
+  } | null>(null);
 
   // Use Classic Dashboard's StreamChat context (already initialized app-wide)
   const { client, activeChannel, loading: streamLoading, error: streamError } = useStreamChat();
@@ -90,6 +100,35 @@ export default function AISupportPage() {
   const error = streamError || flowError;
   const persona = (session.user as any).persona || "tenant";
 
+  const handleSelectItem = (itemId: string, itemType: string, itemTitle: string) => {
+    setSelectedItem({ id: itemId, type: itemType, title: itemTitle });
+    setView("item_reason");
+  };
+
+  const handleSelectReason = async (reasonId: string, reasonLabel: string) => {
+    // Store selection in flow state metadata
+    if (selectedItem) {
+      await sendIntent("item_selected", {
+        item_id: selectedItem.id,
+        item_title: selectedItem.title,
+      });
+      await sendIntent("reason_selected", {
+        reason: reasonLabel,
+      });
+      // Open drawer to show chat
+      setIsDrawerOpen(true);
+    }
+  };
+
+  const handleLaunchChat = () => {
+    setIsDrawerOpen(true);
+  };
+
+  const handleBackToHub = () => {
+    setView("hub");
+    setSelectedItem(null);
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100">
       <div className="mx-auto flex min-h-screen flex-col px-4 pb-6 pt-6 sm:px-6 lg:px-10 max-w-7xl">
@@ -128,17 +167,36 @@ export default function AISupportPage() {
           </div>
         )}
 
-        {/* Main Content - Landing Page */}
-        <main className="flex-1">
-          <LandingPage
-            onLaunch={() => setIsDrawerOpen(true)}
-            sessionId={flowState?.session_id || null}
-            persona={persona}
-            stage={stage}
-            uiMode={uiMode}
-            flowState={flowState}
-            isDrawerOpen={isDrawerOpen}
-          />
+        {/* Main Content */}
+        <main className="flex-1 flex flex-col gap-4">
+          {/* Amazon-style Help Hub or Item Reason Panel */}
+          <div className="flex-1 rounded-3xl border border-slate-800/60 bg-slate-950/80 backdrop-blur-xl overflow-hidden">
+            {view === "hub" ? (
+              <HelpHub
+                userName={session.user.name || "User"}
+                persona={persona}
+                onSelectItem={handleSelectItem}
+                onLaunchChat={handleLaunchChat}
+              />
+            ) : (
+              <ItemReasonPanel
+                itemId={selectedItem?.id || ""}
+                itemType={selectedItem?.type || ""}
+                itemTitle={selectedItem?.title || ""}
+                itemSubtitle={selectedItem?.subtitle}
+                persona={persona}
+                onBack={handleBackToHub}
+                onSelectReason={handleSelectReason}
+              />
+            )}
+          </div>
+
+          {/* Help Articles Section */}
+          {view === "hub" && (
+            <div className="rounded-3xl border border-slate-800/60 bg-slate-950/80 backdrop-blur-xl">
+              <HelpArticles persona={persona} />
+            </div>
+          )}
         </main>
 
         {/* Footer */}
@@ -158,56 +216,72 @@ export default function AISupportPage() {
 
       {/* AI Support Drawer (Amazon-style guided flow) */}
       {isDrawerOpen && (
-        <AIChatAssistantLauncher autoOpen={true}>
+        <AIChatAssistantLauncher
+          autoOpen={true}
+          onClose={() => setIsDrawerOpen(false)}
+        >
           <div className="flex h-full flex-col">
-            {/* Split View: Chat + Guided Flow Panel */}
-            <div className="flex flex-1 flex-col lg:flex-row gap-2 p-2 overflow-hidden">
+            {/* Conditional View: Rufus Welcome or Chat + Flow */}
+            {!flowState?.session_id || stage === "intro" ? (
+              /* Show Rufus Welcome when no active session */
+              <RufusWelcome
+                onQuickAction={async (action) => {
+                  if (action === "chat" || action === "maintenance") {
+                    await sendIntent("ai_init", {});
+                  }
+                }}
+              />
+            ) : (
+              /* Show Chat + Guided Flow */
+              <>
+                {/* Split View: Chat + Guided Flow Panel */}
+                <div className="flex flex-1 flex-col lg:flex-row gap-2 p-2 overflow-hidden">
+                  {/* Chat Panel (60% width on desktop) */}
+                  <div className="flex-1 lg:w-[60%] rounded-xl border border-slate-700/50 bg-slate-900/50 overflow-hidden">
+                    <StreamChatPane
+                      className="h-full"
+                      showEscalation={stage === "diagnosis"}
+                      onEscalate={async () => {
+                        await sendIntent("ai_escalate", {
+                          reason: "user_requested",
+                          current_stage: stage,
+                        });
+                      }}
+                    />
+                  </div>
 
-              {/* Chat Panel (60% width on desktop) */}
-              <div className="flex-1 lg:w-[60%] rounded-xl border border-slate-700/50 bg-slate-900/50 overflow-hidden">
-                <StreamChatPane
-                  className="h-full"
-                  showEscalation={stage === "diagnosis"}
-                  onEscalate={async () => {
-                    await sendIntent("ai_escalate", {
-                      reason: "user_requested",
-                      current_stage: stage,
-                    });
-                  }}
-                />
-              </div>
+                  {/* Guided Flow Panel (40% width on desktop) */}
+                  <aside className="lg:w-[40%] rounded-xl border border-slate-700/50 bg-slate-950/70 p-4 flex flex-col gap-3 overflow-y-auto">
+                    <div className="flex items-center justify-between">
+                      <h2 className="text-sm font-semibold text-slate-100">Guided Flow</h2>
+                      {initializing && (
+                        <span className="text-xs text-slate-400">Initializing...</span>
+                      )}
+                    </div>
 
-              {/* Guided Flow Panel (40% width on desktop) */}
-              <aside className="lg:w-[40%] rounded-xl border border-slate-700/50 bg-slate-950/70 p-4 flex flex-col gap-3 overflow-y-auto">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-sm font-semibold text-slate-100">Guided Flow</h2>
-                  {initializing && (
-                    <span className="text-xs text-slate-400">Initializing...</span>
-                  )}
+                    <AIDynamicPanel
+                      uiMode={uiMode}
+                      payload={payload}
+                      sendIntent={sendIntent}
+                      flowState={flowState}
+                    />
+                  </aside>
                 </div>
 
-                <AIDynamicPanel
-                  uiMode={uiMode}
-                  payload={payload}
-                  sendIntent={sendIntent}
-                  flowState={flowState}
-                />
-              </aside>
-
-            </div>
-
-            {/* Drawer Footer - Status Bar */}
-            <div className="border-t border-slate-700/50 bg-slate-950/80 px-4 py-2 flex items-center justify-between text-xs">
-              <div className="flex items-center gap-2">
-                <div className={`h-1.5 w-1.5 rounded-full ${flowState?.session_id ? 'bg-emerald-500 animate-pulse' : 'bg-slate-500'}`} />
-                <span className="text-slate-400">
-                  Stage: <span className="font-medium text-emerald-400">{stage}</span>
-                </span>
-              </div>
-              <div className="text-slate-500">
-                Mode: {uiMode} • {persona}
-              </div>
-            </div>
+                {/* Drawer Footer - Status Bar */}
+                <div className="border-t border-slate-700/50 bg-slate-950/80 px-4 py-2 flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2">
+                    <div className={`h-1.5 w-1.5 rounded-full ${flowState?.session_id ? 'bg-emerald-500 animate-pulse' : 'bg-slate-500'}`} />
+                    <span className="text-slate-400">
+                      Stage: <span className="font-medium text-emerald-400">{stage}</span>
+                    </span>
+                  </div>
+                  <div className="text-slate-500">
+                    Mode: {uiMode} • {persona}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </AIChatAssistantLauncher>
       )}
