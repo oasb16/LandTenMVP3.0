@@ -157,6 +157,13 @@ class AISupportOrchestrator:
             return await self._handle_item_selection(payload, channel_id, user_id, persona)
         elif intent == "reason_selected":
             return await self._handle_reason_selection(payload, channel_id, user_id, persona)
+
+        # Phase 1: Tenant Photo Upload
+        elif intent == "photos_uploaded":
+            return await self._handle_photos_uploaded(payload, channel_id, user_id, persona)
+        elif intent == "skip_photos":
+            return await self._handle_skip_photos(payload, channel_id, user_id, persona)
+
         elif intent == "confirm_summary":
             return await self._handle_confirm_summary(payload, channel_id, user_id, persona)
         elif intent == "edit_summary":
@@ -167,6 +174,47 @@ class AISupportOrchestrator:
             return await self._handle_escalation(payload, channel_id, user_id, persona)
         elif intent == "resolution_action":
             return await self._handle_resolution_action(payload, channel_id, user_id, persona)
+
+        # Phase 2: Landlord Incident Triage
+        elif intent == "select_incident":
+            return await self._handle_select_incident(payload, channel_id, user_id, persona)
+        elif intent == "classify_incident":
+            return await self._handle_classify_incident(payload, channel_id, user_id, persona)
+        elif intent == "create_job":
+            return await self._handle_create_job(payload, channel_id, user_id, persona)
+        elif intent == "close_incident":
+            return await self._handle_close_incident(payload, channel_id, user_id, persona)
+
+        # Phase 3: Landlord Job + Bids
+        elif intent == "request_bids":
+            return await self._handle_request_bids(payload, channel_id, user_id, persona)
+        elif intent == "select_bid":
+            return await self._handle_select_bid(payload, channel_id, user_id, persona)
+        elif intent == "approve_bid":
+            return await self._handle_approve_bid(payload, channel_id, user_id, persona)
+        elif intent == "reject_bid":
+            return await self._handle_reject_bid(payload, channel_id, user_id, persona)
+
+        # Phase 4: Contractor Bidding
+        elif intent == "select_job":
+            return await self._handle_select_job(payload, channel_id, user_id, persona)
+        elif intent == "submit_bid":
+            return await self._handle_submit_bid(payload, channel_id, user_id, persona)
+
+        # Phase 5: Job Execution
+        elif intent == "accept_job":
+            return await self._handle_accept_job(payload, channel_id, user_id, persona)
+        elif intent == "decline_job":
+            return await self._handle_decline_job(payload, channel_id, user_id, persona)
+        elif intent == "start_work":
+            return await self._handle_start_work(payload, channel_id, user_id, persona)
+        elif intent == "update_progress":
+            return await self._handle_update_progress(payload, channel_id, user_id, persona)
+        elif intent == "mark_complete":
+            return await self._handle_mark_complete(payload, channel_id, user_id, persona)
+        elif intent == "upload_completion_photos":
+            return await self._handle_upload_completion_photos(payload, channel_id, user_id, persona)
+
         else:
             logger.warning(f"Unknown intent: {intent}")
             return self._fallback_state(f"Unknown intent: {intent}")
@@ -1350,6 +1398,454 @@ class AISupportOrchestrator:
             "Safety concern",
             "Other issue"
         ]
+
+    # =========================================================================
+    # PHASE 1: TENANT PHOTO UPLOAD HANDLERS
+    # =========================================================================
+
+    async def _handle_photos_uploaded(
+        self,
+        payload: Dict[str, Any],
+        channel_id: str,
+        user_id: str,
+        persona: str
+    ) -> Dict[str, Any]:
+        """
+        Handle photo upload completion - proceed to summary.
+        Stage: photo_upload → summary, UI Mode: photo_uploader → summary
+        """
+        photos = payload.get("photos", [])
+        logger.info(f"[AI Support] Photos uploaded: {len(photos)} photos")
+
+        session = self.session_manager.get_or_create(channel_id, user_id, persona)
+        session.metadata["photos"] = photos
+        session.update_stage("summary", "summary")
+
+        return {
+            "stage": "summary",
+            "ui_mode": "summary",
+            "persona": persona,
+            "payload": {
+                "selected_cta": session.selected_cta or "",
+                "selected_cta_label": session.metadata.get("selected_cta_label", ""),
+                "selected_item_id": session.selected_item_id or "",
+                "selected_item_title": session.selected_item_title or "",
+                "selected_reason": session.selected_reason or "",
+                "photos_count": len(photos)
+            }
+        }
+
+    async def _handle_skip_photos(
+        self,
+        payload: Dict[str, Any],
+        channel_id: str,
+        user_id: str,
+        persona: str
+    ) -> Dict[str, Any]:
+        """
+        Handle skipping photo upload - proceed to summary.
+        Stage: photo_upload → summary, UI Mode: photo_uploader → summary
+        """
+        logger.info(f"[AI Support] Photos skipped")
+
+        session = self.session_manager.get_or_create(channel_id, user_id, persona)
+        session.update_stage("summary", "summary")
+
+        return {
+            "stage": "summary",
+            "ui_mode": "summary",
+            "persona": persona,
+            "payload": {
+                "selected_cta": session.selected_cta or "",
+                "selected_cta_label": session.metadata.get("selected_cta_label", ""),
+                "selected_item_id": session.selected_item_id or "",
+                "selected_item_title": session.selected_item_title or "",
+                "selected_reason": session.selected_reason or ""
+            }
+        }
+
+    # =========================================================================
+    # PHASE 2: LANDLORD INCIDENT TRIAGE HANDLERS
+    # =========================================================================
+
+    async def _handle_select_incident(
+        self,
+        payload: Dict[str, Any],
+        channel_id: str,
+        user_id: str,
+        persona: str
+    ) -> Dict[str, Any]:
+        """
+        Handle incident selection - show triage panel.
+        Stage: incident_detail → incident_triage, UI Mode: incident_detail → triage_panel
+        """
+        action_id = payload.get("action_id")
+        logger.info(f"[AI Support] Incident action selected: {action_id}")
+
+        session = self.session_manager.get_or_create(channel_id, user_id, persona)
+        incident_id = session.metadata.get("incident_id", "")
+
+        if action_id == "triage":
+            session.update_stage("incident_triage", "triage_panel")
+            return {
+                "stage": "incident_triage",
+                "ui_mode": "triage_panel",
+                "persona": persona,
+                "payload": {
+                    "incident_id": incident_id,
+                    "incident_summary": session.metadata.get("incident_summary", ""),
+                    "classification_options": [
+                        {
+                            "id": "emergency",
+                            "label": "Emergency Repair",
+                            "description": "Immediate safety hazard or property damage",
+                            "priority": "emergency"
+                        },
+                        {
+                            "id": "urgent",
+                            "label": "Urgent Repair",
+                            "description": "Needs attention within 24 hours",
+                            "priority": "urgent"
+                        },
+                        {
+                            "id": "routine",
+                            "label": "Routine Maintenance",
+                            "description": "Schedule within 1 week",
+                            "priority": "routine"
+                        },
+                        {
+                            "id": "low",
+                            "label": "Low Priority",
+                            "description": "Non-urgent, can wait",
+                            "priority": "low"
+                        }
+                    ]
+                }
+            }
+        else:
+            return self._fallback_state("Unknown action")
+
+    async def _handle_classify_incident(
+        self,
+        payload: Dict[str, Any],
+        channel_id: str,
+        user_id: str,
+        persona: str
+    ) -> Dict[str, Any]:
+        """
+        Handle incident classification - create job or resolve.
+        """
+        classification_id = payload.get("classification_id")
+        logger.info(f"[AI Support] Incident classified as: {classification_id}")
+
+        session = self.session_manager.get_or_create(channel_id, user_id, persona)
+        session.metadata["classification"] = classification_id
+
+        # For now, show resolution options
+        return {
+            "stage": "resolution",
+            "ui_mode": "resolution",
+            "persona": persona,
+            "payload": {
+                "summary": f"Incident classified as {classification_id}",
+                "actions": [
+                    {"id": "create_job", "label": "Create Work Order"},
+                    {"id": "close", "label": "Mark as Resolved"}
+                ]
+            }
+        }
+
+    async def _handle_create_job(
+        self,
+        payload: Dict[str, Any],
+        channel_id: str,
+        user_id: str,
+        persona: str
+    ) -> Dict[str, Any]:
+        """Handle job creation from incident."""
+        logger.info(f"[AI Support] Creating job from incident")
+
+        return {
+            "stage": "resolution",
+            "ui_mode": "resolution",
+            "persona": persona,
+            "payload": {
+                "summary": "Work order created successfully",
+                "actions": [
+                    {"id": "view_job", "label": "View Work Order"},
+                    {"id": "done", "label": "Done"}
+                ]
+            }
+        }
+
+    async def _handle_close_incident(
+        self,
+        payload: Dict[str, Any],
+        channel_id: str,
+        user_id: str,
+        persona: str
+    ) -> Dict[str, Any]:
+        """Handle incident closure."""
+        logger.info(f"[AI Support] Closing incident")
+
+        return {
+            "stage": "resolution",
+            "ui_mode": "resolution",
+            "persona": persona,
+            "payload": {
+                "summary": "Incident marked as resolved",
+                "actions": [
+                    {"id": "done", "label": "Done"}
+                ]
+            }
+        }
+
+    # =========================================================================
+    # PHASE 3: LANDLORD JOB + BIDS HANDLERS
+    # =========================================================================
+
+    async def _handle_request_bids(
+        self,
+        payload: Dict[str, Any],
+        channel_id: str,
+        user_id: str,
+        persona: str
+    ) -> Dict[str, Any]:
+        """Handle bid request."""
+        logger.info(f"[AI Support] Requesting bids")
+        return self._fallback_state("Bid requests not yet implemented")
+
+    async def _handle_select_bid(
+        self,
+        payload: Dict[str, Any],
+        channel_id: str,
+        user_id: str,
+        persona: str
+    ) -> Dict[str, Any]:
+        """Handle bid selection for review."""
+        logger.info(f"[AI Support] Bid selected")
+        return self._fallback_state("Bid selection not yet implemented")
+
+    async def _handle_approve_bid(
+        self,
+        payload: Dict[str, Any],
+        channel_id: str,
+        user_id: str,
+        persona: str
+    ) -> Dict[str, Any]:
+        """Handle bid approval."""
+        bid_id = payload.get("bid_id")
+        logger.info(f"[AI Support] Approving bid: {bid_id}")
+
+        return {
+            "stage": "resolution",
+            "ui_mode": "resolution",
+            "persona": persona,
+            "payload": {
+                "summary": "Bid approved! The contractor will be notified.",
+                "actions": [
+                    {"id": "track_job", "label": "Track Job Progress"},
+                    {"id": "done", "label": "Done"}
+                ]
+            }
+        }
+
+    async def _handle_reject_bid(
+        self,
+        payload: Dict[str, Any],
+        channel_id: str,
+        user_id: str,
+        persona: str
+    ) -> Dict[str, Any]:
+        """Handle bid rejection."""
+        logger.info(f"[AI Support] Rejecting bid")
+        return self._fallback_state("Bid rejection not yet implemented")
+
+    # =========================================================================
+    # PHASE 4: CONTRACTOR BIDDING HANDLERS
+    # =========================================================================
+
+    async def _handle_select_job(
+        self,
+        payload: Dict[str, Any],
+        channel_id: str,
+        user_id: str,
+        persona: str
+    ) -> Dict[str, Any]:
+        """Handle job selection - show bid form."""
+        job_id = payload.get("job_id")
+        logger.info(f"[AI Support] Job selected: {job_id}")
+
+        session = self.session_manager.get_or_create(channel_id, user_id, persona)
+        session.metadata["selected_job_id"] = job_id
+
+        return {
+            "stage": "bid_submission",
+            "ui_mode": "bid_form",
+            "persona": persona,
+            "payload": {
+                "job_id": job_id,
+                "job_title": session.metadata.get("selected_job_title", "Job"),
+                "suggested_price_range": {
+                    "min": 500,
+                    "max": 2000
+                }
+            }
+        }
+
+    async def _handle_submit_bid(
+        self,
+        payload: Dict[str, Any],
+        channel_id: str,
+        user_id: str,
+        persona: str
+    ) -> Dict[str, Any]:
+        """Handle bid submission."""
+        price = payload.get("price")
+        logger.info(f"[AI Support] Bid submitted: ${price}")
+
+        return {
+            "stage": "resolution",
+            "ui_mode": "resolution",
+            "persona": persona,
+            "payload": {
+                "summary": f"Your bid of ${price} has been submitted successfully!",
+                "actions": [
+                    {"id": "view_bids", "label": "View My Bids"},
+                    {"id": "browse_jobs", "label": "Browse More Jobs"},
+                    {"id": "done", "label": "Done"}
+                ]
+            }
+        }
+
+    # =========================================================================
+    # PHASE 5: JOB EXECUTION HANDLERS
+    # =========================================================================
+
+    async def _handle_accept_job(
+        self,
+        payload: Dict[str, Any],
+        channel_id: str,
+        user_id: str,
+        persona: str
+    ) -> Dict[str, Any]:
+        """Handle job acceptance."""
+        job_id = payload.get("job_id")
+        logger.info(f"[AI Support] Job accepted: {job_id}")
+
+        return {
+            "stage": "resolution",
+            "ui_mode": "resolution",
+            "persona": persona,
+            "payload": {
+                "summary": "Job accepted! You can now start work.",
+                "actions": [
+                    {"id": "start_work", "label": "Mark Work as Started"},
+                    {"id": "view_job", "label": "View Job Details"},
+                    {"id": "done", "label": "Done"}
+                ]
+            }
+        }
+
+    async def _handle_decline_job(
+        self,
+        payload: Dict[str, Any],
+        channel_id: str,
+        user_id: str,
+        persona: str
+    ) -> Dict[str, Any]:
+        """Handle job declination."""
+        logger.info(f"[AI Support] Job declined")
+
+        return {
+            "stage": "resolution",
+            "ui_mode": "resolution",
+            "persona": persona,
+            "payload": {
+                "summary": "Job declined. The property owner will be notified.",
+                "actions": [
+                    {"id": "browse_jobs", "label": "Browse Other Jobs"},
+                    {"id": "done", "label": "Done"}
+                ]
+            }
+        }
+
+    async def _handle_start_work(
+        self,
+        payload: Dict[str, Any],
+        channel_id: str,
+        user_id: str,
+        persona: str
+    ) -> Dict[str, Any]:
+        """Handle work start."""
+        logger.info(f"[AI Support] Work started")
+
+        return {
+            "stage": "resolution",
+            "ui_mode": "resolution",
+            "persona": persona,
+            "payload": {
+                "summary": "Work marked as in progress",
+                "actions": [
+                    {"id": "update_progress", "label": "Update Progress"},
+                    {"id": "mark_complete", "label": "Mark as Complete"},
+                    {"id": "done", "label": "Done"}
+                ]
+            }
+        }
+
+    async def _handle_update_progress(
+        self,
+        payload: Dict[str, Any],
+        channel_id: str,
+        user_id: str,
+        persona: str
+    ) -> Dict[str, Any]:
+        """Handle progress update."""
+        logger.info(f"[AI Support] Progress updated")
+        return self._fallback_state("Progress updates not yet implemented")
+
+    async def _handle_mark_complete(
+        self,
+        payload: Dict[str, Any],
+        channel_id: str,
+        user_id: str,
+        persona: str
+    ) -> Dict[str, Any]:
+        """Handle job completion."""
+        job_id = payload.get("job_id")
+        summary = payload.get("summary", "")
+        photos = payload.get("photos", [])
+        logger.info(f"[AI Support] Job marked complete: {job_id}, {len(photos)} photos")
+
+        return {
+            "stage": "resolution",
+            "ui_mode": "resolution",
+            "persona": persona,
+            "payload": {
+                "summary": "Job marked as complete! Waiting for property owner approval.",
+                "actions": [
+                    {"id": "view_jobs", "label": "View My Jobs"},
+                    {"id": "browse_jobs", "label": "Browse New Jobs"},
+                    {"id": "done", "label": "Done"}
+                ]
+            }
+        }
+
+    async def _handle_upload_completion_photos(
+        self,
+        payload: Dict[str, Any],
+        channel_id: str,
+        user_id: str,
+        persona: str
+    ) -> Dict[str, Any]:
+        """Handle completion photo upload."""
+        logger.info(f"[AI Support] Completion photos uploaded")
+        return self._fallback_state("Completion photo upload not yet implemented")
+
+    # =========================================================================
+    # HELPER METHODS
+    # =========================================================================
 
     def _fallback_state(self, error: str) -> Dict[str, Any]:
         """Return fallback error state."""

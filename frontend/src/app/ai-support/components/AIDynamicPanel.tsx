@@ -2,7 +2,7 @@
  * AIDynamicPanel
  *
  * Router component that renders the appropriate panel based on UI mode
- * Amazon Spec: cta_panel, gallery, selector, chat, resolution, fallback
+ * Extended for multi-persona flows (Phases 1-5)
  */
 
 "use client";
@@ -10,12 +10,32 @@
 import { AnimatePresence } from "framer-motion";
 import type { UIMode, IntentType, FlowState } from "@/types/ai-support";
 
+// Base panels
 import ActionPanel from "../panels/ActionPanel";
 import ItemPicker from "../panels/ItemPicker";
 import ReasonPicker from "../panels/ReasonPicker";
 import SummaryPanel from "../panels/SummaryPanel";
 import ResolutionPanel from "../panels/ResolutionPanel";
 import FallbackPanel from "../panels/FallbackPanel";
+
+// Phase 1: Tenant Photo Upload
+import PhotoUploader from "../panels/PhotoUploader";
+
+// Phase 2: Landlord Incident Triage
+import IncidentDetailPanel from "../panels/IncidentDetailPanel";
+import TriagePanel from "../panels/TriagePanel";
+
+// Phase 3: Landlord Job + Bids
+import BidComparisonPanel from "../panels/BidComparisonPanel";
+
+// Phase 4: Contractor Bidding
+import JobDetailPanel from "../panels/JobDetailPanel";
+import BidForm from "../panels/BidForm";
+
+// Phase 5: Job Execution
+import StatusTrackerPanel from "../panels/StatusTrackerPanel";
+import AcceptancePanel from "../panels/AcceptancePanel";
+import CompletionForm from "../panels/CompletionForm";
 
 interface AIDynamicPanelProps {
   uiMode: UIMode;
@@ -129,6 +149,142 @@ export default function AIDynamicPanel({
         <FallbackPanel
           key="fallback"
           error={getPayload({ error: "An error occurred" }).error}
+        />
+      )}
+
+      {/* ===== PHASE 1: TENANT PHOTO UPLOAD ===== */}
+      {uiMode === "photo_uploader" && (
+        <PhotoUploader
+          key="photo_uploader"
+          maxPhotos={getPayload<any>({ max_photos: 5 }).max_photos}
+          required={getPayload<any>({ required: false }).required}
+          existingPhotos={getPayload<any>({ existing_photos: [] }).existing_photos}
+          onUpload={async (photos) => {
+            await sendIntent("photos_uploaded", { photos: photos.map(f => f.name) });
+          }}
+          onSkip={async () => {
+            await sendIntent("skip_photos", {});
+          }}
+        />
+      )}
+
+      {/* ===== PHASE 2: LANDLORD INCIDENT TRIAGE ===== */}
+      {uiMode === "incident_detail" && (
+        <IncidentDetailPanel
+          key="incident_detail"
+          incident={getPayload<any>({ incident: {} }).incident}
+          actions={getPayload<any>({ actions: [] }).actions}
+          onAction={async (actionId) => {
+            await sendIntent("select_incident", { action_id: actionId });
+          }}
+        />
+      )}
+
+      {uiMode === "triage_panel" && (
+        <TriagePanel
+          key="triage_panel"
+          incidentId={getPayload<any>({ incident_id: "" }).incident_id}
+          incidentSummary={getPayload<any>({ incident_summary: "" }).incident_summary}
+          classificationOptions={getPayload<any>({ classification_options: [] }).classification_options}
+          onClassify={async (classificationId) => {
+            await sendIntent("classify_incident", { classification_id: classificationId });
+          }}
+        />
+      )}
+
+      {/* ===== PHASE 3: LANDLORD JOB + BIDS ===== */}
+      {uiMode === "bid_comparison" && (
+        <BidComparisonPanel
+          key="bid_comparison"
+          jobId={getPayload<any>({ job_id: "" }).job_id}
+          jobTitle={getPayload<any>({ job_title: "" }).job_title}
+          bids={getPayload<any>({ bids: [] }).bids}
+          onSelectBid={async (bidId) => {
+            await sendIntent("approve_bid", { bid_id: bidId });
+          }}
+        />
+      )}
+
+      {/* ===== PHASE 4: CONTRACTOR BIDDING ===== */}
+      {uiMode === "job_detail" && (
+        <JobDetailPanel
+          key="job_detail"
+          job={getPayload<any>({ job: {} }).job}
+          canBid={getPayload<any>({ can_bid: false }).can_bid}
+          existingBid={getPayload<any>({ existing_bid: undefined }).existing_bid}
+          onBid={async () => {
+            await sendIntent("select_job", { job_id: getPayload<any>({ job: { id: "" } }).job.id });
+          }}
+          onBack={async () => {
+            await sendIntent("ai_continue", {});
+          }}
+        />
+      )}
+
+      {uiMode === "bid_form" && (
+        <BidForm
+          key="bid_form"
+          jobId={getPayload<any>({ job_id: "" }).job_id}
+          jobTitle={getPayload<any>({ job_title: "" }).job_title}
+          suggestedPriceRange={getPayload<any>({ suggested_price_range: undefined }).suggested_price_range}
+          onSubmit={async (bidData) => {
+            await sendIntent("submit_bid", bidData);
+          }}
+          onCancel={async () => {
+            await sendIntent("ai_continue", {});
+          }}
+        />
+      )}
+
+      {/* ===== PHASE 5: JOB EXECUTION ===== */}
+      {uiMode === "status_tracker" && (
+        <StatusTrackerPanel
+          key="status_tracker"
+          entityType={getPayload<any>({ entity_type: "incident" }).entity_type}
+          entityId={getPayload<any>({ entity_id: "" }).entity_id}
+          title={getPayload<any>({ title: "" }).title}
+          currentStatus={getPayload<any>({ current_status: "" }).current_status}
+          timeline={getPayload<any>({ timeline: [] }).timeline}
+          nextActions={getPayload<any>({ next_actions: undefined }).next_actions}
+          onAction={async (actionId) => {
+            await sendIntent("resolution_action", { action_id: actionId });
+          }}
+        />
+      )}
+
+      {uiMode === "job_acceptance" && (
+        <AcceptancePanel
+          key="job_acceptance"
+          jobId={getPayload<any>({ job_id: "" }).job_id}
+          jobTitle={getPayload<any>({ job_title: "" }).job_title}
+          approvedBid={getPayload<any>({ approved_bid: {} }).approved_bid}
+          terms={getPayload<any>({ terms: [] }).terms}
+          onAccept={async () => {
+            await sendIntent("accept_job", { job_id: getPayload<any>({ job_id: "" }).job_id });
+          }}
+          onDecline={async () => {
+            await sendIntent("decline_job", { job_id: getPayload<any>({ job_id: "" }).job_id });
+          }}
+        />
+      )}
+
+      {uiMode === "completion_form" && (
+        <CompletionForm
+          key="completion_form"
+          jobId={getPayload<any>({ job_id: "" }).job_id}
+          jobTitle={getPayload<any>({ job_title: "" }).job_title}
+          workSummaryRequired={getPayload<any>({ work_summary_required: true }).work_summary_required}
+          photosRequired={getPayload<any>({ photos_required: true }).photos_required}
+          onSubmit={async (data) => {
+            await sendIntent("mark_complete", {
+              job_id: getPayload<any>({ job_id: "" }).job_id,
+              summary: data.summary,
+              photos: data.photos.map(f => f.name),
+            });
+          }}
+          onCancel={async () => {
+            await sendIntent("ai_continue", {});
+          }}
         />
       )}
     </AnimatePresence>
