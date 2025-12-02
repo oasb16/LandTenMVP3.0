@@ -9,7 +9,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { CheckCircle, Circle, Clock, User, Calendar } from "lucide-react";
+import { CheckCircle, Circle, Clock, User, Calendar, ArrowLeft } from "lucide-react";
 import type { StatusTrackerPanelProps } from "@/types/ai-support";
 
 export default function StatusTrackerPanel({
@@ -20,6 +20,7 @@ export default function StatusTrackerPanel({
   timeline,
   nextActions,
   onAction,
+  onBack,
 }: StatusTrackerPanelProps) {
   const getStatusColor = (status: string) => {
     const lower = status.toLowerCase();
@@ -61,6 +62,17 @@ export default function StatusTrackerPanel({
       transition={{ duration: 0.3 }}
       className="flex flex-col h-full"
     >
+      {/* Back Button (Optional) */}
+      {onBack && (
+        <button
+          onClick={onBack}
+          className="flex items-center gap-2 text-slate-400 hover:text-slate-200 transition-colors mb-3"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          <span className="text-sm">Back</span>
+        </button>
+      )}
+
       {/* Header */}
       <div className="mb-4">
         <div className="flex items-center gap-2 text-xs text-slate-500 mb-2">

@@ -477,6 +477,7 @@ export interface StatusTrackerPanelProps {
   timeline: StatusTrackerPayload["timeline"];
   nextActions?: Array<{ id: string; label: string }>;
   onAction?: (actionId: string) => void;
+  onBack?: () => void | Promise<void>;
 }
 
 export interface AcceptancePanelProps {
@@ -486,6 +487,7 @@ export interface AcceptancePanelProps {
   terms: string[];
   onAccept: () => void;
   onDecline: () => void;
+  onBack?: () => void | Promise<void>;
 }
 
 export interface CompletionFormProps {
