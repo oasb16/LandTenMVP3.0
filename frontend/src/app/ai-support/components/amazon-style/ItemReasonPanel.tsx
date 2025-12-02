@@ -9,6 +9,7 @@
 
 import { motion } from "framer-motion";
 import { ArrowLeft, ChevronRight } from "lucide-react";
+import { useStreamChat } from "@/hooks/chat/StreamChatContext";
 
 interface ItemReasonPanelProps {
   itemId: string;
@@ -29,6 +30,21 @@ export default function ItemReasonPanel({
   onBack,
   onSelectReason,
 }: ItemReasonPanelProps) {
+  const { activeChannel } = useStreamChat();
+
+  const handleReasonClick = async (reasonId: string, reasonLabel: string) => {
+    // Send the reason label as a user message into chat
+    if (activeChannel) {
+      try {
+        await activeChannel.sendMessage({ text: reasonLabel });
+      } catch (err) {
+        console.error("[ItemReasonPanel] Failed to send message:", err);
+      }
+    }
+
+    // Then call the original handler
+    onSelectReason(reasonId, reasonLabel);
+  };
   const getReasons = () => {
     // Tenant reasons
     if (persona === "tenant") {
@@ -163,7 +179,7 @@ export default function ItemReasonPanel({
                     initial={{ opacity: 0, x: 20 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: index * 0.05 }}
-                    onClick={() => onSelectReason(reason.id, reason.label)}
+                    onClick={() => handleReasonClick(reason.id, reason.label)}
                     className="w-full p-4 bg-slate-800/60 border border-slate-700/60 hover:border-emerald-500/50 rounded-xl transition-all duration-200 flex items-center justify-between group text-left"
                   >
                     <span className="font-medium text-slate-100">

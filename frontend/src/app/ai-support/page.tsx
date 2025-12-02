@@ -18,20 +18,17 @@ import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useStreamChat } from "@/hooks/chat/StreamChatContext";
 import StreamChatPane from "@/components/StreamChatPane";
-import AIDynamicPanel from "./components/AIDynamicPanel";
 import AIChatAssistantLauncher from "./components/AIChatAssistantLauncher";
 import HelpHub from "./components/amazon-style/HelpHub";
 import ItemReasonPanel from "./components/amazon-style/ItemReasonPanel";
 import RufusWelcome from "./components/amazon-style/RufusWelcome";
 import StatusPanel from "./components/amazon-style/StatusPanel";
 import HelpArticles from "./components/amazon-style/HelpArticles";
-import { AIContextPanel } from "@/components/dashboard/AIContextPanel";
-import { AgentStatusBar } from "@/components/dashboard/AgentStatusBar";
 import { DebugPanel } from "@/components/dashboard/DebugPanel";
 import { ConversationList } from "@/components/dashboard/ConversationList";
 import PaymentInitiator from "@/components/PaymentInitiator";
 import useAISupportFlow from "./hooks/useAISupportFlow";
-import { Settings, MessageSquare, Bug } from "lucide-react";
+import { MessageSquare, Bug } from "lucide-react";
 import "./ai-support.css";
 
 export default function AISupportPage() {
@@ -41,7 +38,6 @@ export default function AISupportPage() {
   const [view, setView] = useState<"hub" | "item_reason">("hub");
   const [drawerMode, setDrawerMode] = useState<"welcome" | "chat" | "status" | "conversations" | "billing">("welcome");
   const [showDebugPanel, setShowDebugPanel] = useState(false);
-  const [showContextPanel, setShowContextPanel] = useState(false);
   const [selectedItem, setSelectedItem] = useState<{
     id: string;
     type: string;
@@ -313,13 +309,6 @@ export default function AISupportPage() {
             >
               <Bug className="w-4 h-4" />
             </button>
-            <button
-              onClick={() => setShowContextPanel(!showContextPanel)}
-              className="text-slate-500 hover:text-emerald-400 transition-colors"
-              title="Toggle context panel"
-            >
-              <Settings className="w-4 h-4" />
-            </button>
             <div className="text-slate-500 text-xs">
               Powered by LandTen AI • Amazon-style UX
             </div>
@@ -390,62 +379,17 @@ export default function AISupportPage() {
                 />
               </div>
             ) : (
-              /* Show Chat + Guided Flow */
-              <>
-                {/* Split View: Chat + Guided Flow Panel */}
-                <div className="flex flex-1 flex-col lg:flex-row gap-2 p-2 overflow-hidden">
-                  {/* Chat Panel (60% width on desktop) */}
-                  <div className="flex-1 lg:w-[60%] rounded-xl border border-slate-700/50 bg-slate-900/50 overflow-hidden">
-                    <StreamChatPane
-                      className="h-full"
-                      showEscalation={stage === "diagnosis"}
-                      onEscalate={async () => {
-                        await sendIntent("ai_escalate", {
-                          reason: "user_requested",
-                          current_stage: stage,
-                        });
-                      }}
-                    />
-                  </div>
-
-                  {/* Guided Flow Panel (40% width on desktop) */}
-                  <aside className="lg:w-[40%] rounded-xl border border-slate-700/50 bg-slate-950/70 p-4 flex flex-col gap-3 overflow-y-auto">
-                    <div className="flex items-center justify-between">
-                      <h2 className="text-sm font-semibold text-slate-100">Guided Flow</h2>
-                      <div className="flex items-center gap-2">
-                        {initializing && (
-                          <span className="text-xs text-slate-400">Initializing...</span>
-                        )}
-                        <button
-                          onClick={() => setShowContextPanel(!showContextPanel)}
-                          className={`text-xs px-2 py-1 rounded transition-colors ${showContextPanel ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700/50 text-slate-400 hover:text-slate-200'}`}
-                          title="Toggle context panel"
-                        >
-                          Context
-                        </button>
-                      </div>
-                    </div>
-
-                    {showContextPanel ? (
-                      <AIContextPanel />
-                    ) : (
-                      <AIDynamicPanel
-                        uiMode={uiMode}
-                        payload={payload}
-                        sendIntent={sendIntent}
-                        flowState={flowState}
-                      />
-                    )}
-                  </aside>
-                </div>
-
-                {/* Drawer Footer - Agent Status Bar */}
-                <AgentStatusBar
-                  persona={persona}
-                  flowStage={stage}
-                  reasoningActive={initializing || flowLoading}
-                />
-              </>
+              /* Show Chat Only - Single Pane */
+              <StreamChatPane
+                className="h-full"
+                showEscalation={stage === "diagnosis"}
+                onEscalate={async () => {
+                  await sendIntent("ai_escalate", {
+                    reason: "user_requested",
+                    current_stage: stage,
+                  });
+                }}
+              />
             )}
           </div>
         </AIChatAssistantLauncher>

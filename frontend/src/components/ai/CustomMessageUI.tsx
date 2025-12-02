@@ -10,6 +10,7 @@ import { AIResponseParser } from "./AIResponseParser";
 import { TextExpander } from "./TextExpander";
 import { IncidentCardEnhanced } from "./IncidentCardEnhanced";
 import { DiscoveryQuestions } from "./DiscoveryQuestions";
+import { ActionCard } from "./ActionCard";
 
 type StreamMessage = MessageResponse;
 
@@ -276,8 +277,23 @@ export const CustomMessageUI = memo(function CustomMessageUI({
         ) : // Check if this contains numbered questions (discovery session)
         containsNumberedQuestions(messageText) && isAIMessage ? (
           <DiscoveryQuestions text={messageText} />
+        ) : isAIMessage ? (
+          // AI message: show in two parts (long + short summary)
+          <div className="flex flex-col gap-3 w-full max-w-[90%]">
+            {/* Part 1: Long Version (Ellipsized) */}
+            <motion.div
+              layout
+              className={`${bubbleClasses} ${bubbleAlignment}`}
+              transition={{ type: "spring", stiffness: 260, damping: 24 }}
+            >
+              <TextExpander text={messageText} maxLength={240} isBot={true} />
+            </motion.div>
+
+            {/* Part 2: Short Actionable Summary */}
+            {renderActionSummary(messageText, metadata, stage, onActionClick)}
+          </div>
         ) : (
-          // Regular text message with optional expansion
+          // Regular user message with optional expansion
           <motion.div
             layout
             className={`${bubbleClasses} ${bubbleAlignment}`}
@@ -356,4 +372,99 @@ function containsNumberedQuestions(text: string): boolean {
 
   // Consider it a question list if there are 3+ numbered items
   return numberedCount >= 3;
+}
+
+/**
+ * Render action summary based on message context
+ */
+function renderActionSummary(
+  messageText: string,
+  metadata: MetadataPayload,
+  stage?: string,
+  onActionClick?: (actionValue: string) => Promise<void> | void,
+) {
+  // Try to extract actions from metadata or text
+  const actions = extractNextSteps(messageText, metadata, stage);
+
+  if (actions.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="rounded-2xl border border-emerald-500/20 bg-gradient-to-br from-slate-900/80 via-slate-900 to-slate-950 p-4 shadow-xl">
+      <h4 className="text-sm font-semibold text-emerald-300 mb-3 flex items-center gap-2">
+        <Sparkles className="h-4 w-4" />
+        What you can do next:
+      </h4>
+      <div className="grid grid-cols-1 gap-2">
+        {actions.map((action, index) => (
+          <ActionCard
+            key={index}
+            icon={Sparkles}
+            title={action.action}
+            desc={action.details}
+            index={index}
+            onClick={onActionClick}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Extract next steps from message text or metadata
+ */
+function extractNextSteps(
+  messageText: string,
+  metadata: MetadataPayload,
+  stage?: string,
+): Array<{ action: string; details?: string }> {
+  // Try to parse structured data from message text
+  const parsed = tryParseStructuredReasoning(messageText);
+  if (parsed?.analysis?.next_actions && parsed.analysis.next_actions.length > 0) {
+    return parsed.analysis.next_actions;
+  }
+
+  // Fallback to generic actions based on context/stage
+  return getGenericActionsForStage(stage, metadata);
+}
+
+/**
+ * Get generic fallback actions based on stage/context
+ */
+function getGenericActionsForStage(
+  stage?: string,
+  metadata?: MetadataPayload,
+): Array<{ action: string; details?: string }> {
+  const normalizedStage = stage?.toLowerCase() || metadata?.context_type?.toLowerCase() || "";
+
+  if (normalizedStage.includes("incident") || normalizedStage.includes("maintenance")) {
+    return [
+      { action: "Upload photos of the issue", details: "Help us understand the problem better" },
+      { action: "Add more details", details: "Provide additional information" },
+      { action: "Check status", details: "View your request status" },
+    ];
+  }
+
+  if (normalizedStage.includes("discovery")) {
+    return [
+      { action: "Answer questions", details: "Help us diagnose the issue" },
+      { action: "Provide more context", details: "Share additional details" },
+    ];
+  }
+
+  if (normalizedStage.includes("job") || normalizedStage.includes("contractor")) {
+    return [
+      { action: "Review bids", details: "Compare contractor proposals" },
+      { action: "Approve work", details: "Accept a contractor's bid" },
+      { action: "Contact contractor", details: "Ask questions or get updates" },
+    ];
+  }
+
+  // Default generic actions
+  return [
+    { action: "Continue conversation", details: "Ask me anything" },
+    { action: "Get help", details: "I'm here to assist" },
+  ];
 }
