@@ -23,6 +23,7 @@ import AIChatAssistantLauncher from "./components/AIChatAssistantLauncher";
 import HelpHub from "./components/amazon-style/HelpHub";
 import ItemReasonPanel from "./components/amazon-style/ItemReasonPanel";
 import RufusWelcome from "./components/amazon-style/RufusWelcome";
+import StatusPanel from "./components/amazon-style/StatusPanel";
 import HelpArticles from "./components/amazon-style/HelpArticles";
 import useAISupportFlow from "./hooks/useAISupportFlow";
 import "./ai-support.css";
@@ -32,6 +33,7 @@ export default function AISupportPage() {
   const router = useRouter();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [view, setView] = useState<"hub" | "item_reason">("hub");
+  const [drawerMode, setDrawerMode] = useState<"welcome" | "chat" | "status">("welcome");
   const [selectedItem, setSelectedItem] = useState<{
     id: string;
     type: string;
@@ -115,18 +117,46 @@ export default function AISupportPage() {
       await sendIntent("reason_selected", {
         reason: reasonLabel,
       });
-      // Open drawer to show chat
+      // Open drawer in chat mode
+      setDrawerMode("chat");
       setIsDrawerOpen(true);
     }
   };
 
-  const handleLaunchChat = () => {
+  const handleLaunchChat = async () => {
+    // Init AI session and open drawer
+    await sendIntent("ai_init", {});
+    setDrawerMode("chat");
     setIsDrawerOpen(true);
   };
 
   const handleBackToHub = () => {
     setView("hub");
     setSelectedItem(null);
+  };
+
+  const handleQuickAction = async (action: string) => {
+    if (action === "maintenance") {
+      // Start maintenance flow - skip intro, go to item select
+      await sendIntent("select_cta", { cta_id: "maintenance" });
+      setDrawerMode("chat");
+    } else if (action === "billing") {
+      // Start billing flow
+      await sendIntent("select_cta", { cta_id: "billing" });
+      setDrawerMode("chat");
+    } else if (action === "chat") {
+      // Free-form chat mode
+      await sendIntent("ai_init", {});
+      setDrawerMode("chat");
+    }
+  };
+
+  const handleShowStatus = () => {
+    setDrawerMode("status");
+  };
+
+  const handleBackToWelcome = () => {
+    setDrawerMode("welcome");
   };
 
   return (
@@ -221,15 +251,18 @@ export default function AISupportPage() {
           onClose={() => setIsDrawerOpen(false)}
         >
           <div className="flex h-full flex-col">
-            {/* Conditional View: Rufus Welcome or Chat + Flow */}
-            {!flowState?.session_id || stage === "intro" ? (
-              /* Show Rufus Welcome when no active session */
+            {/* Conditional View: Welcome / Status / Chat+Flow */}
+            {drawerMode === "welcome" ? (
+              /* Show Rufus Welcome */
               <RufusWelcome
-                onQuickAction={async (action) => {
-                  if (action === "chat" || action === "maintenance") {
-                    await sendIntent("ai_init", {});
-                  }
-                }}
+                onQuickAction={handleQuickAction}
+                onShowStatus={handleShowStatus}
+              />
+            ) : drawerMode === "status" ? (
+              /* Show Status Panel */
+              <StatusPanel
+                persona={persona}
+                onBack={handleBackToWelcome}
               />
             ) : (
               /* Show Chat + Guided Flow */
