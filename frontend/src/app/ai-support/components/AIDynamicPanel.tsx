@@ -249,6 +249,9 @@ export default function AIDynamicPanel({
           onAction={async (actionId) => {
             await sendIntent("resolution_action", { action_id: actionId });
           }}
+          onBack={async () => {
+            await sendIntent("ai_continue", {});
+          }}
         />
       )}
 
@@ -264,6 +267,9 @@ export default function AIDynamicPanel({
           }}
           onDecline={async () => {
             await sendIntent("decline_job", { job_id: getPayload<any>({ job_id: "" }).job_id });
+          }}
+          onBack={async () => {
+            await sendIntent("ai_continue", {});
           }}
         />
       )}

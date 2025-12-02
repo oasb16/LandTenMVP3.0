@@ -112,7 +112,32 @@ export default function AISupportPage() {
 
   const handleSelectItem = (itemId: string, itemType: string, itemTitle: string) => {
     setSelectedItem({ id: itemId, type: itemType, title: itemTitle });
-    setView("item_reason");
+
+    // Special handling for specific item types that should open drawer directly
+    if (itemType === "lease" || itemType === "notification") {
+      // For lease and notifications, go straight to chat with context
+      sendIntent("item_selected", {
+        item_id: itemId,
+        item_title: itemTitle,
+        item_type: itemType,
+      }).then(() => {
+        setDrawerMode("chat");
+        setIsDrawerOpen(true);
+      });
+    } else if (itemType === "incident" || itemType === "job") {
+      // For incidents and jobs, send to backend for proper routing
+      sendIntent("item_selected", {
+        item_id: itemId,
+        item_title: itemTitle,
+        item_type: itemType,
+      }).then(() => {
+        setDrawerMode("chat");
+        setIsDrawerOpen(true);
+      });
+    } else {
+      // For other types (property, billing), show reason picker
+      setView("item_reason");
+    }
   };
 
   const handleSelectReason = async (reasonId: string, reasonLabel: string) => {
@@ -121,13 +146,27 @@ export default function AISupportPage() {
       await sendIntent("item_selected", {
         item_id: selectedItem.id,
         item_title: selectedItem.title,
+        item_type: selectedItem.type,
       });
       await sendIntent("reason_selected", {
         reason: reasonLabel,
+        reason_id: reasonId,
       });
-      // Open drawer in chat mode
-      setDrawerMode("chat");
-      setIsDrawerOpen(true);
+
+      // Special routing for specific reason types
+      if (reasonId === "pay") {
+        // Payment reason → open billing drawer
+        setDrawerMode("billing");
+        setIsDrawerOpen(true);
+      } else if (reasonId === "status" || reasonId === "check") {
+        // Status check reason → open status panel
+        setDrawerMode("status");
+        setIsDrawerOpen(true);
+      } else {
+        // Default: open chat mode
+        setDrawerMode("chat");
+        setIsDrawerOpen(true);
+      }
     }
   };
 
