@@ -24,10 +24,8 @@ export default function StreamChatPane({ className, showEscalation, onEscalate }
     user,
   } = useStreamChat();
 
-  // Agent toggle state with localStorage persistence
   const [agentEnabled, setAgentEnabled] = useState(true);
 
-  // Load agent enabled state from localStorage on mount
   useEffect(() => {
     const saved = localStorage.getItem('agentEnabled');
     if (saved !== null) {
@@ -36,13 +34,11 @@ export default function StreamChatPane({ className, showEscalation, onEscalate }
     }
   }, []);
 
-  // Save agent enabled state to localStorage when it changes
   useEffect(() => {
     localStorage.setItem('agentEnabled', agentEnabled.toString());
     console.log("[StreamChatPane] Agent mode", agentEnabled ? "ENABLED" : "DISABLED");
   }, [agentEnabled]);
 
-  // ====== COMPREHENSIVE DEBUG LOGGING ======
   useEffect(() => {
     console.log("[StreamChatPane] 🟢 COMPONENT MOUNTED");
     console.log("[StreamChatPane] Context values:", {
@@ -58,15 +54,12 @@ export default function StreamChatPane({ className, showEscalation, onEscalate }
     return () => {
       console.log("[StreamChatPane] 🔴 COMPONENT UNMOUNTED");
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Only run on mount/unmount
+  }, []);
 
-  // Log active channel changes
   useEffect(() => {
     console.log("[StreamChatPane] Active channel changed:", activeChannel?.cid);
   }, [activeChannel?.cid]);
 
-  // Log context changes
   useEffect(() => {
     console.log("[StreamChatPane] Context update:", {
       hasClient: !!client,
@@ -76,7 +69,6 @@ export default function StreamChatPane({ className, showEscalation, onEscalate }
     });
   }, [client, activeChannel, user, agentEnabled]);
 
-  // Log channel state for debugging (must be before early returns)
   useEffect(() => {
     if (activeChannel) {
       console.log("[StreamChatPane] Active channel state:", {
@@ -91,15 +83,12 @@ export default function StreamChatPane({ className, showEscalation, onEscalate }
     }
   }, [activeChannel, activeChannel?.state?.messages?.length]);
 
-  // Auto-scroll to bottom when channel or messages change
   useEffect(() => {
     if (!activeChannel) return;
 
-    // Small delay to ensure DOM is ready
     const timer = setTimeout(() => {
       const messageList = document.querySelector('.str-chat__list');
       if (messageList) {
-        // Scroll to bottom (top in reverse layout)
         messageList.scrollTop = 0;
       }
     }, 100);
@@ -107,9 +96,12 @@ export default function StreamChatPane({ className, showEscalation, onEscalate }
     return () => clearTimeout(timer);
   }, [activeChannel, activeChannel?.state?.messages?.length]);
 
+  const handleActionClick = useCallback((actionValue: string) => {
+    console.log('[StreamChatPane] CustomAttachment action:', actionValue);
+  }, []);
+
   const showEmptyState = !loading && !activeChannel;
 
-  // Loading state
   if (loading) {
     return (
       <div
@@ -123,7 +115,6 @@ export default function StreamChatPane({ className, showEscalation, onEscalate }
     );
   }
 
-  // Error state
   if (error) {
     return (
       <div
@@ -138,7 +129,6 @@ export default function StreamChatPane({ className, showEscalation, onEscalate }
     );
   }
 
-  // Empty state (no channel selected)
   if (showEmptyState) {
     return (
       <div
@@ -155,7 +145,6 @@ export default function StreamChatPane({ className, showEscalation, onEscalate }
     );
   }
 
-  // Main chat UI using Stream SDK components
   if (!client || !activeChannel) {
     return null;
   }
@@ -163,22 +152,13 @@ export default function StreamChatPane({ className, showEscalation, onEscalate }
   return (
     <div
       className={`str-chat str-chat__theme-dark flex h-full flex-col ${className ?? ""}`.trim()}
-      style={{
-        // Force Stream components to use full height
-        minHeight: 0,
-      }}
+      style={{ minHeight: 0 }}
     >
       <Chat client={client} theme="str-chat__theme-dark">
         <Channel
           channel={activeChannel}
           Attachment={(props) => (
-            <CustomAttachment
-              {...props}
-              onActionClick={(actionValue) => {
-                console.log('[StreamChatPane] CustomAttachment action:', actionValue);
-                // Trigger action through context - will be handled by AIDynamicPanel
-              }}
-            />
+            <CustomAttachment {...props} onActionClick={handleActionClick} />
           )}
         >
           <Window>
@@ -188,22 +168,16 @@ export default function StreamChatPane({ className, showEscalation, onEscalate }
             />
 
             <MessageList
-              // Auto-scroll to newest messages
-              disableDateSeparator={false}
-              // Performance optimization
-              messageLimit={50}
-              // Hide typing indicator if needed
-              hideTypingIndicator={false}
-              // Use HybridMessage for AI message rendering
               Message={HybridMessage}
+              disableDateSeparator={false}
+              messageLimit={50}
+              hideTypingIndicator={false}
             />
 
-            {/* Message Input Container */}
             <div
               className="flex flex-col border-t border-slate-800/70 bg-slate-950/80"
               style={{ flexShrink: 0 }}
             >
-              {/* Escalation Button - shows during diagnosis */}
               {showEscalation && onEscalate && (
                 <div className="px-4 py-2 border-b border-slate-700">
                   <button
@@ -216,7 +190,6 @@ export default function StreamChatPane({ className, showEscalation, onEscalate }
                 </div>
               )}
 
-              {/* Message Input with Custom Submit Handler */}
               <MessageInputWithWebhook agentEnabled={agentEnabled} />
             </div>
           </Window>
@@ -227,13 +200,9 @@ export default function StreamChatPane({ className, showEscalation, onEscalate }
   );
 }
 
-/**
- * Custom MessageInput wrapper that intercepts message submissions
- * and forwards to AI webhook when agent is enabled.
- */
 function MessageInputWithWebhook({ agentEnabled }: { agentEnabled: boolean }) {
-  const {sendMessage, user, activeChannel } = useStreamChat();
-  console.log("[MessageInputWithWebhook] Initialized with agentEnabled =", agentEnabled, user, activeChannel);
+  const { sendMessage, user, activeChannel } = useStreamChat();
+
   const handleSubmit = useCallback(
     async (input: any) => {
       const messageText =
@@ -250,51 +219,15 @@ function MessageInputWithWebhook({ agentEnabled }: { agentEnabled: boolean }) {
         return;
       }
 
-      console.log("[MessageInputWithWebhook] Extracted messageText:", messageText);
-      const text = messageText
-
-      // if (!text?.trim() || !activeChannel) {
-      //   console.log('[MessageInputWithWebhook] Missing text or channel');
-      //   return;
-      // }
+      const text = messageText;
 
       console.log('[MessageInputWithWebhook] Sending:', text);
       console.log('[MessageInputWithWebhook] Agent:', agentEnabled ? 'ON' : 'OFF');
 
-      console.log("[MessageInputWithWebhook] Active channel before send:", activeChannel?.cid);
-      console.log("[MessageInputWithWebhook] User before send:", user?.id);
-      console.log("[MessageInputWithWebhook] Preparing message payload for ...", user);
-      console.log("[MessageInputWithWebhook] Message text:", text);
-      console.log("[MessageInputWithWebhook] Agent enabled:", agentEnabled);
-      console.log("[MessageInputWithWebhook] Preparing to send message...");
-      console.log("[MessageInputWithWebhook] Message payload:", {
-        text,
-        user,
-        attachments: [],
-        mentioned_users: [],
-        metadata: {
-          agentEnabled,
-          persona: (user as any)?.role || 'tenant',
-        },
-      });
-
       try {
-        // // ✅ Step 1: Send valid message to Stream
-      //   const messagePayload = {
-      //     text,
-      //     attachments: [], // must be present
-      //     mentioned_users: [], // also optional, but safer
-      //     metadata: {
-      //       agentEnabled,
-      //       persona: user?.role || 'tenant',
-      //     },
-      //   };
-      //   console.log("[MessageInputWithWebhook] Sending message to Stream:", messagePayload);
         const result = await sendMessage(text);
         console.log('[MessageInputWithWebhook] ✅ Sent to Stream:', result);
 
-        // ✅ Step 2: Forward to AI webhook if enabled
-        console.log("[MessageInputWithWebhook] Forwarding to AI webhook...");
         if (agentEnabled) {
           if (!activeChannel) {
             console.warn('[MessageInputWithWebhook] No activeChannel - aborting webhook');
@@ -320,14 +253,12 @@ function MessageInputWithWebhook({ agentEnabled }: { agentEnabled: boolean }) {
               name: user?.name,
               is_bot: false,
             },
-            channel_id: activeChannel!.cid || 'landten-default',
+            channel_id: activeChannel.cid || 'landten-default',
             channel_type: 'messaging',
           };
 
           const backendBase = process.env.NEXT_PUBLIC_BACKEND_URL?.replace(/\/api$/, '') || window.location.origin;
-          console.log("[MessageInputWithWebhook] Posting to webhook at", `${backendBase}/ai/stream-webhook`, "with payload:", payload);
           const res = await fetch(`${backendBase}/ai/stream-webhook`, {
-
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
@@ -338,7 +269,6 @@ function MessageInputWithWebhook({ agentEnabled }: { agentEnabled: boolean }) {
           console.log('[MessageInputWithWebhook] Agent disabled — skipping webhook');
         }
 
-        // ✅ Step 3: Rehydrate channel so message list updates
         if (activeChannel?.watch) {
           await activeChannel.watch();
         }
