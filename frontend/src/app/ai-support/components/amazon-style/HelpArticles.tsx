@@ -18,7 +18,7 @@ interface HelpArticle {
 
 interface HelpArticlesProps {
   persona: string;
-  onArticleClick?: (articleId: string) => void;
+  onArticleClick?: (articleId: string, articleTitle: string) => void;
 }
 
 export default function HelpArticles({ persona, onArticleClick }: HelpArticlesProps) {
@@ -133,7 +133,7 @@ export default function HelpArticles({ persona, onArticleClick }: HelpArticlesPr
             initial={{ opacity: 0, x: -10 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: index * 0.05 }}
-            onClick={() => onArticleClick?.(article.id)}
+            onClick={() => onArticleClick?.(article.id, article.title)}
             className="w-full p-3 bg-slate-800/60 border border-slate-700/60 hover:border-emerald-500/50 rounded-lg transition-all duration-200 flex items-center justify-between group text-left"
           >
             <div className="flex-1 min-w-0">
