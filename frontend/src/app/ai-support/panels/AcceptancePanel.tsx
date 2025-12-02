@@ -9,7 +9,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { CheckCircle2, DollarSign, Calendar, Clock, FileText, XCircle } from "lucide-react";
+import { CheckCircle2, DollarSign, Calendar, Clock, FileText, XCircle, ArrowLeft } from "lucide-react";
 import type { AcceptancePanelProps } from "@/types/ai-support";
 
 export default function AcceptancePanel({
@@ -19,6 +19,7 @@ export default function AcceptancePanel({
   terms,
   onAccept,
   onDecline,
+  onBack,
 }: AcceptancePanelProps) {
   return (
     <motion.div
@@ -28,6 +29,17 @@ export default function AcceptancePanel({
       transition={{ duration: 0.3 }}
       className="flex flex-col h-full"
     >
+      {/* Back Button (Optional) */}
+      {onBack && (
+        <button
+          onClick={onBack}
+          className="flex items-center gap-2 text-slate-400 hover:text-slate-200 transition-colors mb-3"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          <span className="text-sm">Back</span>
+        </button>
+      )}
+
       {/* Header */}
       <div className="mb-4">
         <div className="flex items-center gap-2 mb-3">
