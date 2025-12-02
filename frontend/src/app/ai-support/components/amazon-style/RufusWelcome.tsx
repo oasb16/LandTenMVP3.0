@@ -9,6 +9,7 @@
 
 import { motion } from "framer-motion";
 import { Sparkles, MessageCircle, FileText, Search, Settings } from "lucide-react";
+import { useStreamChat } from "@/hooks/chat/StreamChatContext";
 
 interface RufusWelcomeProps {
   onQuickAction: (action: string) => void;
@@ -16,34 +17,50 @@ interface RufusWelcomeProps {
 }
 
 export default function RufusWelcome({ onQuickAction, onShowStatus }: RufusWelcomeProps) {
+  const { activeChannel } = useStreamChat();
+
+  const handleQuickAction = async (actionId: string, label: string) => {
+    // Send the action label as a user message into chat
+    if (activeChannel) {
+      try {
+        await activeChannel.sendMessage({ text: label });
+      } catch (err) {
+        console.error("[RufusWelcome] Failed to send message:", err);
+      }
+    }
+
+    // Then call the original handler
+    if (actionId === "status") {
+      onShowStatus();
+    } else {
+      onQuickAction(actionId);
+    }
+  };
+
   const quickActions = [
     {
       id: "maintenance",
       label: "Report Maintenance",
       icon: Settings,
       description: "Quick maintenance request",
-      handler: () => onQuickAction("maintenance"),
     },
     {
       id: "status",
       label: "Check Status",
       icon: Search,
       description: "Track your requests",
-      handler: () => onShowStatus(),
     },
     {
       id: "billing",
       label: "Billing Help",
       icon: FileText,
       description: "Payment & billing",
-      handler: () => onQuickAction("billing"),
     },
     {
       id: "chat",
       label: "Start Chat",
       icon: MessageCircle,
       description: "Talk to assistant",
-      handler: () => onQuickAction("chat"),
     },
   ];
 
@@ -84,7 +101,7 @@ export default function RufusWelcome({ onQuickAction, onShowStatus }: RufusWelco
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ delay: index * 0.05 }}
-                onClick={action.handler}
+                onClick={() => handleQuickAction(action.id, action.label)}
                 className="p-4 bg-slate-800/60 border border-slate-700/60 hover:border-emerald-500/50 rounded-xl transition-all duration-200 text-left group"
               >
                 <div className="w-10 h-10 rounded-lg bg-slate-700/60 flex items-center justify-center mb-3 group-hover:bg-emerald-500/20 transition-colors">
