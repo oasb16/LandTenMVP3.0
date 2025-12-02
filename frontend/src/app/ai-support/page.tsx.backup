@@ -25,13 +25,7 @@ import ItemReasonPanel from "./components/amazon-style/ItemReasonPanel";
 import RufusWelcome from "./components/amazon-style/RufusWelcome";
 import StatusPanel from "./components/amazon-style/StatusPanel";
 import HelpArticles from "./components/amazon-style/HelpArticles";
-import { AIContextPanel } from "@/components/dashboard/AIContextPanel";
-import { AgentStatusBar } from "@/components/dashboard/AgentStatusBar";
-import { DebugPanel } from "@/components/dashboard/DebugPanel";
-import { ConversationList } from "@/components/dashboard/ConversationList";
-import PaymentInitiator from "@/components/PaymentInitiator";
 import useAISupportFlow from "./hooks/useAISupportFlow";
-import { Settings, MessageSquare, Bug } from "lucide-react";
 import "./ai-support.css";
 
 export default function AISupportPage() {
@@ -39,9 +33,7 @@ export default function AISupportPage() {
   const router = useRouter();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [view, setView] = useState<"hub" | "item_reason">("hub");
-  const [drawerMode, setDrawerMode] = useState<"welcome" | "chat" | "status" | "conversations" | "billing">("welcome");
-  const [showDebugPanel, setShowDebugPanel] = useState(false);
-  const [showContextPanel, setShowContextPanel] = useState(false);
+  const [drawerMode, setDrawerMode] = useState<"welcome" | "chat" | "status">("welcome");
   const [selectedItem, setSelectedItem] = useState<{
     id: string;
     type: string;
@@ -148,26 +140,19 @@ export default function AISupportPage() {
       // Start maintenance flow - skip intro, go to item select
       await sendIntent("select_cta", { cta_id: "maintenance" });
       setDrawerMode("chat");
-      setIsDrawerOpen(true);
     } else if (action === "billing") {
-      // Start billing flow - show payment initiator
-      setDrawerMode("billing");
-      setIsDrawerOpen(true);
+      // Start billing flow
+      await sendIntent("select_cta", { cta_id: "billing" });
+      setDrawerMode("chat");
     } else if (action === "chat") {
       // Free-form chat mode
       await sendIntent("ai_init", {});
       setDrawerMode("chat");
-      setIsDrawerOpen(true);
-    } else if (action === "conversations") {
-      // Show conversation list
-      setDrawerMode("conversations");
-      setIsDrawerOpen(true);
     }
   };
 
   const handleShowStatus = () => {
     setDrawerMode("status");
-    setIsDrawerOpen(true);
   };
 
   const handleBackToWelcome = () => {
@@ -252,43 +237,10 @@ export default function AISupportPage() {
               {client && activeChannel ? 'Connected' : 'Ready'}
             </span>
           </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => {
-                setDrawerMode("conversations");
-                setIsDrawerOpen(true);
-              }}
-              className="text-slate-500 hover:text-emerald-400 transition-colors"
-              title="View conversations"
-            >
-              <MessageSquare className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => setShowDebugPanel(!showDebugPanel)}
-              className="text-slate-500 hover:text-purple-400 transition-colors"
-              title="Toggle debug panel"
-            >
-              <Bug className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => setShowContextPanel(!showContextPanel)}
-              className="text-slate-500 hover:text-emerald-400 transition-colors"
-              title="Toggle context panel"
-            >
-              <Settings className="w-4 h-4" />
-            </button>
-            <div className="text-slate-500 text-xs">
-              Powered by LandTen AI • Amazon-style UX
-            </div>
+          <div className="text-slate-500 text-xs">
+            Powered by LandTen AI • Amazon-style UX
           </div>
         </footer>
-
-        {/* Debug Panel (overlay) */}
-        {showDebugPanel && (
-          <div className="fixed bottom-20 right-4 z-50 w-96">
-            <DebugPanel />
-          </div>
-        )}
 
       </div>
 
@@ -299,7 +251,7 @@ export default function AISupportPage() {
           onClose={() => setIsDrawerOpen(false)}
         >
           <div className="flex h-full flex-col">
-            {/* Conditional View: Welcome / Status / Conversations / Billing / Chat+Flow */}
+            {/* Conditional View: Welcome / Status / Chat+Flow */}
             {drawerMode === "welcome" ? (
               /* Show Rufus Welcome */
               <RufusWelcome
@@ -312,40 +264,6 @@ export default function AISupportPage() {
                 persona={persona}
                 onBack={handleBackToWelcome}
               />
-            ) : drawerMode === "conversations" ? (
-              /* Show Conversation List */
-              <div className="flex-1 flex flex-col p-4 overflow-hidden">
-                <button
-                  onClick={handleBackToWelcome}
-                  className="mb-4 text-sm text-slate-400 hover:text-slate-200 transition-colors flex items-center gap-2"
-                >
-                  ← Back
-                </button>
-                <ConversationList />
-              </div>
-            ) : drawerMode === "billing" ? (
-              /* Show Payment Initiator */
-              <div className="flex-1 overflow-y-auto p-4">
-                <button
-                  onClick={handleBackToWelcome}
-                  className="mb-4 text-sm text-slate-400 hover:text-slate-200 transition-colors flex items-center gap-2"
-                >
-                  ← Back
-                </button>
-                <PaymentInitiator
-                  contractorId="default-contractor"
-                  contractorName="Contractor Services"
-                  defaultAmount={0}
-                  defaultDescription="Payment for services"
-                  onSuccess={(payment) => {
-                    console.log("Payment successful:", payment);
-                    // Return to welcome after payment
-                    setTimeout(() => {
-                      handleBackToWelcome();
-                    }, 2000);
-                  }}
-                />
-              </div>
             ) : (
               /* Show Chat + Guided Flow */
               <>
@@ -369,39 +287,32 @@ export default function AISupportPage() {
                   <aside className="lg:w-[40%] rounded-xl border border-slate-700/50 bg-slate-950/70 p-4 flex flex-col gap-3 overflow-y-auto">
                     <div className="flex items-center justify-between">
                       <h2 className="text-sm font-semibold text-slate-100">Guided Flow</h2>
-                      <div className="flex items-center gap-2">
-                        {initializing && (
-                          <span className="text-xs text-slate-400">Initializing...</span>
-                        )}
-                        <button
-                          onClick={() => setShowContextPanel(!showContextPanel)}
-                          className={`text-xs px-2 py-1 rounded transition-colors ${showContextPanel ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700/50 text-slate-400 hover:text-slate-200'}`}
-                          title="Toggle context panel"
-                        >
-                          Context
-                        </button>
-                      </div>
+                      {initializing && (
+                        <span className="text-xs text-slate-400">Initializing...</span>
+                      )}
                     </div>
 
-                    {showContextPanel ? (
-                      <AIContextPanel />
-                    ) : (
-                      <AIDynamicPanel
-                        uiMode={uiMode}
-                        payload={payload}
-                        sendIntent={sendIntent}
-                        flowState={flowState}
-                      />
-                    )}
+                    <AIDynamicPanel
+                      uiMode={uiMode}
+                      payload={payload}
+                      sendIntent={sendIntent}
+                      flowState={flowState}
+                    />
                   </aside>
                 </div>
 
-                {/* Drawer Footer - Agent Status Bar */}
-                <AgentStatusBar
-                  persona={persona}
-                  flowStage={stage}
-                  reasoningActive={initializing || flowLoading}
-                />
+                {/* Drawer Footer - Status Bar */}
+                <div className="border-t border-slate-700/50 bg-slate-950/80 px-4 py-2 flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2">
+                    <div className={`h-1.5 w-1.5 rounded-full ${flowState?.session_id ? 'bg-emerald-500 animate-pulse' : 'bg-slate-500'}`} />
+                    <span className="text-slate-400">
+                      Stage: <span className="font-medium text-emerald-400">{stage}</span>
+                    </span>
+                  </div>
+                  <div className="text-slate-500">
+                    Mode: {uiMode} • {persona}
+                  </div>
+                </div>
               </>
             )}
           </div>
