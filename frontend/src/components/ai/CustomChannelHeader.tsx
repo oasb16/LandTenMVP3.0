@@ -9,6 +9,7 @@ interface CustomChannelHeaderProps {
   onAgentToggle: (enabled: boolean) => void;
 }
 
+
 /**
  * Custom Channel Header with AI Agent toggle
  *
