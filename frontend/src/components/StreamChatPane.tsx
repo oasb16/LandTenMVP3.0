@@ -1,10 +1,13 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Loader2, WifiOff, Bot, BotOff, UserPlus } from "lucide-react";
+import { Loader2, WifiOff, UserPlus } from "lucide-react";
 import { useStreamChat } from "@/hooks/chat/StreamChatContext";
-import { Chat, Channel, ChannelHeader, MessageList, MessageInput, Window, Thread } from "stream-chat-react";
+import { Chat, Channel, MessageList, MessageInput, Window, Thread } from "stream-chat-react";
 import "stream-chat-react/dist/css/v2/index.css";
+import { HybridMessage } from "./ai/HybridMessage";
+import { CustomChannelHeader } from "./ai/CustomChannelHeader";
+import { CustomAttachment } from "./ai/CustomAttachment";
 
 type Props = {
   className?: string;
@@ -166,9 +169,23 @@ export default function StreamChatPane({ className, showEscalation, onEscalate }
       }}
     >
       <Chat client={client} theme="str-chat__theme-dark">
-        <Channel channel={activeChannel}>
+        <Channel
+          channel={activeChannel}
+          Attachment={(props) => (
+            <CustomAttachment
+              {...props}
+              onActionClick={(actionValue) => {
+                console.log('[StreamChatPane] CustomAttachment action:', actionValue);
+                // Trigger action through context - will be handled by AIDynamicPanel
+              }}
+            />
+          )}
+        >
           <Window>
-            <ChannelHeader />
+            <CustomChannelHeader
+              agentEnabled={agentEnabled}
+              onAgentToggle={setAgentEnabled}
+            />
 
             <MessageList
               // Auto-scroll to newest messages
@@ -177,9 +194,11 @@ export default function StreamChatPane({ className, showEscalation, onEscalate }
               messageLimit={50}
               // Hide typing indicator if needed
               hideTypingIndicator={false}
+              // Use HybridMessage for AI message rendering
+              Message={HybridMessage}
             />
 
-            {/* Agent Toggle and Message Input Container */}
+            {/* Message Input Container */}
             <div
               className="flex flex-col border-t border-slate-800/70 bg-slate-950/80"
               style={{ flexShrink: 0 }}
@@ -196,36 +215,6 @@ export default function StreamChatPane({ className, showEscalation, onEscalate }
                   </button>
                 </div>
               )}
-
-              {/* Agent Toggle Bar */}
-              <div className="flex items-center justify-between px-4 py-2 border-b border-slate-800/50">
-                <div className="flex items-center gap-2">
-                  {agentEnabled ? (
-                    <Bot className="h-4 w-4 text-emerald-400" />
-                  ) : (
-                    <BotOff className="h-4 w-4 text-slate-500" />
-                  )}
-                  <span className="text-xs font-medium text-slate-300">
-                    PropertyAI Agent
-                  </span>
-                </div>
-
-                <button
-                  onClick={() => setAgentEnabled(!agentEnabled)}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                    agentEnabled
-                      ? 'bg-emerald-500 hover:bg-emerald-600'
-                      : 'bg-slate-700 hover:bg-slate-600'
-                  }`}
-                  aria-label="Toggle PropertyAI Agent"
-                >
-                  <span
-                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                      agentEnabled ? 'translate-x-6' : 'translate-x-1'
-                    }`}
-                  />
-                </button>
-              </div>
 
               {/* Message Input with Custom Submit Handler */}
               <MessageInputWithWebhook agentEnabled={agentEnabled} />
