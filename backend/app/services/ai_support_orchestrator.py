@@ -214,6 +214,8 @@ class AISupportOrchestrator:
             return await self._handle_mark_complete(payload, channel_id, user_id, persona)
         elif intent == "upload_completion_photos":
             return await self._handle_upload_completion_photos(payload, channel_id, user_id, persona)
+        elif intent == "ai_continue":
+            return await self._handle_continue(payload, channel_id, user_id, persona)
 
         else:
             logger.warning(f"Unknown intent: {intent}")
@@ -1869,6 +1871,57 @@ class AISupportOrchestrator:
         """Handle completion photo upload."""
         logger.info(f"[AI Support] Completion photos uploaded")
         return self._fallback_state("Completion photo upload not yet implemented")
+
+    async def _handle_continue(
+        self,
+        payload: Dict[str, Any],
+        channel_id: str,
+        user_id: str,
+        persona: str
+    ) -> Dict[str, Any]:
+        """
+        Generic continue handler - returns to a neutral state.
+        Used when user cancels an action or wants to go back.
+        """
+        logger.info(f"[AI Support] Continue/back action for {persona}")
+        session = self.session_manager.get_or_create(channel_id, user_id, persona)
+
+        # Return to intro with CTAs based on persona and current state
+        if persona == "tenant":
+            return await self._handle_init(payload, channel_id, user_id, persona)
+        elif persona == "landlord":
+            # Return to landlord dashboard
+            session.update_stage("intro", "cta_panel")
+            return {
+                "stage": "intro",
+                "ui_mode": "cta_panel",
+                "persona": persona,
+                "payload": {
+                    "options": [
+                        {"id": "incidents", "label": "Review Incidents", "icon": "alert-circle"},
+                        {"id": "jobs", "label": "Manage Jobs", "icon": "briefcase"},
+                        {"id": "properties", "label": "Property Overview", "icon": "building"},
+                    ]
+                }
+            }
+        elif persona == "contractor":
+            # Return to contractor dashboard
+            session.update_stage("intro", "cta_panel")
+            return {
+                "stage": "intro",
+                "ui_mode": "cta_panel",
+                "persona": persona,
+                "payload": {
+                    "options": [
+                        {"id": "available_jobs", "label": "Browse Jobs", "icon": "search"},
+                        {"id": "my_jobs", "label": "My Jobs", "icon": "clipboard"},
+                        {"id": "profile", "label": "My Profile", "icon": "user"},
+                    ]
+                }
+            }
+
+        # Default fallback
+        return await self._handle_init(payload, channel_id, user_id, persona)
 
     # =========================================================================
     # HELPER METHODS
