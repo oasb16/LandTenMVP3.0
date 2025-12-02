@@ -239,7 +239,11 @@ export default function AISupportPage() {
           {/* Help Articles Section */}
           {view === "hub" && (
             <div className="rounded-3xl border border-slate-800/60 bg-slate-950/80 backdrop-blur-xl">
-              <HelpArticles persona={persona} />
+              <HelpArticles persona={persona} onArticleClick={(articleId, articleTitle) => {
+                console.log("Article clicked:", articleId, articleTitle);
+                // Open drawer with article context
+                handleLaunchChat();
+              }} />
             </div>
           )}
         </main>
