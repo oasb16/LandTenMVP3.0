@@ -5,20 +5,40 @@
  */
 
 /* ============================================================================
-   STREAM CHAT OVERRIDES
+   STREAM CHAT CORE LAYOUT FIXES
    ============================================================================ */
 
-/* Message List Container */
+/* Force Stream Chat to use flex layout and fill height */
+.str-chat {
+  display: flex !important;
+  flex-direction: column !important;
+  height: 100% !important;
+}
+
+.str-chat__container {
+  height: 100% !important;
+}
+
+/* Make message list background transparent */
 .str-chat__list {
-  background-color: rgb(249 250 251);
+  background-color: transparent !important;
   padding: 1rem;
 }
 
-@media (prefers-color-scheme: dark) {
-  .str-chat__list {
-    background-color: rgb(17 24 39);
-  }
+/* Ensure messages display correctly */
+.str-chat__message {
+  display: flex !important;
 }
+
+/* Enable proper scrolling */
+.str-chat__list--scroll {
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+}
+
+/* ============================================================================
+   STREAM CHAT OVERRIDES
+   ============================================================================ */
 
 /* Individual Messages */
 .str-chat__message-simple {

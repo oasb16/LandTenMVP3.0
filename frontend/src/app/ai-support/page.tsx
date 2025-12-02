@@ -397,7 +397,7 @@ export default function AISupportPage() {
                 {/* Split View: Chat + Guided Flow Panel */}
                 <div className="flex flex-1 flex-col lg:flex-row gap-2 p-2 overflow-hidden">
                   {/* Chat Panel (60% width on desktop) */}
-                  <div className="flex-1 lg:w-[60%] rounded-xl border border-slate-700/50 bg-slate-900/50 overflow-hidden">
+                  <div className="flex-1 lg:w-[60%] rounded-xl border border-slate-700/50">
                     <StreamChatPane
                       className="h-full"
                       showEscalation={stage === "diagnosis"}

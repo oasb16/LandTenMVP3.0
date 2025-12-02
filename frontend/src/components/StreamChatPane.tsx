@@ -150,10 +150,7 @@ export default function StreamChatPane({ className, showEscalation, onEscalate }
   }
 
   return (
-    <div
-      className={`str-chat str-chat__theme-dark flex h-full flex-col ${className ?? ""}`.trim()}
-      style={{ minHeight: 0 }}
-    >
+    <div className="flex flex-col h-full w-full overflow-hidden bg-[#0d1117]">
       <Chat client={client} theme="str-chat__theme-dark">
         <Channel
           channel={activeChannel}
