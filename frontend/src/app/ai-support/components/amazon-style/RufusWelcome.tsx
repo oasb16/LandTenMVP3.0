@@ -2,6 +2,7 @@
  * RufusWelcome - Rufus-style AI assistant welcome
  *
  * Shown in drawer before conversation starts
+ * Wired to actual flows: maintenance, status, billing, chat
  */
 
 "use client";
@@ -11,33 +12,38 @@ import { Sparkles, MessageCircle, FileText, Search, Settings } from "lucide-reac
 
 interface RufusWelcomeProps {
   onQuickAction: (action: string) => void;
+  onShowStatus: () => void;
 }
 
-export default function RufusWelcome({ onQuickAction }: RufusWelcomeProps) {
+export default function RufusWelcome({ onQuickAction, onShowStatus }: RufusWelcomeProps) {
   const quickActions = [
     {
       id: "maintenance",
       label: "Report Maintenance",
       icon: Settings,
       description: "Quick maintenance request",
+      handler: () => onQuickAction("maintenance"),
     },
     {
       id: "status",
       label: "Check Status",
       icon: Search,
       description: "Track your requests",
+      handler: () => onShowStatus(),
     },
     {
       id: "billing",
       label: "Billing Help",
       icon: FileText,
       description: "Payment & billing",
+      handler: () => onQuickAction("billing"),
     },
     {
       id: "chat",
       label: "Start Chat",
       icon: MessageCircle,
       description: "Talk to assistant",
+      handler: () => onQuickAction("chat"),
     },
   ];
 
@@ -78,7 +84,7 @@ export default function RufusWelcome({ onQuickAction }: RufusWelcomeProps) {
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ delay: index * 0.05 }}
-                onClick={() => onQuickAction(action.id)}
+                onClick={action.handler}
                 className="p-4 bg-slate-800/60 border border-slate-700/60 hover:border-emerald-500/50 rounded-xl transition-all duration-200 text-left group"
               >
                 <div className="w-10 h-10 rounded-lg bg-slate-700/60 flex items-center justify-center mb-3 group-hover:bg-emerald-500/20 transition-colors">
