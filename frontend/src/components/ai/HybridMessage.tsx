@@ -1,9 +1,10 @@
 "use client";
 
-import React from "react";
+import React, { useCallback } from "react";
 import { MessageUIComponentProps, MessageSimple, useChannelStateContext } from "stream-chat-react";
 import { CustomMessageUI } from "./CustomMessageUI";
 import { useStreamChat } from "@/hooks/chat/StreamChatContext";
+import { useAISupportFlowContext } from "@/app/ai-support/context/AISupportFlowContext";
 
 /**
  * Hybrid message component that conditionally renders:
@@ -15,8 +16,25 @@ import { useStreamChat } from "@/hooks/chat/StreamChatContext";
  */
 export function HybridMessage(props: MessageUIComponentProps) {
   const { triggerAction } = useStreamChat();
+  const { sendIntent } = useAISupportFlowContext();
   const channelState = useChannelStateContext();
   const { message } = props;
+
+  // Unified action handler that tries sendIntent first, falls back to triggerAction
+  const handleAction = useCallback(async (actionValue: string) => {
+    console.log("[HybridMessage] Action triggered:", actionValue);
+
+    try {
+      // If we're inside /ai-support with sendIntent available, use it
+      // This routes actions through the orchestrator
+      await sendIntent("user_action", { action: actionValue });
+      console.log("[HybridMessage] ✅ Action routed through sendIntent");
+    } catch (err) {
+      // Fallback to triggerAction for /dashboard or when sendIntent fails
+      console.log("[HybridMessage] Falling back to triggerAction");
+      await triggerAction(actionValue);
+    }
+  }, [sendIntent, triggerAction]);
 
   // Defensive null check at top
   if (!message) {
@@ -47,7 +65,7 @@ export function HybridMessage(props: MessageUIComponentProps) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         message={message as any}
         currentUserId={currentUserId}
-        onActionClick={triggerAction}
+        onActionClick={handleAction}
       />
     );
   }

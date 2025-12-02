@@ -87,6 +87,7 @@ export type UIMode =
 export type IntentType =
   // User-initiated intents (base)
   | "user_message"          // Plain chat text
+  | "user_action"           // Action clicked from AI message card
   | "select_cta"            // Selected main option from CTA panel
   | "item_selected"         // Selected item from gallery
   | "reason_selected"       // Selected reason from selector

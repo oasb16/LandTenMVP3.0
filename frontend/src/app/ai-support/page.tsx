@@ -31,6 +31,7 @@ import { DebugPanel } from "@/components/dashboard/DebugPanel";
 import { ConversationList } from "@/components/dashboard/ConversationList";
 import PaymentInitiator from "@/components/PaymentInitiator";
 import useAISupportFlow from "./hooks/useAISupportFlow";
+import { AISupportFlowProvider } from "./context/AISupportFlowContext";
 import { Settings, MessageSquare, Bug } from "lucide-react";
 import "./ai-support.css";
 
@@ -341,7 +342,8 @@ export default function AISupportPage() {
           autoOpen={true}
           onClose={() => setIsDrawerOpen(false)}
         >
-          <div className="flex h-full flex-col">
+          <AISupportFlowProvider sendIntent={sendIntent}>
+            <div className="flex h-full flex-col">
             {/* Conditional View: Welcome / Status / Conversations / Billing / Chat+Flow */}
             {drawerMode === "welcome" ? (
               /* Show Rufus Welcome */
@@ -447,7 +449,8 @@ export default function AISupportPage() {
                 />
               </>
             )}
-          </div>
+            </div>
+          </AISupportFlowProvider>
         </AIChatAssistantLauncher>
       )}
     </div>
