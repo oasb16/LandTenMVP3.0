@@ -151,8 +151,8 @@ async def create_incident(
                 # - Same category + description similarity > 40% OR
                 # - Same category + both title and desc have ANY overlap
                 is_duplicate = (
-                    title_similarity > 0.4 or
-                    desc_similarity > 0.4 or
+                    title_similarity > 0.9 or
+                    desc_similarity > 0.9 or
                     (title_overlap > 0 and desc_overlap > 0)
                 )
 
