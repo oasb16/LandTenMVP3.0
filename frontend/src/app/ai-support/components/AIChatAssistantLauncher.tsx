@@ -13,11 +13,13 @@ import { motion, AnimatePresence } from "framer-motion";
 interface AIChatAssistantLauncherProps {
   children: React.ReactNode;
   autoOpen?: boolean;
+  onClose?: () => void;
 }
 
 export default function AIChatAssistantLauncher({
   children,
   autoOpen = true,
+  onClose,
 }: AIChatAssistantLauncherProps) {
   const [isOpen, setIsOpen] = useState(autoOpen);
   const [isMinimized, setIsMinimized] = useState(false);
@@ -28,6 +30,12 @@ export default function AIChatAssistantLauncher({
       setIsOpen(true);
     }
   }, [autoOpen]);
+
+  // Handle close
+  const handleClose = () => {
+    setIsOpen(false);
+    onClose?.();
+  };
 
   return (
     <>
@@ -50,15 +58,15 @@ export default function AIChatAssistantLauncher({
         )}
       </AnimatePresence>
 
-      {/* Chat Drawer */}
+      {/* Chat Drawer - Full-width horizontal bottom drawer */}
       <AnimatePresence>
         {isOpen && (
           <motion.div
-            initial={{ opacity: 0, x: 400 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 400 }}
+            initial={{ opacity: 0, y: 400 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 400 }}
             transition={{ type: "spring", damping: 25, stiffness: 200 }}
-            className="fixed bottom-0 right-0 w-full md:w-[440px] lg:w-[480px] h-[80vh] md:h-[600px] lg:h-[700px] bg-white dark:bg-gray-900 border-l border-t border-gray-200 dark:border-gray-700 shadow-2xl rounded-t-2xl md:rounded-tl-2xl overflow-hidden z-50 flex flex-col"
+            className="fixed bottom-0 left-0 right-0 w-full h-[70vh] bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 shadow-2xl overflow-hidden z-50 flex flex-col"
           >
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-r from-blue-600 to-purple-600 text-white">
@@ -81,7 +89,7 @@ export default function AIChatAssistantLauncher({
                   <Minimize2 className="w-4 h-4" />
                 </button>
                 <button
-                  onClick={() => setIsOpen(false)}
+                  onClick={handleClose}
                   className="p-2 hover:bg-white/20 rounded-lg transition-colors"
                   aria-label="Close"
                 >
@@ -129,15 +137,15 @@ export default function AIChatAssistantLauncher({
         )}
       </AnimatePresence>
 
-      {/* Backdrop for mobile */}
+      {/* Backdrop */}
       <AnimatePresence>
         {isOpen && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            onClick={() => setIsOpen(false)}
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40 md:hidden"
+            onClick={handleClose}
+            className="fixed inset-0 bg-black/30 backdrop-blur-sm z-40"
           />
         )}
       </AnimatePresence>

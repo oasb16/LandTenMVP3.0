@@ -10,7 +10,6 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { Search, ChevronRight, Package, Home, Wrench, FileText, AlertCircle } from "lucide-react";
 import type { Persona } from "@/types/ai-support";
-import { useStreamChat } from "@/hooks/chat/StreamChatContext";
 
 interface HelpHubProps {
   userName: string;
@@ -37,35 +36,7 @@ export default function HelpHub({
 }: HelpHubProps) {
   const [selectedTab, setSelectedTab] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
-  const { activeChannel } = useStreamChat();
-
-  const handleItemClick = async (itemId: string, itemType: string, itemTitle: string) => {
-    // Send the item title as a user message into chat
-    if (activeChannel) {
-      try {
-        await activeChannel.sendMessage({ text: itemTitle });
-      } catch (err) {
-        console.error("[HelpHub] Failed to send message:", err);
-      }
-    }
-
-    // Then call the original handler
-    onSelectItem(itemId, itemType, itemTitle);
-  };
-
-  const handleLaunchChatClick = async () => {
-    // Send a start message into chat
-    if (activeChannel) {
-      try {
-        await activeChannel.sendMessage({ text: "Chat with Assistant" });
-      } catch (err) {
-        console.error("[HelpHub] Failed to send message:", err);
-      }
-    }
-
-    // Then call the original handler
-    onLaunchChat();
-  };
+  // Removed direct message sending - let parent handle via sendChatAndIntent
 
   // Generate persona-specific items
   const getItems = (): HelpItem[] => {
@@ -270,7 +241,7 @@ export default function HelpHub({
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: index * 0.05 }}
-                  onClick={() => handleItemClick(item.id, item.type, item.title)}
+                  onClick={() => onSelectItem(item.id, item.type, item.title)}
                   className="flex items-start gap-4 p-4 bg-slate-800/60 border border-slate-700/60 hover:border-emerald-500/50 rounded-xl transition-all duration-200 text-left group"
                 >
                   {/* Icon */}
@@ -316,7 +287,7 @@ export default function HelpHub({
               Start a conversation with our AI assistant for personalized help.
             </p>
             <button
-              onClick={handleLaunchChatClick}
+              onClick={onLaunchChat}
               className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-emerald-950 rounded-lg font-semibold transition-colors"
             >
               Chat with Assistant
