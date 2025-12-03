@@ -692,8 +692,10 @@ async def record_discovery_answer(
             )
 
         # Determine total questions
+        print("===== incident data in record_discovery_answer: =====", incident)
         if total_questions is None:
             total_questions = 5  # Default
+        print("===== total_questions: =====", total_questions)
 
         # CRITICAL FIX: Save answer to DynamoDB incident
         existing_answers = incident.get("discovery_answers", {})
