@@ -3,8 +3,9 @@
 import { useEffect, useState, useCallback } from "react";
 import { Loader2, WifiOff, Bot, BotOff, UserPlus } from "lucide-react";
 import { useStreamChat } from "@/hooks/chat/StreamChatContext";
-import { Chat, Channel, ChannelHeader, MessageList, MessageInput, Window, Thread } from "stream-chat-react";
+import { Chat, Channel, MessageList, MessageInput, Window, Thread } from "stream-chat-react";
 import { HybridMessage } from "./ai/HybridMessage";
+import { CustomChannelHeader } from "./ai/CustomChannelHeader";
 import "stream-chat-react/dist/css/v2/index.css";
 
 type Props = {
@@ -169,7 +170,10 @@ export default function StreamChatPane({ className, showEscalation, onEscalate }
       <Chat client={client} theme="str-chat__theme-dark">
         <Channel channel={activeChannel}>
           <Window>
-            <ChannelHeader />
+            <CustomChannelHeader
+              agentEnabled={agentEnabled}
+              onAgentToggle={setAgentEnabled}
+            />
 
             <MessageList
               // Use custom HybridMessage component for AI message parsing
