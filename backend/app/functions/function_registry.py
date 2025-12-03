@@ -156,6 +156,8 @@ async def create_incident(
                     (title_overlap > 0 and desc_overlap > 0)
                 )
 
+                is_duplicate = False
+
                 if is_duplicate:
                     logger.warning(f"🚨 DUPLICATE BLOCKED: {inc_id} (status={inc_status}, title_sim={title_similarity:.2f}, desc_sim={desc_similarity:.2f})")
                     return FunctionResult(
