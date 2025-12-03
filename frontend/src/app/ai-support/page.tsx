@@ -1,14 +1,8 @@
 /**
  * AI Support Experience Page
  *
- * Landing page with drawer-based assistant (inspired by proposed1.jsx)
- * Integrates real backend flow with Amazon-style UX
- *
- * ARCHITECTURE:
- * - Landing page shows hero, state visualization, and architecture info
- * - Drawer contains StreamChatPane + AIDynamicPanel (real backend integration)
- * - Uses AIChatAssistantLauncher for drawer UX
- * - All data flows through real orchestrator (no mocks)
+ * Landing page with drawer-based assistant
+ * Integrates real backend flow with horizontal split view (60/40)
  */
 
 "use client";
@@ -45,10 +39,10 @@ export default function AISupportPage() {
     subtitle?: string;
   } | null>(null);
 
-  // Use Classic Dashboard's StreamChat context (already initialized app-wide)
+  // Use Classic Dashboard's StreamChat context
   const { client, activeChannel, loading: streamLoading, error: streamError } = useStreamChat();
 
-  // AI Support flow state machine (for guided flow panels)
+  // AI Support flow state machine
   const {
     uiMode,
     stage,
@@ -60,11 +54,9 @@ export default function AISupportPage() {
     sendIntent,
   } = useAISupportFlow({
     mode: "guided",
-    autoInit: isDrawerOpen, // Only init when drawer opens
-    client, // Pass Classic Dashboard's client
+    autoInit: isDrawerOpen,
+    client,
   });
-
-  console.log("[AI Support Page] Render - status:", status, "client:", !!client, "drawer:", isDrawerOpen);
 
   // Redirect unauthenticated users
   useEffect(() => {
@@ -73,7 +65,6 @@ export default function AISupportPage() {
     }
   }, [status, router]);
 
-  // Show loading during auth
   if (status === "loading") {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-100">
@@ -85,7 +76,6 @@ export default function AISupportPage() {
     );
   }
 
-  // Show auth required
   if (!session?.user) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-100">
@@ -108,7 +98,6 @@ export default function AISupportPage() {
 
   /**
    * Unified function to send chat message + trigger backend intent
-   * This ensures proper ordering and state management
    */
   const sendChatAndIntent = async (
     messageText: string,
@@ -118,11 +107,10 @@ export default function AISupportPage() {
       drawerMode?: typeof drawerMode;
     } = {}
   ) => {
-    // Step 1: Send message to chat if channel is available
+    // Step 1: Send message to chat
     if (activeChannel) {
       try {
         await activeChannel.sendMessage({ text: messageText });
-        console.log("[sendChatAndIntent] Message sent to chat:", messageText);
       } catch (err) {
         console.error("[sendChatAndIntent] Failed to send message:", err);
       }
@@ -130,17 +118,16 @@ export default function AISupportPage() {
 
     // Step 2: Send intent to backend
     await sendIntent(intentName as any, intentPayload);
-    console.log("[sendChatAndIntent] Intent sent:", intentName, intentPayload);
 
     // Step 3: Update UI state
     setDrawerMode(options.drawerMode ?? "chat");
     setIsDrawerOpen(true);
 
-    // Step 4: Scroll to last message (after a brief delay to let UI update)
+    // Step 4: Scroll to last message
     setTimeout(() => {
       const messageList = document.querySelector('.str-chat__list');
       if (messageList) {
-        messageList.scrollTop = 0; // Scroll to bottom (reverse layout)
+        messageList.scrollTop = 0;
       }
     }, 100);
   };
@@ -148,9 +135,7 @@ export default function AISupportPage() {
   const handleSelectItem = (itemId: string, itemType: string, itemTitle: string) => {
     setSelectedItem({ id: itemId, type: itemType, title: itemTitle });
 
-    // Special handling for specific item types that should open drawer directly
     if (itemType === "lease" || itemType === "notification") {
-      // For lease and notifications, go straight to chat with context
       sendChatAndIntent(
         itemTitle,
         "item_selected",
@@ -158,7 +143,6 @@ export default function AISupportPage() {
         { drawerMode: "chat" }
       );
     } else if (itemType === "incident" || itemType === "job") {
-      // For incidents and jobs, send to backend for proper routing
       sendChatAndIntent(
         itemTitle,
         "item_selected",
@@ -166,32 +150,25 @@ export default function AISupportPage() {
         { drawerMode: "chat" }
       );
     } else {
-      // For other types (property, billing), show reason picker
       setView("item_reason");
     }
   };
 
   const handleSelectReason = async (reasonId: string, reasonLabel: string) => {
-    // Store selection in flow state metadata
     if (selectedItem) {
-      // First send item_selected intent
       await sendIntent("item_selected", {
         item_id: selectedItem.id,
         item_title: selectedItem.title,
         item_type: selectedItem.type,
       });
 
-      // Special routing for specific reason types
       if (reasonId === "pay") {
-        // Payment reason → open billing drawer (no chat message)
         setDrawerMode("billing");
         setIsDrawerOpen(true);
       } else if (reasonId === "status" || reasonId === "check") {
-        // Status check reason → open status panel (no chat message)
         setDrawerMode("status");
         setIsDrawerOpen(true);
       } else {
-        // Default: open chat mode + send message + intent
         await sendChatAndIntent(
           reasonLabel,
           "reason_selected",
@@ -203,7 +180,6 @@ export default function AISupportPage() {
   };
 
   const handleLaunchChat = async () => {
-    // Init AI session and open drawer
     await sendChatAndIntent(
       "Start Chat",
       "ai_init",
@@ -219,7 +195,6 @@ export default function AISupportPage() {
 
   const handleQuickAction = async (action: string) => {
     if (action === "maintenance") {
-      // Start maintenance flow
       await sendChatAndIntent(
         "Report Maintenance",
         "select_cta",
@@ -227,11 +202,9 @@ export default function AISupportPage() {
         { drawerMode: "chat" }
       );
     } else if (action === "billing") {
-      // Start billing flow - show payment initiator (no chat message)
       setDrawerMode("billing");
       setIsDrawerOpen(true);
     } else if (action === "chat") {
-      // Free-form chat mode
       await sendChatAndIntent(
         "Start Chat",
         "ai_init",
@@ -239,19 +212,17 @@ export default function AISupportPage() {
         { drawerMode: "chat" }
       );
     } else if (action === "conversations") {
-      // Show conversation list (no chat message)
       setDrawerMode("conversations");
       setIsDrawerOpen(true);
     }
   };
 
   const handleShowStatus = async () => {
-    // Show status panel with a message (no intent needed for status panel)
     if (activeChannel) {
       try {
         await activeChannel.sendMessage({ text: "Check Status" });
       } catch (err) {
-        console.error("[handleShowStatus] Failed to send message:", err);
+        console.error("[handleShowStatus] Failed:", err);
       }
     }
     setDrawerMode("status");
@@ -302,7 +273,6 @@ export default function AISupportPage() {
 
         {/* Main Content */}
         <main className="flex-1 flex flex-col gap-4">
-          {/* Amazon-style Help Hub or Item Reason Panel */}
           <div className="flex-1 rounded-3xl border border-slate-800/60 bg-slate-950/80 backdrop-blur-xl overflow-hidden">
             {view === "hub" ? (
               <HelpHub
@@ -324,12 +294,9 @@ export default function AISupportPage() {
             )}
           </div>
 
-          {/* Help Articles Section */}
           {view === "hub" && (
             <div className="rounded-3xl border border-slate-800/60 bg-slate-950/80 backdrop-blur-xl">
               <HelpArticles persona={persona} onArticleClick={(articleId, articleTitle) => {
-                console.log("Article clicked:", articleId, articleTitle);
-                // Open drawer with article context
                 handleLaunchChat();
               }} />
             </div>
@@ -363,12 +330,12 @@ export default function AISupportPage() {
               <Bug className="w-4 h-4" />
             </button>
             <div className="text-slate-500 text-xs">
-              Powered by LandTen AI • Amazon-style UX
+              Powered by LandTen AI
             </div>
           </div>
         </footer>
 
-        {/* Debug Panel (overlay) */}
+        {/* Debug Panel */}
         {showDebugPanel && (
           <div className="fixed bottom-20 right-4 z-50 w-96">
             <DebugPanel />
@@ -377,28 +344,24 @@ export default function AISupportPage() {
 
       </div>
 
-      {/* AI Support Drawer (Amazon-style guided flow) */}
+      {/* AI Support Drawer - ChatGPT Style Full Width */}
       {isDrawerOpen && (
         <AIChatAssistantLauncher
           autoOpen={true}
           onClose={() => setIsDrawerOpen(false)}
         >
           <div className="flex h-full flex-col">
-            {/* Conditional View: Welcome / Status / Conversations / Billing / Chat+Flow */}
             {drawerMode === "welcome" ? (
-              /* Show Rufus Welcome */
               <RufusWelcome
                 onQuickAction={handleQuickAction}
                 onShowStatus={handleShowStatus}
               />
             ) : drawerMode === "status" ? (
-              /* Show Status Panel */
               <StatusPanel
                 persona={persona}
                 onBack={handleBackToWelcome}
               />
             ) : drawerMode === "conversations" ? (
-              /* Show Conversation List */
               <div className="flex-1 flex flex-col p-4 overflow-hidden">
                 <button
                   onClick={handleBackToWelcome}
@@ -409,7 +372,6 @@ export default function AISupportPage() {
                 <ConversationList />
               </div>
             ) : drawerMode === "billing" ? (
-              /* Show Payment Initiator */
               <div className="flex-1 overflow-y-auto p-4">
                 <button
                   onClick={handleBackToWelcome}
@@ -423,8 +385,6 @@ export default function AISupportPage() {
                   defaultAmount={0}
                   defaultDescription="Payment for services"
                   onSuccess={(payment) => {
-                    console.log("Payment successful:", payment);
-                    // Return to welcome after payment
                     setTimeout(() => {
                       handleBackToWelcome();
                     }, 2000);
@@ -432,7 +392,7 @@ export default function AISupportPage() {
                 />
               </div>
             ) : (
-              /* Show Chat Only (Full Width) - ChatGPT Style */
+              /* Chat Only - Full Width (ChatGPT Style) */
               <div className="flex h-full flex-col overflow-hidden">
                 <StreamChatPane
                   className="h-full"
