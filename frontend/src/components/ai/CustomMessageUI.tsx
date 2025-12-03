@@ -51,6 +51,68 @@ const deriveStage = (contextType?: string): string | undefined => {
 const STAGE_PULSE_DURATION = 2200;
 
 /**
+ * Parse <ai-expanded> format from backend
+ * Returns parsed expandable data if valid, null otherwise.
+ */
+function tryParseAIExpanded(text: string): {
+  raw: string;
+  preview: string;
+  actions: Array<{action: string; details?: string}>;
+  expandable: boolean;
+} | null {
+  const trimmed = text.trim();
+
+  // Check if this is an <ai-expanded> block
+  if (!trimmed.startsWith("<ai-expanded>") || !trimmed.includes("</ai-expanded>")) {
+    return null;
+  }
+
+  try {
+    // Extract content between tags
+    const contentMatch = trimmed.match(/<ai-expanded>([\s\S]*?)<\/ai-expanded>/);
+    if (!contentMatch) return null;
+
+    const content = contentMatch[1];
+
+    // Extract RAW (try both formats for compatibility)
+    const rawMatch = content.match(/(?:RAW_MODEL_OUTPUT|RAW):([\s\S]*?)(?=TRUNCATED_PREVIEW:|PREVIEW:|ACTIONS:|EXPANDABLE:|$)/);
+    const raw = rawMatch ? rawMatch[1].trim() : "";
+
+    // Extract PREVIEW (try both formats for compatibility)
+    const previewMatch = content.match(/(?:TRUNCATED_PREVIEW|PREVIEW):([\s\S]*?)(?=ACTIONS:|EXPANDABLE:|$)/);
+    const preview = previewMatch ? previewMatch[1].trim() : raw.substring(0, 220);
+
+    // Extract ACTIONS
+    const actionsMatch = content.match(/ACTIONS:([\s\S]*?)(?=EXPANDABLE:|$)/);
+    const actions: Array<{action: string; details?: string}> = [];
+
+    if (actionsMatch) {
+      const actionsText = actionsMatch[1].trim();
+      const actionLines = actionsText.split('\n').filter(line => line.trim().startsWith('-'));
+
+      actionLines.forEach(line => {
+        const cleaned = line.trim().substring(1).trim(); // Remove '-' prefix
+        actions.push({ action: cleaned });
+      });
+    }
+
+    // Extract EXPANDABLE flag
+    const expandableMatch = content.match(/EXPANDABLE:\s*(true|false)/i);
+    const expandable = expandableMatch ? expandableMatch[1].toLowerCase() === 'true' : true;
+
+    return {
+      raw,
+      preview,
+      actions,
+      expandable,
+    };
+  } catch (err) {
+    console.error("[tryParseAIExpanded] Parse error:", err);
+    return null;
+  }
+}
+
+/**
  * Safely detect and parse JSON from message text.
  * Returns parsed data if valid and matches expected structure, null otherwise.
  *
@@ -156,6 +218,11 @@ export const CustomMessageUI = memo(function CustomMessageUI({
   const [policyHighlight, setPolicyHighlight] = useState(false);
   const [showRawJSON, setShowRawJSON] = useState(false);
 
+  // Try to parse <ai-expanded> format first (ChatGPT-style expandables from backend)
+  const parsedExpanded = useMemo(() => {
+    return tryParseAIExpanded(messageText);
+  }, [messageText]);
+
   // Try to parse structured reasoning from message text
   const parsedReasoning = useMemo(() => {
     return tryParseStructuredReasoning(messageText);
@@ -225,7 +292,40 @@ export const CustomMessageUI = memo(function CustomMessageUI({
         </div>
       )}
 
-      {messageText && parsedReasoning ? (
+      {messageText && parsedExpanded ? (
+        // ChatGPT-style expandable message from backend
+        <div className="flex w-full max-w-[90%] flex-col gap-2">
+          <motion.div
+            layout
+            className={`${bubbleClasses} ${bubbleAlignment}`}
+            transition={{ type: "spring", stiffness: 260, damping: 24 }}
+          >
+            <TextExpander text={parsedExpanded.raw} maxLength={500} isBot={true} />
+          </motion.div>
+
+          {/* Action buttons if present */}
+          {parsedExpanded.actions && parsedExpanded.actions.length > 0 && (
+            <div className="rounded-2xl border border-emerald-500/20 bg-gradient-to-br from-slate-900/80 via-slate-900 to-slate-950 p-4 shadow-xl">
+              <h4 className="text-sm font-semibold text-emerald-300 mb-3 flex items-center gap-2">
+                <Sparkles className="h-4 w-4" />
+                What you can do next:
+              </h4>
+              <div className="grid grid-cols-1 gap-2">
+                {parsedExpanded.actions.map((action, index) => (
+                  <ActionCard
+                    key={index}
+                    icon={Sparkles}
+                    title={action.action}
+                    desc={action.details}
+                    index={index}
+                    onClick={onActionClick}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      ) : messageText && parsedReasoning ? (
         // Structured reasoning detected - render as natural language UI
         <div className="flex w-full max-w-[90%] flex-col gap-2">
           <AIResponseParser

@@ -378,8 +378,8 @@ async def create_incident(
         preview = collapse_text(incident_card_text, limit=500)
         expandable_text = (
             f"<ai-expanded>\n"
-            f"RAW_MODEL_OUTPUT:\n{incident_card_text}\n\n"
-            f"TRUNCATED_PREVIEW:\n{preview}\n\n"
+            f"RAW:\n{incident_card_text}\n\n"
+            f"PREVIEW:\n{preview}\n\n"
             f"EXPANDABLE: true\n"
             f"</ai-expanded>"
         )
@@ -641,8 +641,8 @@ async def start_discovery(
         preview = collapse_text(full_message, limit=500)
         expandable_text = (
             f"<ai-expanded>\n"
-            f"RAW_MODEL_OUTPUT:\n{full_message}\n\n"
-            f"TRUNCATED_PREVIEW:\n{preview}\n\n"
+            f"RAW:\n{full_message}\n\n"
+            f"PREVIEW:\n{preview}\n\n"
             f"EXPANDABLE: true\n"
             f"</ai-expanded>"
         )
@@ -758,8 +758,8 @@ async def record_discovery_answer(
             preview = collapse_text(completion_msg, limit=500)
             expandable_text = (
                 f"<ai-expanded>\n"
-                f"RAW_MODEL_OUTPUT:\n{completion_msg}\n\n"
-                f"TRUNCATED_PREVIEW:\n{preview}\n\n"
+                f"RAW:\n{completion_msg}\n\n"
+                f"PREVIEW:\n{preview}\n\n"
                 f"EXPANDABLE: true\n"
                 f"</ai-expanded>"
             )
@@ -841,8 +841,8 @@ async def record_discovery_answer(
         preview = collapse_text(full_message, limit=500)
         expandable_text = (
             f"<ai-expanded>\n"
-            f"RAW_MODEL_OUTPUT:\n{full_message}\n\n"
-            f"TRUNCATED_PREVIEW:\n{preview}\n\n"
+            f"RAW:\n{full_message}\n\n"
+            f"PREVIEW:\n{preview}\n\n"
             f"EXPANDABLE: true\n"
             f"</ai-expanded>"
         )
@@ -991,8 +991,8 @@ async def start_diagnosis(
         preview = collapse_text(full_diagnosis, limit=500)
         expandable_text = (
             f"<ai-expanded>\n"
-            f"RAW_MODEL_OUTPUT:\n{full_diagnosis}\n\n"
-            f"TRUNCATED_PREVIEW:\n{preview}\n\n"
+            f"RAW:\n{full_diagnosis}\n\n"
+            f"PREVIEW:\n{preview}\n\n"
             f"ACTIONS:\n"
             f"- Create work order\n"
             f"- Add more details\n"
@@ -1225,8 +1225,8 @@ async def create_work_order(
         preview = collapse_text(full_work_order, limit=500)
         expandable_text = (
             f"<ai-expanded>\n"
-            f"RAW_MODEL_OUTPUT:\n{full_work_order}\n\n"
-            f"TRUNCATED_PREVIEW:\n{preview}\n\n"
+            f"RAW:\n{full_work_order}\n\n"
+            f"PREVIEW:\n{preview}\n\n"
             f"ACTIONS:\n"
             f"- Generate contractor bids\n"
             f"- Review status\n"
@@ -1418,8 +1418,8 @@ async def generate_bids(job_id: str, category: str, channel_id: str) -> Function
         preview = collapse_text(full_bids_summary, limit=500)
         expandable_text = (
             f"<ai-expanded>\n"
-            f"RAW_MODEL_OUTPUT:\n{full_bids_summary}\n\n"
-            f"TRUNCATED_PREVIEW:\n{preview}\n\n"
+            f"RAW:\n{full_bids_summary}\n\n"
+            f"PREVIEW:\n{preview}\n\n"
             f"ACTIONS:\n"
             f"- Accept bid\n"
             f"- View contractor details\n"
@@ -1552,8 +1552,8 @@ async def request_landlord_approval(
         preview = collapse_text(full_approval_msg, limit=500)
         expandable_text = (
             f"<ai-expanded>\n"
-            f"RAW_MODEL_OUTPUT:\n{full_approval_msg}\n\n"
-            f"TRUNCATED_PREVIEW:\n{preview}\n\n"
+            f"RAW:\n{full_approval_msg}\n\n"
+            f"PREVIEW:\n{preview}\n\n"
             f"ACTIONS:\n"
             f"- Approve work order\n"
             f"- Reject with feedback\n"
