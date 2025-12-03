@@ -19,6 +19,7 @@ import { useSession } from "next-auth/react";
 import { useStreamChat } from "@/hooks/chat/StreamChatContext";
 import StreamChatPane from "@/components/StreamChatPane";
 import AIChatAssistantLauncher from "./components/AIChatAssistantLauncher";
+import AIDynamicPanel from "./components/AIDynamicPanel";
 import HelpHub from "./components/amazon-style/HelpHub";
 import ItemReasonPanel from "./components/amazon-style/ItemReasonPanel";
 import RufusWelcome from "./components/amazon-style/RufusWelcome";
@@ -38,6 +39,7 @@ export default function AISupportPage() {
   const [view, setView] = useState<"hub" | "item_reason">("hub");
   const [drawerMode, setDrawerMode] = useState<"welcome" | "chat" | "status" | "conversations" | "billing">("welcome");
   const [showDebugPanel, setShowDebugPanel] = useState(false);
+  const [showGuidedFlow, setShowGuidedFlow] = useState(false);
   const [selectedItem, setSelectedItem] = useState<{
     id: string;
     type: string;
@@ -106,30 +108,67 @@ export default function AISupportPage() {
   const error = streamError || flowError;
   const persona = (session.user as any).persona || "tenant";
 
+  /**
+   * Unified function to send chat message + trigger backend intent
+   * This ensures proper ordering and state management
+   */
+  const sendChatAndIntent = async (
+    messageText: string,
+    intentName: string,
+    intentPayload: Record<string, unknown>,
+    options: {
+      showGuidedFlow?: boolean;
+      drawerMode?: typeof drawerMode;
+    } = {}
+  ) => {
+    // Step 1: Send message to chat if channel is available
+    if (activeChannel) {
+      try {
+        await activeChannel.sendMessage({ text: messageText });
+        console.log("[sendChatAndIntent] Message sent to chat:", messageText);
+      } catch (err) {
+        console.error("[sendChatAndIntent] Failed to send message:", err);
+      }
+    }
+
+    // Step 2: Send intent to backend
+    await sendIntent(intentName as any, intentPayload);
+    console.log("[sendChatAndIntent] Intent sent:", intentName, intentPayload);
+
+    // Step 3: Update UI state
+    setShowGuidedFlow(options.showGuidedFlow ?? false);
+    setDrawerMode(options.drawerMode ?? "chat");
+    setIsDrawerOpen(true);
+
+    // Step 4: Scroll to last message (after a brief delay to let UI update)
+    setTimeout(() => {
+      const messageList = document.querySelector('.str-chat__list');
+      if (messageList) {
+        messageList.scrollTop = 0; // Scroll to bottom (reverse layout)
+      }
+    }, 100);
+  };
+
   const handleSelectItem = (itemId: string, itemType: string, itemTitle: string) => {
     setSelectedItem({ id: itemId, type: itemType, title: itemTitle });
 
     // Special handling for specific item types that should open drawer directly
     if (itemType === "lease" || itemType === "notification") {
-      // For lease and notifications, go straight to chat with context
-      sendIntent("item_selected", {
-        item_id: itemId,
-        item_title: itemTitle,
-        item_type: itemType,
-      }).then(() => {
-        setDrawerMode("chat");
-        setIsDrawerOpen(true);
-      });
+      // For lease and notifications, go straight to chat with context + guided flow
+      sendChatAndIntent(
+        itemTitle,
+        "item_selected",
+        { item_id: itemId, item_title: itemTitle, item_type: itemType },
+        { showGuidedFlow: true, drawerMode: "chat" }
+      );
     } else if (itemType === "incident" || itemType === "job") {
-      // For incidents and jobs, send to backend for proper routing
-      sendIntent("item_selected", {
-        item_id: itemId,
-        item_title: itemTitle,
-        item_type: itemType,
-      }).then(() => {
-        setDrawerMode("chat");
-        setIsDrawerOpen(true);
-      });
+      // For incidents and jobs, send to backend for proper routing + guided flow
+      sendChatAndIntent(
+        itemTitle,
+        "item_selected",
+        { item_id: itemId, item_title: itemTitle, item_type: itemType },
+        { showGuidedFlow: true, drawerMode: "chat" }
+      );
     } else {
       // For other types (property, billing), show reason picker
       setView("item_reason");
@@ -139,38 +178,44 @@ export default function AISupportPage() {
   const handleSelectReason = async (reasonId: string, reasonLabel: string) => {
     // Store selection in flow state metadata
     if (selectedItem) {
+      // First send item_selected intent
       await sendIntent("item_selected", {
         item_id: selectedItem.id,
         item_title: selectedItem.title,
         item_type: selectedItem.type,
       });
-      await sendIntent("reason_selected", {
-        reason: reasonLabel,
-        reason_id: reasonId,
-      });
 
       // Special routing for specific reason types
       if (reasonId === "pay") {
-        // Payment reason → open billing drawer
+        // Payment reason → open billing drawer (no guided flow, no chat message)
+        setShowGuidedFlow(false);
         setDrawerMode("billing");
         setIsDrawerOpen(true);
       } else if (reasonId === "status" || reasonId === "check") {
-        // Status check reason → open status panel
+        // Status check reason → open status panel (no guided flow, no chat message)
+        setShowGuidedFlow(false);
         setDrawerMode("status");
         setIsDrawerOpen(true);
       } else {
-        // Default: open chat mode
-        setDrawerMode("chat");
-        setIsDrawerOpen(true);
+        // Default: open chat mode with guided flow + send message + intent
+        await sendChatAndIntent(
+          reasonLabel,
+          "reason_selected",
+          { reason: reasonLabel, reason_id: reasonId },
+          { showGuidedFlow: true, drawerMode: "chat" }
+        );
       }
     }
   };
 
   const handleLaunchChat = async () => {
-    // Init AI session and open drawer
-    await sendIntent("ai_init", {});
-    setDrawerMode("chat");
-    setIsDrawerOpen(true);
+    // Init AI session and open drawer - NO guided flow for general chat
+    await sendChatAndIntent(
+      "Start Chat",
+      "ai_init",
+      {},
+      { showGuidedFlow: false, drawerMode: "chat" }
+    );
   };
 
   const handleBackToHub = () => {
@@ -180,27 +225,44 @@ export default function AISupportPage() {
 
   const handleQuickAction = async (action: string) => {
     if (action === "maintenance") {
-      // Start maintenance flow - skip intro, go to item select
-      await sendIntent("select_cta", { cta_id: "maintenance" });
-      setDrawerMode("chat");
-      setIsDrawerOpen(true);
+      // Start maintenance flow with guided flow
+      await sendChatAndIntent(
+        "Report Maintenance",
+        "select_cta",
+        { cta_id: "maintenance" },
+        { showGuidedFlow: true, drawerMode: "chat" }
+      );
     } else if (action === "billing") {
-      // Start billing flow - show payment initiator
+      // Start billing flow - show payment initiator (no guided flow, no chat message)
+      setShowGuidedFlow(false);
       setDrawerMode("billing");
       setIsDrawerOpen(true);
     } else if (action === "chat") {
-      // Free-form chat mode
-      await sendIntent("ai_init", {});
-      setDrawerMode("chat");
-      setIsDrawerOpen(true);
+      // Free-form chat mode - NO guided flow
+      await sendChatAndIntent(
+        "Start Chat",
+        "ai_init",
+        {},
+        { showGuidedFlow: false, drawerMode: "chat" }
+      );
     } else if (action === "conversations") {
-      // Show conversation list
+      // Show conversation list (no guided flow, no chat message)
+      setShowGuidedFlow(false);
       setDrawerMode("conversations");
       setIsDrawerOpen(true);
     }
   };
 
-  const handleShowStatus = () => {
+  const handleShowStatus = async () => {
+    // Show status panel with a message (no intent needed for status panel)
+    if (activeChannel) {
+      try {
+        await activeChannel.sendMessage({ text: "Check Status" });
+      } catch (err) {
+        console.error("[handleShowStatus] Failed to send message:", err);
+      }
+    }
+    setShowGuidedFlow(false);
     setDrawerMode("status");
     setIsDrawerOpen(true);
   };
@@ -379,17 +441,41 @@ export default function AISupportPage() {
                 />
               </div>
             ) : (
-              /* Show Chat Only - Single Pane */
-              <StreamChatPane
-                className="h-full"
-                showEscalation={stage === "diagnosis"}
-                onEscalate={async () => {
-                  await sendIntent("ai_escalate", {
-                    reason: "user_requested",
-                    current_stage: stage,
-                  });
-                }}
-              />
+              /* Show Chat + Conditionally Show Guided Flow */
+              <div className="flex h-full flex-row gap-2 p-2 overflow-hidden">
+                {/* Chat Panel (60% width or full width if no guided flow) */}
+                <div className={`${showGuidedFlow ? 'w-[60%]' : 'flex-1'} rounded-xl border border-slate-700/50 bg-slate-900/50 overflow-hidden`}>
+                  <StreamChatPane
+                    className="h-full"
+                    showEscalation={stage === "diagnosis"}
+                    onEscalate={async () => {
+                      await sendIntent("ai_escalate", {
+                        reason: "user_requested",
+                        current_stage: stage,
+                      });
+                    }}
+                  />
+                </div>
+
+                {/* Guided Flow Panel (40% width) - Conditional */}
+                {showGuidedFlow && uiMode && uiMode !== "chat" && (
+                  <aside className="w-[40%] rounded-xl border border-slate-700/50 bg-slate-950/70 p-4 flex flex-col gap-3 overflow-y-auto">
+                    <div className="flex items-center justify-between">
+                      <h2 className="text-sm font-semibold text-slate-100">Guided Flow</h2>
+                      {initializing && (
+                        <span className="text-xs text-slate-400">Initializing...</span>
+                      )}
+                    </div>
+
+                    <AIDynamicPanel
+                      uiMode={uiMode}
+                      payload={payload}
+                      sendIntent={sendIntent}
+                      flowState={flowState}
+                    />
+                  </aside>
+                )}
+              </div>
             )}
           </div>
         </AIChatAssistantLauncher>
