@@ -19,6 +19,7 @@ import { useSession } from "next-auth/react";
 import { useStreamChat } from "@/hooks/chat/StreamChatContext";
 import StreamChatPane from "@/components/StreamChatPane";
 import AIChatAssistantLauncher from "./components/AIChatAssistantLauncher";
+import AIDynamicPanel from "./components/AIDynamicPanel";
 import HelpHub from "./components/amazon-style/HelpHub";
 import ItemReasonPanel from "./components/amazon-style/ItemReasonPanel";
 import RufusWelcome from "./components/amazon-style/RufusWelcome";
@@ -38,6 +39,7 @@ export default function AISupportPage() {
   const [view, setView] = useState<"hub" | "item_reason">("hub");
   const [drawerMode, setDrawerMode] = useState<"welcome" | "chat" | "status" | "conversations" | "billing">("welcome");
   const [showDebugPanel, setShowDebugPanel] = useState(false);
+  const [showGuidedFlow, setShowGuidedFlow] = useState(false);
   const [selectedItem, setSelectedItem] = useState<{
     id: string;
     type: string;
@@ -116,6 +118,7 @@ export default function AISupportPage() {
     intentPayload: Record<string, unknown>,
     options: {
       drawerMode?: typeof drawerMode;
+      showGuidedFlow?: boolean;
     } = {}
   ) => {
     // Step 1: Send message to chat if channel is available
@@ -134,6 +137,7 @@ export default function AISupportPage() {
 
     // Step 3: Update UI state
     setDrawerMode(options.drawerMode ?? "chat");
+    setShowGuidedFlow(options.showGuidedFlow ?? false);
     setIsDrawerOpen(true);
 
     // Step 4: Scroll to last message (after a brief delay to let UI update)
@@ -432,18 +436,33 @@ export default function AISupportPage() {
                 />
               </div>
             ) : (
-              /* Show Chat Only - Full Width */
-              <div className="flex h-full flex-col overflow-hidden">
-                <StreamChatPane
-                  className="h-full"
-                  showEscalation={stage === "diagnosis"}
-                  onEscalate={async () => {
-                    await sendIntent("ai_escalate", {
-                      reason: "user_requested",
-                      current_stage: stage,
-                    });
-                  }}
-                />
+              /* Horizontal Split View: Chat (60%) + Guided Flow Panel (40%) */
+              <div className="flex h-full flex-row gap-2 p-2 overflow-hidden">
+                {/* Chat Panel - 60% or full width */}
+                <div className={`${showGuidedFlow ? 'w-[60%]' : 'flex-1'} flex flex-col overflow-hidden`}>
+                  <StreamChatPane
+                    className="h-full"
+                    showEscalation={stage === "diagnosis"}
+                    onEscalate={async () => {
+                      await sendIntent("ai_escalate", {
+                        reason: "user_requested",
+                        current_stage: stage,
+                      });
+                    }}
+                  />
+                </div>
+
+                {/* Guided Flow Panel - 40% when visible */}
+                {showGuidedFlow && (
+                  <aside className="w-[40%] flex flex-col overflow-hidden">
+                    <AIDynamicPanel
+                      uiMode={uiMode}
+                      payload={payload}
+                      sendIntent={sendIntent}
+                      flowState={flowState}
+                    />
+                  </aside>
+                )}
               </div>
             )}
           </div>
