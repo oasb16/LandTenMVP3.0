@@ -20,7 +20,6 @@ from ..services.ai_support_orchestrator import get_ai_support_orchestrator
 from ..functions.function_registry import (
     get_function_definitions,
     execute_function,
-    DEFAULT_DISCOVERY_QUESTIONS,
 )
 from ..models.orchestrator_schemas import MetaContext, FunctionResult
 
@@ -334,11 +333,6 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
             # Inject meta-context fields into function arguments
             function_args = {**orchestrator_output.function_call.arguments}
 
-            # Special handling for discovery questions
-            if orchestrator_output.function_call.name == "start_discovery":
-                if "questions" not in function_args or not function_args["questions"]:
-                    function_args["questions"] = DEFAULT_DISCOVERY_QUESTIONS
-
             # Special handling for discovery answer recording
             if orchestrator_output.function_call.name == "record_discovery_answer":
                 function_args["total_questions"] = len(meta_context.discovery.questions)
@@ -428,8 +422,6 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
                     if orchestrator_output_2.function_call.name == "start_discovery":
                         if "incident_id" not in function_args_2 and meta_context.active_incident_id:
                             function_args_2["incident_id"] = meta_context.active_incident_id
-                        if "questions" not in function_args_2 or not function_args_2["questions"]:
-                            function_args_2["questions"] = DEFAULT_DISCOVERY_QUESTIONS
 
                     function_result_2 = await execute_function(
                         function_name=orchestrator_output_2.function_call.name,
