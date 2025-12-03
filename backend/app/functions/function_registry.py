@@ -23,24 +23,10 @@ from ..utils.message_cards import (
     format_discovery_progress,
     collapse_long_text,
 )
-from ..utils.discovery_questions import (
-    get_discovery_questions,
-    get_first_discovery_question,
-    should_ask_discovery_questions,
-)
 from collections import defaultdict
 import time
 
 logger = logging.getLogger(__name__)
-
-# ==================== DISCOVERY QUESTIONS ====================
-
-DEFAULT_DISCOVERY_QUESTIONS = [
-    "Is the issue still occurring right now?",
-    "Where exactly is the problem located in your unit?",
-    "When did you first notice this issue?",
-    "Are there any safety hazards (water near electricity, gas smell, etc.)?",
-]
 
 # 🚨 FIX: Incident deduplication cache with TTL (auto-expire after 5 minutes)
 # Maps user_id -> {fingerprint: timestamp}
@@ -91,6 +77,99 @@ def collapse_text(text: str, limit: int = 300) -> str:
             truncated = truncated[:last_space]
 
     return f"{truncated}... *(see more)*"
+
+
+async def generate_chatgpt_discovery_questions(
+    category: str,
+    severity: str,
+    user_message: str,
+    conversation_context: Optional[List[str]] = None,
+    max_q: int = 5,
+) -> List[str]:
+    """
+    Generate dynamic ChatGPT-style discovery questions using LLM.
+    No static lists - fully conversational and context-aware.
+
+    Args:
+        category: Issue category (plumbing, electrical, etc.)
+        severity: Severity level (low, medium, high, emergency)
+        user_message: The user's initial description
+        conversation_context: Previous Q&A pairs for context-aware follow-ups
+        max_q: Maximum number of questions to generate (default 5)
+
+    Returns:
+        List of 1-5 natural, conversational questions
+    """
+    try:
+        from ..services.ai_chat import get_ai_service
+
+        ai_service = get_ai_service()
+
+        # Build context from previous answers if available
+        context_text = ""
+        if conversation_context:
+            context_text = "\n\nPrevious conversation:\n" + "\n".join(conversation_context)
+
+        system_prompt = """You are PropertyAI. Generate discovery questions like ChatGPT—not a rigid checklist.
+Make them natural, conversational, and context-aware. No banked questions.
+Return 5 short questions max, each on a new line.
+
+Guidelines:
+- Ask natural follow-up questions based on context
+- Be conversational and empathetic
+- Prioritize safety and urgency
+- Keep questions concise and clear
+- Adapt to the specific category and severity"""
+
+        user_prompt = f"""Generate {max_q} discovery questions for this maintenance issue:
+
+Category: {category}
+Severity: {severity}
+User's description: {user_message}{context_text}
+
+Return ONLY the questions, one per line, numbered 1-{max_q}."""
+
+        response = await ai_service.generate_completion(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            max_tokens=500,
+        )
+
+        # Parse response into list of questions
+        questions = []
+        lines = response.strip().split("\n")
+        for line in lines:
+            # Remove numbering and clean up
+            cleaned = line.strip()
+            # Remove leading numbers like "1.", "1)", etc.
+            import re
+            cleaned = re.sub(r"^\d+[\.\)]\s*", "", cleaned)
+            if cleaned and len(cleaned) > 10:  # Reasonable question length
+                questions.append(cleaned)
+
+        # Ensure we have 1-5 questions
+        questions = questions[:max_q]
+
+        if not questions:
+            # Fallback to basic questions if LLM fails
+            logger.warning("LLM generated no questions, using fallback")
+            return [
+                "Can you describe what's happening in more detail?",
+                "When did you first notice this issue?",
+                "Is this causing any safety concerns?",
+            ]
+
+        logger.info(f"✨ Generated {len(questions)} ChatGPT-style discovery questions")
+        return questions
+
+    except Exception as e:
+        logger.error(f"Error generating ChatGPT discovery questions: {e}", exc_info=True)
+        # Fallback to basic questions
+        return [
+            "Can you describe what's happening in more detail?",
+            "When did you first notice this issue?",
+            "Is this causing any safety concerns?",
+        ]
 
 
 async def create_incident(
@@ -266,12 +345,11 @@ async def create_incident(
                     f"**Category:** {category}\n"
                     f"**Severity:** {severity.upper()}\n"
                     f"**Urgency:** {urgency}\n\n"
-                    f"**Details:**\n{collapse_text(description, limit=300)}\n\n"
+                    f"**Details:**\n{description}\n\n"
                     f"---\nWe'll gather more details to resolve this quickly."
                 )
                 logger.info(f"✨ Generated dynamic incident card")
             else:
-                collapsed_description = collapse_text(description, limit=300)
                 incident_card_text = (
                     f"📄 **Incident Reported**\n\n"
                     f"**Incident ID:** {incident_id}\n"
@@ -279,13 +357,12 @@ async def create_incident(
                     f"**Category:** {category}\n"
                     f"**Severity:** {severity}\n"
                     f"**Urgency:** {urgency}\n\n"
-                    f"**Details:**\n{collapsed_description}\n\n"
+                    f"**Details:**\n{description}\n\n"
                     f"---\nWe'll gather more details to resolve this quickly."
                 )
 
         except Exception as e:
             logger.error(f"Error generating dynamic incident card: {e}", exc_info=True)
-            collapsed_description = collapse_text(description, limit=300)
             incident_card_text = (
                 f"📄 **Incident Reported**\n\n"
                 f"**Incident ID:** {incident_id}\n"
@@ -293,73 +370,36 @@ async def create_incident(
                 f"**Category:** {category}\n"
                 f"**Severity:** {severity}\n"
                 f"**Urgency:** {urgency}\n\n"
-                f"**Details:**\n{collapsed_description}\n\n"
+                f"**Details:**\n{description}\n\n"
                 f"---\nWe'll gather more details to resolve this quickly."
             )
+
+        # Wrap in expandable format
+        preview = collapse_text(incident_card_text, limit=500)
+        expandable_text = (
+            f"<ai-expanded>\n"
+            f"RAW_MODEL_OUTPUT:\n{incident_card_text}\n\n"
+            f"TRUNCATED_PREVIEW:\n{preview}\n\n"
+            f"EXPANDABLE: true\n"
+            f"</ai-expanded>"
+        )
 
         bot.send_ai_message(
             channel_id=channel_id,
             persona="tenant",
-            text=incident_card_text,
+            text=expandable_text,
             metadata={
                 "incident_id": incident_id,
-                "type": "incident_created",
                 "category": category,
                 "severity": severity,
                 "urgency": urgency,
                 "title": title,
                 "success": True,
+                "actionable": True,
             },
         )
 
         user_message_sent = True
-        # CRITICAL FIX: Only send first discovery question if appropriate
-        # DO NOT send if orchestrator will handle it (prevents duplicates)
-        # Check if we should auto-start discovery
-        auto_start_discovery = should_ask_discovery_questions(category, severity)
-
-        if auto_start_discovery:
-            logger.info(f"✅ Auto-starting discovery for incident {incident_id}")
-
-            first_question = get_first_discovery_question(category, severity, description)
-            discovery_text = format_discovery_progress(
-                question_index=0,
-                total_questions=5,  # Default to 5 questions
-                current_question=first_question,
-            )
-            bot.send_ai_message(
-                channel_id=channel_id,
-                persona="tenant",
-                text=discovery_text,
-                metadata={
-                    "incident_id": incident_id,
-                    "type": "discovery_question",
-                    "question_index": 0,
-                },
-            )
-
-            # Update incident status to 'discovery' immediately
-            dynamo.update_incident_status(
-                incident_id=incident_id, status="discovery", user_id=user_id
-            )
-
-            # CRITICAL: Return flag indicating discovery was auto-started
-            # This prevents the orchestrator from calling start_discovery again
-            return FunctionResult(
-                success=True,
-                data={
-                    "incident_id": incident_id,
-                    "status": "discovery",  # Changed from "detected"
-                    "title": title,
-                    "category": category,
-                    "severity": severity,
-                    "urgency": urgency,
-                    "created_at": now,
-                    "discovery_auto_started": True,  # Flag for orchestrator
-                    "user_message_sent": user_message_sent,
-                },
-                message=f"Incident {incident_id} created and discovery started automatically",
-            )
 
         logger.info(f"Created incident {incident_id} for user {user_id}")
 
@@ -538,8 +578,8 @@ async def start_discovery(
     questions: Optional[List[str]] = None,
 ) -> FunctionResult:
     """
-    PHASE OMEGA: Pure executor - orchestrator ensures single call.
-    Start discovery question flow with category-specific questions.
+    ChatGPT-style dynamic discovery - ALWAYS uses LLM-generated questions.
+    No static question banks.
     """
     try:
         bot = get_bot()
@@ -557,48 +597,27 @@ async def start_discovery(
             severity = severity or "medium"
             user_message = user_message or ""
 
-        # 🚀 PHASE OMEGA: Dynamic Discovery Integration
+        # ALWAYS generate ChatGPT-style dynamic questions
         if not questions:
-            try:
-                from ..services.dynamic_discovery import get_dynamic_discovery_generator
+            logger.info(f"🔮 Generating ChatGPT-style discovery questions for category={category}, severity={severity}")
 
-                generator = get_dynamic_discovery_generator()
+            questions = await generate_chatgpt_discovery_questions(
+                category=category,
+                severity=severity,
+                user_message=user_message,
+                conversation_context=None,
+                max_q=5,
+            )
 
-                logger.info(f"🔮 Generating dynamic discovery questions for category={category}, severity={severity}")
+            logger.info(f"✨ Generated {len(questions)} ChatGPT-style discovery questions")
 
-                dynamic_questions = await generator.generate_questions(
-                    category=category,
-                    severity=severity,
-                    user_message=user_message,
-                    max_questions=5,
-                )
-
-                if dynamic_questions and len(dynamic_questions) > 0:
-                    questions = dynamic_questions
-                    logger.info(f"✨ Generated {len(questions)} dynamic discovery questions")
-                else:
-                    logger.warning(f"⚠️ Dynamic discovery returned no questions, using defaults")
-                    questions = None
-
-            except Exception as e:
-                logger.error(f"Error generating dynamic discovery questions: {e}", exc_info=True)
-                logger.info(f"Falling back to static discovery questions")
-                questions = None
-
-            # 🚀 PHASE OMEGA: Record pattern for auto-evolving skills
-            try:
-                from ..services.auto_evolving_skills import get_skills_recorder
-
-                recorder = get_skills_recorder()
-                await recorder.record_discovery_pattern(
-                    category=category,
-                    severity=severity,
-                    user_message=user_message,
-                    questions_generated=dynamic_questions if dynamic_questions else [],
-                )
-
-            except Exception as e:
-                logger.error(f"Error recording discovery pattern: {e}", exc_info=True)
+            # Store questions in incident for later reference
+            dynamo.update_incident_status(
+                incident_id=incident_id,
+                status="discovery",
+                user_id=user_id or incident.get("user_id"),
+                discovery_responses={"questions": questions},
+            )
 
         # Update incident status to 'discovery' if not already
         if incident and incident.get("status") not in ["discovery", "discovery_complete", "diagnosing", "work_order", "completed"]:
@@ -608,53 +627,49 @@ async def start_discovery(
                 user_id=user_id or incident.get("user_id"),
             )
 
-        # Get adaptive questions based on category and severity (fallback)
-        discovery_questions = questions or get_discovery_questions(
-            category=category,
-            severity=severity,
-            user_message=user_message or "",
-            max_questions=5,
+        # Create conversational message with first question
+        total = len(questions)
+        first_question = questions[0]
+
+        # ChatGPT-style conversational format
+        full_message = (
+            f"Thanks for reporting this {category} issue. I'd like to ask you a few questions to understand the situation better and get you the right help.\n\n"
+            f"**Question 1 of {total}:** {first_question}"
         )
 
-        if not discovery_questions:
-            discovery_questions = DEFAULT_DISCOVERY_QUESTIONS
-
-        # Send discovery question with progress bar
-        total = len(discovery_questions)
-        filled = 1
-        empty = total - filled
-        progress_bar = "▓" * filled + "░" * empty
-
-        discovery_text = (
-            f"🔍 **Discovery Question**\n\n"
-            f"Progress: [{progress_bar}] 1/{total}\n\n"
-            f"**Q1:** {discovery_questions[0]}\n\n"
-            f"Please answer to help us understand the issue better."
+        # Wrap in expandable format
+        preview = collapse_text(full_message, limit=500)
+        expandable_text = (
+            f"<ai-expanded>\n"
+            f"RAW_MODEL_OUTPUT:\n{full_message}\n\n"
+            f"TRUNCATED_PREVIEW:\n{preview}\n\n"
+            f"EXPANDABLE: true\n"
+            f"</ai-expanded>"
         )
 
         bot.send_ai_message(
             channel_id=channel_id,
             persona="tenant",
-            text=discovery_text,
+            text=expandable_text,
             metadata={
                 "incident_id": incident_id,
-                "type": "discovery_question",
                 "question_index": 0,
-                "total_questions": len(discovery_questions),
+                "total_questions": total,
+                "actionable": True,
             },
         )
 
         user_message_sent = True
-        logger.info(f"Started discovery for incident {incident_id} with {len(discovery_questions)} questions")
+        logger.info(f"Started ChatGPT-style discovery for incident {incident_id} with {len(questions)} questions")
 
         return FunctionResult(
             success=True,
             data={
                 "incident_id": incident_id,
-                "questions": discovery_questions,
-                "current_question": discovery_questions[0],
+                "questions": questions,
+                "current_question": questions[0],
                 "question_index": 0,
-                "total_questions": len(discovery_questions),
+                "total_questions": len(questions),
                 "user_message_sent": user_message_sent,
             },
             message=f"Discovery started for incident {incident_id}",
@@ -677,7 +692,10 @@ async def record_discovery_answer(
     user_id: str,
     total_questions: Optional[int] = None,
 ) -> FunctionResult:
-    """Record a discovery answer and send next question"""
+    """
+    Record discovery answer and dynamically regenerate next question based on conversation context.
+    ChatGPT-style: each follow-up question is context-aware of previous answers.
+    """
     try:
         dynamo = get_dynamo_service()
         bot = get_bot()
@@ -691,13 +709,14 @@ async def record_discovery_answer(
                 message=f"Cannot record answer: incident {incident_id} not found",
             )
 
-        # Determine total questions
-        print("===== incident data in record_discovery_answer: =====", incident)
-        if total_questions is None:
-            total_questions = 5  # Default
-        print("===== total_questions: =====", total_questions)
+        # Get stored questions from incident
+        discovery_responses = incident.get("discovery_responses", {})
+        stored_questions = discovery_responses.get("questions", [])
 
-        # CRITICAL FIX: Save answer to DynamoDB incident
+        if total_questions is None:
+            total_questions = len(stored_questions) if stored_questions else 5
+
+        # Save answer to DynamoDB incident
         existing_answers = incident.get("discovery_answers", {})
         if isinstance(existing_answers, dict):
             existing_answers[f"q{question_index}"] = answer
@@ -718,30 +737,41 @@ async def record_discovery_answer(
         if not update_success:
             logger.error(f"Failed to save discovery answer for {incident_id}")
 
-        # Acknowledge answer progress
-        progress_msg = f"✅ Answer recorded ({next_index}/{total_questions})"
-        if next_index < total_questions:
-            progress_msg += f"\n\nNext question coming..."
-        else:
-            progress_msg += f"\n\n🎯 Discovery complete! Analyzing the issue..."
-
-        bot.send_ai_message(
-            channel_id=channel_id,
-            persona="tenant",
-            text=progress_msg,
-            metadata={"incident_id": incident_id, "question_index": next_index},
-        )
-
         user_message_sent = True
-        # 🚨 FIX: Check if discovery is complete
+
+        # Check if discovery is complete
         if next_index >= total_questions:
             logger.info(f"✅ Discovery completed for incident {incident_id}")
 
-            # 🚨 CRITICAL FIX: Transition incident status to 'discovery_complete'
+            # Transition to discovery_complete
             dynamo.update_incident_status(
                 incident_id=incident_id,
                 status="discovery_complete",
                 user_id=user_id,
+            )
+
+            # Send completion message
+            completion_msg = (
+                f"Perfect! I have all the information I need. Let me analyze the issue and determine the best course of action."
+            )
+
+            preview = collapse_text(completion_msg, limit=500)
+            expandable_text = (
+                f"<ai-expanded>\n"
+                f"RAW_MODEL_OUTPUT:\n{completion_msg}\n\n"
+                f"TRUNCATED_PREVIEW:\n{preview}\n\n"
+                f"EXPANDABLE: true\n"
+                f"</ai-expanded>"
+            )
+
+            bot.send_ai_message(
+                channel_id=channel_id,
+                persona="tenant",
+                text=expandable_text,
+                metadata={
+                    "incident_id": incident_id,
+                    "actionable": True,
+                },
             )
 
             return FunctionResult(
@@ -757,44 +787,79 @@ async def record_discovery_answer(
                 message="Discovery questions completed, moving to diagnosis",
             )
 
-        # CRITICAL: Automatically send next question
-        # Get discovery questions from context or generate new ones
+        # Dynamically regenerate next question based on conversation context
         category = incident.get("category", "general")
         severity = incident.get("severity", "medium")
         description = incident.get("description", "")
 
-        from ..utils.discovery_questions import get_discovery_questions
-        questions = get_discovery_questions(category, severity, description, max_questions=total_questions)
+        # Build conversation context from previous Q&A
+        conversation_context = []
+        for i in range(next_index):
+            q = stored_questions[i] if i < len(stored_questions) else f"Question {i+1}"
+            a = existing_answers.get(f"q{i}", "No answer")
+            conversation_context.append(f"Q{i+1}: {q}\nA{i+1}: {a}")
 
-        if next_index < len(questions):
-            next_question = questions[next_index]
+        # Generate next question dynamically
+        logger.info(f"🔮 Regenerating question {next_index+1} based on conversation context")
 
-            # Send next discovery question
-            from ..utils.message_cards import format_discovery_progress
-            discovery_text = format_discovery_progress(
-                question_index=next_index,
-                total_questions=total_questions,
-                current_question=next_question,
+        # Generate new set of questions, but we only need the next one
+        remaining_questions_needed = total_questions - next_index
+        new_questions = await generate_chatgpt_discovery_questions(
+            category=category,
+            severity=severity,
+            user_message=description,
+            conversation_context=conversation_context,
+            max_q=remaining_questions_needed,
+        )
+
+        # Update stored questions
+        if new_questions:
+            # Keep existing questions and append new ones
+            updated_questions = stored_questions[:next_index] + new_questions
+            discovery_responses["questions"] = updated_questions
+            dynamo.update_incident_status(
+                incident_id=incident_id,
+                status="discovery",
+                user_id=user_id,
+                discovery_responses=discovery_responses,
             )
 
-            bot.send_ai_message(
-                channel_id=channel_id,
-                persona="tenant",
-                text=discovery_text,
-                metadata={
-                    "incident_id": incident_id,
-                    "type": "discovery_question",
-                    "question_index": next_index,
-                },
-            )
-
-            user_message_sent = True
-            logger.info(f"✅ Sent discovery question {next_index+1}/{total_questions} for incident {incident_id}")
+            next_question = new_questions[0]
+        elif next_index < len(stored_questions):
+            # Fallback to stored question
+            next_question = stored_questions[next_index]
         else:
-            logger.warning(f"⚠️ No question available for index {next_index}")
+            # Ultimate fallback
+            next_question = "Can you provide any additional details about the issue?"
 
-        # Send next question
-        logger.info(f"Recorded discovery answer {question_index} for incident {incident_id}")
+        # ChatGPT-style conversational next question
+        full_message = (
+            f"Thanks for that information. \n\n"
+            f"**Question {next_index + 1} of {total_questions}:** {next_question}"
+        )
+
+        preview = collapse_text(full_message, limit=500)
+        expandable_text = (
+            f"<ai-expanded>\n"
+            f"RAW_MODEL_OUTPUT:\n{full_message}\n\n"
+            f"TRUNCATED_PREVIEW:\n{preview}\n\n"
+            f"EXPANDABLE: true\n"
+            f"</ai-expanded>"
+        )
+
+        bot.send_ai_message(
+            channel_id=channel_id,
+            persona="tenant",
+            text=expandable_text,
+            metadata={
+                "incident_id": incident_id,
+                "question_index": next_index,
+                "total_questions": total_questions,
+                "actionable": True,
+            },
+        )
+
+        logger.info(f"✅ Sent dynamically generated discovery question {next_index+1}/{total_questions} for incident {incident_id}")
 
         return FunctionResult(
             success=True,
@@ -908,24 +973,43 @@ async def start_diagnosis(
         except Exception as e:
             logger.error(f"Error recording diagnosis pattern: {e}", exc_info=True)
 
-        # Send diagnosis message to user
-        diagnosis_text = (
-            f"🔬 **Diagnosis Complete**\n\n"
-            f"Based on your answers, here's what I found:\n\n"
+        # ChatGPT-style conversational diagnosis with action suggestions
+        recommended_action = _get_recommended_action(category, severity)
+
+        full_diagnosis = (
+            f"Based on the information you've provided, I've analyzed the {category} issue. Here's my assessment:\n\n"
             f"{diagnosis_summary}\n\n"
-            f"**Recommended Action:** {_get_recommended_action(category, severity)}\n\n"
-            f"---\nWould you like me to create a work order to fix this issue?"
+            f"**My Recommendation:** {recommended_action}\n\n"
+            f"**What would you like to do next?**\n"
+            f"- I can create a work order to get this fixed\n"
+            f"- You can provide more details if needed\n"
+            f"- I can show you the current status of your request\n\n"
+            f"Just let me know how you'd like to proceed!"
+        )
+
+        # Wrap in expandable format
+        preview = collapse_text(full_diagnosis, limit=500)
+        expandable_text = (
+            f"<ai-expanded>\n"
+            f"RAW_MODEL_OUTPUT:\n{full_diagnosis}\n\n"
+            f"TRUNCATED_PREVIEW:\n{preview}\n\n"
+            f"ACTIONS:\n"
+            f"- Create work order\n"
+            f"- Add more details\n"
+            f"- Show status\n\n"
+            f"EXPANDABLE: true\n"
+            f"</ai-expanded>"
         )
 
         bot.send_ai_message(
             channel_id=channel_id,
             persona="tenant",
-            text=diagnosis_text,
+            text=expandable_text,
             metadata={
                 "incident_id": incident_id,
-                "type": "diagnosis",
                 "category": category,
                 "severity": severity,
+                "actionable": True,
             },
         )
 
@@ -1116,25 +1200,52 @@ async def create_work_order(
             logger.error(f"Error updating incident status: {e}")
             # Continue even if status update fails
 
-        # Send beautifully formatted work order card
-        work_order_text = format_work_order_card({
-            "job_id": job_id,
-            "title": title,
-            "category": incident.get("category"),
-            "estimated_cost": estimated_cost,
-            "urgency": urgency or incident.get("urgency"),
-        })
+        # ChatGPT-style conversational work order confirmation with action suggestions
+        full_work_order = (
+            f"Great! I've created a work order to address your {incident.get('category')} issue.\n\n"
+            f"**Work Order Details:**\n"
+            f"- **Order ID:** {job_id}\n"
+            f"- **Service:** {title}\n"
+            f"- **Category:** {incident.get('category')}\n"
+            f"- **Estimated Cost:** ${estimated_cost}\n"
+            f"- **Priority:** {(urgency or incident.get('urgency')).upper()}\n\n"
+            f"**What happens next?**\n"
+            f"1. I'll generate contractor bids for you\n"
+            f"2. You can review and select a contractor\n"
+            f"3. Once approved, we'll schedule the repair\n\n"
+            f"**Available actions:**\n"
+            f"- Generate contractor bids now\n"
+            f"- Review work order status\n"
+            f"- Modify work order details\n"
+            f"- Request landlord approval\n\n"
+            f"Would you like me to generate contractor bids now?"
+        )
+
+        # Wrap in expandable format
+        preview = collapse_text(full_work_order, limit=500)
+        expandable_text = (
+            f"<ai-expanded>\n"
+            f"RAW_MODEL_OUTPUT:\n{full_work_order}\n\n"
+            f"TRUNCATED_PREVIEW:\n{preview}\n\n"
+            f"ACTIONS:\n"
+            f"- Generate contractor bids\n"
+            f"- Review status\n"
+            f"- Modify details\n"
+            f"- Request approval\n\n"
+            f"EXPANDABLE: true\n"
+            f"</ai-expanded>"
+        )
 
         bot.send_ai_message(
             channel_id=channel_id,
             persona="tenant",
-            text=work_order_text,
+            text=expandable_text,
             metadata={
                 "job_id": job_id,
                 "incident_id": incident_id,
-                "type": "work_order",
                 "title": title,
                 "category": incident.get("category"),
+                "actionable": True,
             },
         )
 
@@ -1277,18 +1388,56 @@ async def generate_bids(job_id: str, category: str, channel_id: str) -> Function
         # Generate mock bids (in production, this would query real contractors)
         bids = generate_contractor_bids(category)
 
-        # Send bids notification
-        bids_summary = f"📊 Received {len(bids)} Contractor Bids\n\n"
+        # ChatGPT-style conversational bids summary with action suggestions
+        full_bids_summary = (
+            f"Great news! I've received {len(bids)} contractor bids for your {category} work order.\n\n"
+            f"**Top Contractors:**\n\n"
+        )
+
         for i, bid in enumerate(bids[:3], 1):  # Show top 3
-            bids_summary += f"{i}. {bid.get('contractor_name', 'Unknown')} - ${bid.get('quote', 0)} (⭐ {bid.get('rating', 0)})\n"
+            contractor = bid.get('contractor_name', 'Unknown')
+            quote = bid.get('quote', 0)
+            rating = bid.get('rating', 0)
+            full_bids_summary += f"{i}. **{contractor}**\n"
+            full_bids_summary += f"   - Quote: ${quote}\n"
+            full_bids_summary += f"   - Rating: {'⭐' * int(rating)} ({rating}/5.0)\n\n"
+
         if len(bids) > 3:
-            bids_summary += f"\n+{len(bids) - 3} more bids available"
+            full_bids_summary += f"*Plus {len(bids) - 3} more contractors available*\n\n"
+
+        full_bids_summary += (
+            f"**What would you like to do?**\n"
+            f"- Accept one of these bids\n"
+            f"- Request more details about a contractor\n"
+            f"- See all available bids\n"
+            f"- Request landlord approval first\n\n"
+            f"Let me know which contractor you'd like to proceed with, or if you need more information!"
+        )
+
+        # Wrap in expandable format
+        preview = collapse_text(full_bids_summary, limit=500)
+        expandable_text = (
+            f"<ai-expanded>\n"
+            f"RAW_MODEL_OUTPUT:\n{full_bids_summary}\n\n"
+            f"TRUNCATED_PREVIEW:\n{preview}\n\n"
+            f"ACTIONS:\n"
+            f"- Accept bid\n"
+            f"- View contractor details\n"
+            f"- See all bids\n"
+            f"- Request approval\n\n"
+            f"EXPANDABLE: true\n"
+            f"</ai-expanded>"
+        )
 
         bot.send_ai_message(
             channel_id=channel_id,
             persona="landlord",
-            text=bids_summary,
-            metadata={"job_id": job_id, "bid_count": len(bids), "type": "bids"},
+            text=expandable_text,
+            metadata={
+                "job_id": job_id,
+                "bid_count": len(bids),
+                "actionable": True,
+            },
         )
 
         logger.info(f"Generated {len(bids)} bids for job {job_id}")
@@ -1381,14 +1530,48 @@ async def request_landlord_approval(
         job = dynamo.get_job(job_id)
         incident = dynamo.get_incident(incident_id, job.get("landlord_id", ""))
 
-        # Send approval request to landlord
-        approval_msg = f"📋 **Approval Required**\n\n**Job:** {job.get('title')}\n**Category:** {job.get('category')}\n**Estimated Cost:** ${job.get('estimated_cost')}\n**Urgency:** {job.get('urgency')}\n\nPlease review and approve or reject this work order."
+        # ChatGPT-style conversational approval request with action suggestions
+        full_approval_msg = (
+            f"A work order has been created and needs your approval.\n\n"
+            f"**Work Order Summary:**\n"
+            f"- **Job ID:** {job_id}\n"
+            f"- **Service:** {job.get('title')}\n"
+            f"- **Category:** {job.get('category')}\n"
+            f"- **Estimated Cost:** ${job.get('estimated_cost')}\n"
+            f"- **Priority:** {job.get('urgency', 'routine').upper()}\n\n"
+            f"**Property Issue:**\n{incident.get('description', 'No description available') if incident else 'Details not available'}\n\n"
+            f"**What would you like to do?**\n"
+            f"- Approve this work order\n"
+            f"- Reject with feedback\n"
+            f"- Request more details\n"
+            f"- View contractor bids\n\n"
+            f"Please review and let me know your decision."
+        )
+
+        # Wrap in expandable format
+        preview = collapse_text(full_approval_msg, limit=500)
+        expandable_text = (
+            f"<ai-expanded>\n"
+            f"RAW_MODEL_OUTPUT:\n{full_approval_msg}\n\n"
+            f"TRUNCATED_PREVIEW:\n{preview}\n\n"
+            f"ACTIONS:\n"
+            f"- Approve work order\n"
+            f"- Reject with feedback\n"
+            f"- Request more details\n"
+            f"- View bids\n\n"
+            f"EXPANDABLE: true\n"
+            f"</ai-expanded>"
+        )
 
         bot.send_ai_message(
             channel_id=channel_id,
             persona="landlord",
-            text=approval_msg,
-            metadata={"job_id": job_id, "incident_id": incident_id, "type": "approval_request"},
+            text=expandable_text,
+            metadata={
+                "job_id": job_id,
+                "incident_id": incident_id,
+                "actionable": True,
+            },
         )
 
         logger.info(f"Requested landlord approval for job {job_id}")
