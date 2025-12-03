@@ -58,15 +58,16 @@ export default function AIChatAssistantLauncher({
         )}
       </AnimatePresence>
 
-      {/* Chat Drawer - Full-width horizontal bottom drawer */}
+      {/* Chat Drawer - ChatGPT-style right-side panel */}
       <AnimatePresence>
         {isOpen && (
           <motion.div
-            initial={{ opacity: 0, y: 400 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 400 }}
+            initial={{ opacity: 0, x: 480 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 480 }}
             transition={{ type: "spring", damping: 25, stiffness: 200 }}
-            className="fixed bottom-0 left-0 right-0 w-full h-[70vh] bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 shadow-2xl overflow-hidden z-50 flex flex-col"
+            className="fixed right-0 bottom-0 top-0 w-full sm:w-[480px] h-full bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-700 shadow-2xl overflow-hidden z-50 flex flex-col"
+            style={{ minWidth: '320px', maxWidth: '100vw' }}
           >
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-r from-blue-600 to-purple-600 text-white">
