@@ -25,6 +25,12 @@ type MetadataPayload = {
   incident_id?: string | null;
   persona?: string;
   flow_state?: { stage?: string | null };
+  type?: string;
+  category?: string;
+  severity?: string;
+  urgency?: string;
+  title?: string;
+  success?: boolean;
 };
 
 const CARD_BORDER: Record<string, string> = {
@@ -62,8 +68,13 @@ function tryParseAIExpanded(text: string): {
 } | null {
   const trimmed = text.trim();
 
-  // Check if this is an <ai-expanded> block
-  if (!trimmed.startsWith("<ai-expanded>") || !trimmed.includes("</ai-expanded>")) {
+  // CRITICAL: Must start with <ai-expanded> tag
+  if (!trimmed.startsWith("<ai-expanded>")) {
+    return null;
+  }
+
+  // CRITICAL: Must contain closing tag
+  if (!trimmed.includes("</ai-expanded>")) {
     return null;
   }
 
@@ -74,16 +85,21 @@ function tryParseAIExpanded(text: string): {
 
     const content = contentMatch[1];
 
-    // Extract RAW (try both formats for compatibility)
-    const rawMatch = content.match(/(?:RAW_MODEL_OUTPUT|RAW):([\s\S]*?)(?=TRUNCATED_PREVIEW:|PREVIEW:|ACTIONS:|EXPANDABLE:|$)/);
+    // Extract RAW (full model output)
+    const rawMatch = content.match(/RAW:\s*([\s\S]*?)(?=\n\s*PREVIEW:|$)/);
     const raw = rawMatch ? rawMatch[1].trim() : "";
 
-    // Extract PREVIEW (try both formats for compatibility)
-    const previewMatch = content.match(/(?:TRUNCATED_PREVIEW|PREVIEW):([\s\S]*?)(?=ACTIONS:|EXPANDABLE:|$)/);
-    const preview = previewMatch ? previewMatch[1].trim() : raw.substring(0, 220);
+    // Extract PREVIEW (truncated version for initial display)
+    const previewMatch = content.match(/PREVIEW:\s*([\s\S]*?)(?=\n\s*ACTIONS:|$)/);
+    const preview = previewMatch ? previewMatch[1].trim() : "";
+
+    // CRITICAL: If both are empty, this is invalid
+    if (!raw && !preview) {
+      return null;
+    }
 
     // Extract ACTIONS
-    const actionsMatch = content.match(/ACTIONS:([\s\S]*?)(?=EXPANDABLE:|$)/);
+    const actionsMatch = content.match(/ACTIONS:\s*([\s\S]*?)(?=\n\s*EXPANDABLE:|$)/);
     const actions: Array<{action: string; details?: string}> = [];
 
     if (actionsMatch) {
@@ -92,7 +108,9 @@ function tryParseAIExpanded(text: string): {
 
       actionLines.forEach(line => {
         const cleaned = line.trim().substring(1).trim(); // Remove '-' prefix
-        actions.push({ action: cleaned });
+        if (cleaned.length > 0) {
+          actions.push({ action: cleaned });
+        }
       });
     }
 
@@ -115,11 +133,6 @@ function tryParseAIExpanded(text: string): {
 /**
  * Safely detect and parse JSON from message text.
  * Returns parsed data if valid and matches expected structure, null otherwise.
- *
- * Handles multiple JSON structures:
- * 1. { analysis: { summary, next_actions } }
- * 2. { summary, next_actions } (top-level)
- * 3. { reasoning, answer, next_actions }
  */
 function tryParseStructuredReasoning(text: string): { analysis?: { summary?: string; next_actions?: Array<{ action: string; details?: string }> } } | null {
   const trimmed = text.trim();
@@ -153,7 +166,6 @@ function tryParseStructuredReasoning(text: string): { analysis?: { summary?: str
 
     // Case 3: Has related_to_property_management field (AI reasoning output)
     if (parsed.related_to_property_management !== undefined || parsed.analysis_summary) {
-      // Convert AI reasoning structure to display format
       const summary = parsed.analysis_summary || parsed.reasoning || "Analysis completed.";
       const actions = parsed.next_actions || (parsed.recommended_actions ?
         parsed.recommended_actions.map((action: string) => ({ action })) :
@@ -225,6 +237,10 @@ export const CustomMessageUI = memo(function CustomMessageUI({
 
   // Try to parse structured reasoning from message text
   const parsedReasoning = useMemo(() => {
+    // Skip if this looks like <ai-expanded> format
+    if (messageText.trim().startsWith("<ai-expanded>")) {
+      return null;
+    }
     return tryParseStructuredReasoning(messageText);
   }, [messageText]);
 
@@ -292,7 +308,7 @@ export const CustomMessageUI = memo(function CustomMessageUI({
         </div>
       )}
 
-      {messageText && parsedExpanded ? (
+      {messageText && parsedExpanded && (parsedExpanded.raw || parsedExpanded.preview) ? (
         // ChatGPT-style expandable message from backend
         <div className="flex w-full max-w-[90%] flex-col gap-2">
           <motion.div
@@ -300,7 +316,13 @@ export const CustomMessageUI = memo(function CustomMessageUI({
             className={`${bubbleClasses} ${bubbleAlignment}`}
             transition={{ type: "spring", stiffness: 260, damping: 24 }}
           >
-            <TextExpander text={parsedExpanded.raw} maxLength={500} isBot={true} />
+            {/* Show PREVIEW with expandable to RAW */}
+            <TextExpander
+              text={parsedExpanded.raw}
+              previewText={parsedExpanded.preview}
+              maxLength={500}
+              isBot={true}
+            />
           </motion.div>
 
           {/* Action buttons if present */}
@@ -318,7 +340,7 @@ export const CustomMessageUI = memo(function CustomMessageUI({
                     title={action.action}
                     desc={action.details}
                     index={index}
-                    onClick={onActionClick}
+                    onClick={handleActionClick}
                   />
                 ))}
               </div>
@@ -326,14 +348,14 @@ export const CustomMessageUI = memo(function CustomMessageUI({
           )}
         </div>
       ) : messageText && parsedReasoning ? (
-        // Structured reasoning detected - render as natural language UI
+        // Structured reasoning detected - render as natural language UI (NO RAW JSON)
         <div className="flex w-full max-w-[90%] flex-col gap-2">
           <AIResponseParser
             data={parsedReasoning}
             stage={stage}
             incidentId={metadata.incident_id}
             persona={metadata.persona}
-            onActionClick={onActionClick}
+            onActionClick={handleActionClick}
           />
 
           {/* Show Details toggle */}
@@ -389,8 +411,8 @@ export const CustomMessageUI = memo(function CustomMessageUI({
               <TextExpander text={messageText} maxLength={240} isBot={true} />
             </motion.div>
 
-            {/* Part 2: Short Actionable Summary */}
-            {renderActionSummary(messageText, metadata, stage, onActionClick)}
+            {/* Part 2: Short Actionable Summary - Use ACTIONS from <ai-expanded> first */}
+            {renderActionSummary(messageText, metadata, stage, parsedExpanded, handleActionClick)}
           </div>
         ) : (
           // Regular user message with optional expansion
@@ -476,14 +498,40 @@ function containsNumberedQuestions(text: string): boolean {
 
 /**
  * Render action summary based on message context
+ * CRITICAL: Use ACTIONS from <ai-expanded> first if available
  */
 function renderActionSummary(
   messageText: string,
   metadata: MetadataPayload,
   stage?: string,
+  parsedExpanded?: { actions: Array<{action: string; details?: string}> } | null,
   onActionClick?: (actionValue: string) => Promise<void> | void,
 ) {
-  // Try to extract actions from metadata or text
+  // PRIORITY 1: Use ACTIONS from <ai-expanded> if available
+  if (parsedExpanded && parsedExpanded.actions && parsedExpanded.actions.length > 0) {
+    return (
+      <div className="rounded-2xl border border-emerald-500/20 bg-gradient-to-br from-slate-900/80 via-slate-900 to-slate-950 p-4 shadow-xl">
+        <h4 className="text-sm font-semibold text-emerald-300 mb-3 flex items-center gap-2">
+          <Sparkles className="h-4 w-4" />
+          What you can do next:
+        </h4>
+        <div className="grid grid-cols-1 gap-2">
+          {parsedExpanded.actions.map((action, index) => (
+            <ActionCard
+              key={index}
+              icon={Sparkles}
+              title={action.action}
+              desc={action.details}
+              index={index}
+              onClick={onActionClick}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // PRIORITY 2: Try to extract actions from structured reasoning
   const actions = extractNextSteps(messageText, metadata, stage);
 
   if (actions.length === 0) {

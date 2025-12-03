@@ -1,25 +1,27 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ChevronDown } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 
 interface TextExpanderProps {
   text: string;
+  previewText?: string; // Optional preview text to show first
   maxLength?: number;
   className?: string;
   isBot?: boolean;
 }
 
-export function TextExpander({ text, maxLength = 300, className = '', isBot = false }: TextExpanderProps) {
-  // Auto-expand AI messages by default so full responses are visible
-  const [isExpanded, setIsExpanded] = useState(isBot);
+export function TextExpander({ text, previewText, maxLength = 300, className = '', isBot = false }: TextExpanderProps) {
+  // Start collapsed for AI messages to show PREVIEW first
+  const [isExpanded, setIsExpanded] = useState(false);
   const [shouldTruncate, setShouldTruncate] = useState(false);
 
   useEffect(() => {
     // Check if text needs truncation
-    setShouldTruncate(text.length > maxLength);
-  }, [text, maxLength]);
+    const textToCheck = previewText || text;
+    setShouldTruncate(textToCheck.length > maxLength || !!previewText);
+  }, [text, previewText, maxLength]);
 
   // Don't show expander for user messages
   if (!isBot) {
@@ -31,7 +33,10 @@ export function TextExpander({ text, maxLength = 300, className = '', isBot = fa
     return <div className={className}>{text}</div>;
   }
 
-  const displayText = isExpanded ? text : text.substring(0, maxLength) + '...';
+  // Show PREVIEW by default, expand to RAW on click
+  const displayText = isExpanded
+    ? text
+    : (previewText || text.substring(0, maxLength) + '...');
 
   return (
     <div className="text-expander">
