@@ -101,9 +101,16 @@ async def generate_chatgpt_discovery_questions(
         List of 1-5 natural, conversational questions
     """
     try:
-        from ..services.ai_chat import get_ai_service
+        import os
+        from openai import OpenAI
 
-        ai_service = get_ai_service()
+        # Initialize OpenAI client
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("OPENAI_API_KEY not configured")
+
+        client = OpenAI(api_key=api_key)
+        model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
         # Build context from previous answers if available
         context_text = ""
@@ -129,11 +136,18 @@ User's description: {user_message}{context_text}
 
 Return ONLY the questions, one per line, numbered 1-{max_q}."""
 
-        response = await ai_service.generate_completion(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
+        # Call OpenAI API directly
+        completion = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
             max_tokens=500,
+            temperature=0.7,
         )
+
+        response = completion.choices[0].message.content or ""
 
         # Parse response into list of questions
         questions = []
