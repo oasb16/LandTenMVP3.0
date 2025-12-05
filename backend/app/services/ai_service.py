@@ -93,8 +93,7 @@ Chat:
             response_format={"type": "json_object"},
         )
 
-        response_choices = json.loads(completion.choices)
-        print(f"response_choices : {response_choices}")  # Debug print
+        # FIXED: completion.choices is already a list, not JSON string
         raw_content = completion.choices[0].message.content
         print(f"[agent-debug] step={step+1} raw_content={raw_content}")
 
