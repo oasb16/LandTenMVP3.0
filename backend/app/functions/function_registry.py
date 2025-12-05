@@ -134,17 +134,27 @@ Return ONLY the questions, one per line, numbered 1-{max_q}."""
             context=system_context,
         )
 
-        # Parse response into list of questions
+        # FIXED: get_ai_response returns JSON, not plain text
+        # Parse JSON response to extract questions array
         questions = []
-        lines = response.strip().split("\n")
-        for line in lines:
-            # Remove numbering and clean up
-            cleaned = line.strip()
-            # Remove leading numbers like "1.", "1)", etc.
-            import re
-            cleaned = re.sub(r"^\d+[\.\)]\s*", "", cleaned)
-            if cleaned and len(cleaned) > 10:  # Reasonable question length
-                questions.append(cleaned)
+        try:
+            import json
+            data = json.loads(response)
+            if isinstance(data, dict) and "questions" in data:
+                questions = data["questions"]
+            elif isinstance(data, list):
+                questions = data
+        except json.JSONDecodeError:
+            # Fallback to old plain text parsing if JSON fails
+            lines = response.strip().split("\n")
+            for line in lines:
+                # Remove numbering and clean up
+                cleaned = line.strip()
+                # Remove leading numbers like "1.", "1)", etc.
+                import re
+                cleaned = re.sub(r"^\d+[\.\)]\s*", "", cleaned)
+                if cleaned and len(cleaned) > 10:  # Reasonable question length
+                    questions.append(cleaned)
 
         # Ensure we have 1-5 questions
         questions = questions[:max_q]
