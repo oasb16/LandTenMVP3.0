@@ -119,7 +119,11 @@ class RateLimiter:
 
 # Global instances
 _token_cache = TokenCache(max_size=1000, ttl_seconds=300)  # 5 minutes
-_rate_limiter = RateLimiter(min_interval_seconds=5.0)  # 5 seconds
+# FIXED: Reduce rate limit interval for development (was 5.0s, now 1.0s)
+# Production systems can override via environment variable if needed
+import os
+_rate_limit_interval = float(os.getenv("TOKEN_RATE_LIMIT_SECONDS", "1.0"))
+_rate_limiter = RateLimiter(min_interval_seconds=_rate_limit_interval)
 
 
 def _slugify(value: str, allow_at: bool = False) -> str:

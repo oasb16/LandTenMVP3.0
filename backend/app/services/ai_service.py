@@ -17,7 +17,12 @@ def _get_openai_client() -> Optional["OpenAI"]:
     api_key = os.getenv("OPENAI_API_KEY")
     if OpenAI is None or not api_key:
         return None
-    _openai_client = OpenAI(api_key=api_key)
+    # FIXED: Configure retry limits to prevent webhook timeouts
+    _openai_client = OpenAI(
+        api_key=api_key,
+        max_retries=2,  # Limit retries for 429 errors
+        timeout=25.0,   # Fail fast if request takes > 25s
+    )
     return _openai_client
 
 

@@ -534,10 +534,12 @@ class IncidentTopicGraph:
             dynamodb = get_dynamodb_resource()
             table = dynamodb.Table("landten_incidents")
 
-            # Query DynamoDB using incident_id as PK
+            # Query DynamoDB using composite primary key (PK + SK)
+            # FIXED: Include both incident_id (PK) and tenant_id (SK) to match table schema
             response = table.get_item(
                 Key={
-                    "incident_id": f"GRAPH#{user_id}",
+                    "incident_id": f"GRAPH#{user_id}",  # PK
+                    "tenant_id": user_id,                # SK
                 }
             )
 

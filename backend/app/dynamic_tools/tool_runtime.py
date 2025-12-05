@@ -258,4 +258,10 @@ def get_dynamic_tool_runtime() -> DynamicToolRuntime:
     global _dynamic_tool_runtime
     if _dynamic_tool_runtime is None:
         _dynamic_tool_runtime = DynamicToolRuntime()
+        # FIXED: Load tools from disk at initialization
+        try:
+            _dynamic_tool_runtime.load_tools_from_disk()
+            logger.info(f"✅ Dynamic tool runtime initialized with {len(_dynamic_tool_runtime.tools)} tools")
+        except Exception as e:
+            logger.warning(f"⚠️ Could not load tools from disk: {e}")
     return _dynamic_tool_runtime
