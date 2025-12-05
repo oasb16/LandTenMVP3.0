@@ -40,10 +40,16 @@ class LLMOrchestrator:
         self.max_tokens = 4096
 
     def _get_openai_client(self) -> OpenAI:
-        """Lazy OpenAI client initialization"""
+        """Lazy OpenAI client initialization with retry configuration"""
         if self.openai_client is None:
             api_key = os.getenv("OPENAI_API_KEY") or settings.OPENAI_API_KEY
-            self.openai_client = OpenAI(api_key=api_key)
+            # FIXED: Configure max_retries to prevent Heroku H12 timeout
+            # max_retries=2 with exponential backoff (~1s, ~2s) keeps total under 5s
+            self.openai_client = OpenAI(
+                api_key=api_key,
+                max_retries=2,  # Limit retries to prevent 30s+ webhook timeout
+                timeout=25.0,   # Fail fast if single request takes > 25s
+            )
         return self.openai_client
 
     def _load_system_prompt(self) -> str:

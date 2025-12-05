@@ -152,10 +152,20 @@ async def register_stream_webhook():
                 existing_hooks.append(new_hook)
 
             # Update app settings with new/updated hooks (v2 API)
+            # FIXED: Correct API signature for StreamChat.update_app_settings()
             logging.info(f"[stream-webhook] Calling update_app_settings with {len(existing_hooks)} hook(s)...")
-            client.update_app_settings({
-                "event_hooks": existing_hooks
-            })
+            try:
+                # Try the correct v2 API format with app wrapper
+                client.update_app_settings(app={"event_hooks": existing_hooks})
+            except TypeError:
+                # Fallback: Try without app wrapper if SDK version differs
+                try:
+                    settings_response = client.update_app_settings(event_hooks=existing_hooks)
+                    logging.info(f"[stream-webhook] Used event_hooks parameter format")
+                except Exception:
+                    # Final fallback: Use patch_app_settings if available
+                    settings_response = client.patch_app_settings({"event_hooks": existing_hooks})
+                    logging.info(f"[stream-webhook] Used patch_app_settings fallback")
 
             logging.info(f"[stream-webhook] ✅ v2 webhook registered successfully")
             logging.info(f"[stream-webhook] URL: {webhook_url}")

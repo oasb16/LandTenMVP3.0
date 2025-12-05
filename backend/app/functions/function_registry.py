@@ -101,18 +101,16 @@ async def generate_chatgpt_discovery_questions(
         List of 1-5 natural, conversational questions
     """
     try:
-        from ..services.ai_chat import get_ai_service
-
-        ai_service = get_ai_service()
+        from ..services.ai_service import get_ai_response
 
         # Build context from previous answers if available
         context_text = ""
         if conversation_context:
             context_text = "\n\nPrevious conversation:\n" + "\n".join(conversation_context)
 
-        system_prompt = """You are PropertyAI. Generate discovery questions like ChatGPT—not a rigid checklist.
+        system_context = f"""You are PropertyAI. Generate discovery questions like ChatGPT—not a rigid checklist.
 Make them natural, conversational, and context-aware. No banked questions.
-Return 5 short questions max, each on a new line.
+Return {max_q} short questions max, one per line.
 
 Guidelines:
 - Ask natural follow-up questions based on context
@@ -129,10 +127,11 @@ User's description: {user_message}{context_text}
 
 Return ONLY the questions, one per line, numbered 1-{max_q}."""
 
-        response = await ai_service.generate_completion(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            max_tokens=500,
+        # Use synchronous AI service (function_registry functions are async-wrapped by orchestrator)
+        response = get_ai_response(
+            message=user_prompt,
+            persona="assistant",
+            context=system_context,
         )
 
         # Parse response into list of questions
