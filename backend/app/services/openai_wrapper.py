@@ -209,16 +209,25 @@ class OpenAIWrapper:
         self, messages: List[Dict[str, str]], max_tokens: int
     ) -> int:
         """
-        Estimate total tokens for request + response.
+        🚨 CRITICAL FIX: More accurate token estimation to prevent TPM overruns.
 
         Heuristic: ~4 characters per token for English text.
+        Response usage: Assume 80% of max_tokens (was 50%, caused underestimation).
         """
         # Estimate input tokens
         total_chars = sum(len(str(msg.get("content", ""))) for msg in messages)
         input_tokens = total_chars // 4
 
-        # Add estimated response tokens
-        estimated_total = input_tokens + (max_tokens // 2)  # Assume 50% of max used
+        # 🚨 CRITICAL FIX: Assume 80% of max_tokens will be used (more realistic)
+        # Previous 50% assumption caused 2x underestimation
+        estimated_response_tokens = int(max_tokens * 0.8)
+
+        estimated_total = input_tokens + estimated_response_tokens
+
+        logger.debug(
+            f"📊 Token estimate: {input_tokens} input + {estimated_response_tokens} output "
+            f"= {estimated_total} total"
+        )
 
         return estimated_total
 

@@ -27,6 +27,11 @@ from ..services.task_queue import get_task_queue, TaskType
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+# 🔒 IDEMPOTENCY: Track processed webhook event IDs to prevent duplicates
+_processed_events: set = set()  # In production, use Redis with TTL
+_processed_events_lock = asyncio.Lock()
+MAX_PROCESSED_EVENTS = 10000  # Limit memory usage
+
 
 def verify_webhook_signature(payload: bytes, signature: str) -> bool:
     """Verify Stream Chat webhook signature using HMAC SHA256"""
@@ -83,18 +88,26 @@ async def handle_stream_webhook(
         logger.error(f"Failed to read request body: {e}")
         raise HTTPException(status_code=400, detail=f"Failed to read request body: {e}")
 
-    # Verify webhook signature
-    if x_signature:
+    # 🔒 CRITICAL FIX: Enforce webhook signature validation (no bypass)
+    if not x_signature:
+        # Check if auth is explicitly disabled (dev/test only)
+        if os.getenv("AUTH_DISABLED") != "true":
+            logger.error("⛔ Webhook rejected: Missing x-signature header")
+            raise HTTPException(
+                status_code=401,
+                detail={"error": "Missing webhook signature", "hint": "x-signature header required"},
+            )
+        else:
+            logger.warning("⚠️ AUTH_DISABLED=true - allowing unsigned webhook (DEV MODE ONLY)")
+    else:
         logger.debug("Verifying webhook signature")
         if not verify_webhook_signature(body, x_signature):
-            logger.error("Webhook signature verification FAILED")
+            logger.error("⛔ Webhook signature verification FAILED")
             raise HTTPException(
                 status_code=401,
                 detail={"error": "Invalid webhook signature", "hint": "Check STREAM_WEBHOOK_SECRET configuration"},
             )
-        logger.debug("Signature verified successfully")
-    else:
-        logger.warning("No x-signature header present - skipping verification")
+        logger.debug("✅ Signature verified successfully")
 
     # Parse JSON payload
     try:
@@ -104,6 +117,30 @@ async def handle_stream_webhook(
     except Exception as e:
         logger.error(f"Failed to parse JSON payload: {e}")
         raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
+
+    # 🔒 IDEMPOTENCY: Check if this exact event was already processed
+    event_id = None
+    if event_type == "message.new":
+        message = payload.get("message", {})
+        event_id = message.get("id")  # Use Stream's message ID as idempotency key
+
+        if event_id:
+            async with _processed_events_lock:
+                if event_id in _processed_events:
+                    logger.warning(f"⚠️ Duplicate event detected: {event_id} - returning cached response")
+                    return {"status": "duplicate", "event_id": event_id, "message": "Already processed"}
+
+                # Mark as processing (before releasing lock to prevent race)
+                _processed_events.add(event_id)
+
+                # Prevent memory leak: trim old events if too many
+                if len(_processed_events) > MAX_PROCESSED_EVENTS:
+                    # Remove oldest 20% of events (simple FIFO)
+                    to_remove = list(_processed_events)[:2000]
+                    _processed_events.difference_update(to_remove)
+                    logger.debug(f"🧹 Trimmed processed events cache ({len(to_remove)} removed)")
+        else:
+            logger.warning("⚠️ message.new event missing message.id - cannot enforce idempotency")
 
     # Handle different event types
     if event_type == "message.new":
@@ -133,14 +170,11 @@ async def handle_stream_webhook(
 
 async def _save_graph_background(graph, user_id: str):
     """
-    Save incident graph in background without blocking webhook response.
-    Reduces webhook latency by 1-2 seconds per save operation.
+    🚨 DEPRECATED: Removed to prevent duplicate concurrent saves.
+    Incident graph is now saved ONCE at the end of message processing.
     """
-    try:
-        await asyncio.to_thread(graph.save)
-        logger.debug(f"✅ Background graph save completed for user {user_id}")
-    except Exception as e:
-        logger.error(f"❌ Background graph save failed for user {user_id}: {e}")
+    logger.warning("⚠️ _save_graph_background called but deprecated - graph saved at end of processing")
+    pass
 
 
 async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -279,7 +313,8 @@ async def handle_new_message_background(payload: Dict[str, Any]) -> Dict[str, An
         if not meta_context.persona or meta_context.persona == "tenant":
             persona = metadata.get("persona") or await _detect_persona(channel_id, bot)
             meta_context.persona = persona
-            await context_manager.save_context(user_id, channel_id, meta_context)
+            # 🚨 CRITICAL FIX: Defer save to batch writes at end of message processing
+            await context_manager.save_context(user_id, channel_id, meta_context, defer=True)
 
         logger.info(f"Persona: {meta_context.persona}, Stage: {meta_context.stage}")
 
@@ -320,9 +355,8 @@ async def handle_new_message_background(payload: Dict[str, Any]) -> Dict[str, An
             if meta_context.active_incident_id:
                 incident_graph = get_incident_graph(user_id)
 
-                # PHASE OMEGA OBJECTIVE #3: TOPIC GRAPH PERSISTENCE
-                # Save in background to avoid blocking webhook response
-                asyncio.create_task(_save_graph_background(incident_graph, user_id))
+                # 🚨 CRITICAL FIX: Removed duplicate background saves (caused concurrent write races)
+                # Graph is now saved ONCE at end of message processing
 
                 shift_result = incident_graph.detect_topic_shift(
                     new_message=message_text,
@@ -345,9 +379,7 @@ async def handle_new_message_background(payload: Dict[str, Any]) -> Dict[str, An
                             },
                         )
 
-                        # PHASE OMEGA OBJECTIVE #3: TOPIC GRAPH PERSISTENCE
-                        # Save in background to avoid blocking webhook response
-                        asyncio.create_task(_save_graph_background(incident_graph, user_id))
+                        # 🚨 CRITICAL FIX: Graph saved once at end, not here
 
         except Exception as e:
             logger.error(f"Topic graph update error: {e}", exc_info=True)
@@ -620,6 +652,29 @@ async def handle_new_message_background(payload: Dict[str, Any]) -> Dict[str, An
         duration = (time.time() - start_time) * 1000
         logger.info(f"Message processing completed in {duration:.2f}ms")
 
+        # 🚨 CRITICAL FIX: Flush all pending context writes (batched for performance)
+        try:
+            flushed_count = await context_manager.flush_pending_writes()
+            if flushed_count > 0:
+                logger.info(f"✅ Flushed {flushed_count} batched context writes")
+        except Exception as flush_error:
+            logger.error(f"Failed to flush context writes: {flush_error}", exc_info=True)
+
+        # 🚨 CRITICAL FIX: Save incident graph ONCE at end (prevents duplicate concurrent saves)
+        try:
+            from ..services.incident_topic_graph import get_incident_graph
+
+            if meta_context.active_incident_id:
+                incident_graph = get_incident_graph(user_id)
+                # Only save if graph has nodes (prevents zero-node overwrites)
+                if len(incident_graph.nodes) > 0:
+                    await asyncio.to_thread(incident_graph.save)
+                    logger.info(f"💾 Saved incident graph ({len(incident_graph.nodes)} nodes)")
+                else:
+                    logger.debug("⏭️ Skipping graph save (no nodes)")
+        except Exception as graph_error:
+            logger.error(f"Failed to save incident graph: {graph_error}", exc_info=True)
+
         return {
             "status": "success",
             "intent": orchestrator_output.intent,
@@ -629,6 +684,13 @@ async def handle_new_message_background(payload: Dict[str, Any]) -> Dict[str, An
 
     except Exception as e:
         logger.error(f"Error handling message: {e}", exc_info=True)
+
+        # 🚨 CRITICAL FIX: Flush pending writes even on error
+        try:
+            context_manager = get_meta_context_manager()
+            await context_manager.flush_pending_writes()
+        except Exception as flush_error:
+            logger.error(f"Failed to flush context writes on error: {flush_error}")
 
         # Send error message to user
         try:

@@ -66,6 +66,22 @@ class SlidingWindow:
         """Try to reserve quota. Returns True if successful."""
         return self.add(value)
 
+    def release(self, value: int):
+        """
+        🚨 CRITICAL FIX: Release quota when a reservation is not used.
+        Used when RPM is reserved but TPM check fails.
+        """
+        now = time.time()
+        with self.lock:
+            # Remove the most recent entry that matches the value
+            # (FIFO release - remove last added entry)
+            for i in range(len(self.entries) - 1, -1, -1):
+                timestamp, entry_value = self.entries[i]
+                if entry_value == value and (now - timestamp) < 5.0:  # Only release recent entries
+                    del self.entries[i]
+                    logger.debug(f"Released quota: {value}")
+                    return
+
     def get_usage(self) -> int:
         """Get current usage within window"""
         now = time.time()
@@ -171,13 +187,14 @@ class RateLimitManager:
 
         # Check TPM
         if not windows["tpm"].reserve(estimated_tokens):
-            # Release RPM reservation since we're failing
-            # (Note: SlidingWindow doesn't have release, so we'll need to handle this differently)
+            # 🚨 CRITICAL FIX: Release RPM reservation since TPM check failed
+            windows["rpm"].release(1)
             tpm_used = windows["tpm"].get_usage()
             tpm_limit = windows["tpm"].limit
             logger.warning(
                 f"⛔ TPM limit exceeded for {model}: {tpm_used}/{tpm_limit} (requested {estimated_tokens})"
             )
+            logger.debug(f"🔓 Released RPM quota after TPM failure")
             return (False, "tpm_exceeded")
 
         logger.debug(

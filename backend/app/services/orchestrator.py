@@ -40,6 +40,12 @@ class LLMOrchestrator:
         self.temperature = getattr(settings, "ORCHESTRATOR_TEMPERATURE", 0.3)
         self.max_tokens = 4096
 
+        # 🚨 CRITICAL FIX: Hard token budgets to prevent TPM explosions
+        self.MAX_INPUT_TOKENS = 10000  # Hard limit on input tokens
+        self.MAX_SYSTEM_PROMPT_TOKENS = 3000  # Trim system prompt if longer
+        self.MAX_CONVERSATION_MESSAGES = 3  # Last N messages only
+        self.MAX_DISCOVERY_HINT_TOKENS = 300  # Limit hint verbosity
+
     def _get_openai_client(self) -> OpenAI:
         """Lazy OpenAI client initialization with retry configuration"""
         if self.openai_client is None:
@@ -83,6 +89,37 @@ Always output EITHER:
 
 NEVER mix both modes.
 """
+
+    def _estimate_token_count(self, text: str) -> int:
+        """
+        🚨 CRITICAL FIX: Accurate token estimation for budget enforcement.
+        Uses character-based heuristic: ~4 chars per token for English.
+        """
+        return len(text) // 4
+
+    def _trim_to_token_budget(self, text: str, max_tokens: int) -> str:
+        """
+        🚨 CRITICAL FIX: Trim text to fit within token budget.
+        Truncates from the middle to preserve beginning and end context.
+        """
+        estimated_tokens = self._estimate_token_count(text)
+
+        if estimated_tokens <= max_tokens:
+            return text
+
+        # Truncate to fit budget (preserve beginning + end)
+        target_chars = max_tokens * 4
+        if len(text) <= target_chars:
+            return text
+
+        # Keep first 60% and last 20%, trim middle
+        keep_start = int(target_chars * 0.6)
+        keep_end = int(target_chars * 0.2)
+
+        trimmed = text[:keep_start] + f"\n\n[... {estimated_tokens - max_tokens} tokens trimmed ...]\n\n" + text[-keep_end:]
+
+        logger.warning(f"⚠️ Trimmed text from {estimated_tokens} to ~{max_tokens} tokens")
+        return trimmed
 
     def _build_tools_for_openai(self, functions: List[FunctionDefinition]) -> List[Dict[str, Any]]:
         """Convert function definitions to OpenAI tool format"""
@@ -627,64 +664,21 @@ NEVER mix both modes.
         - Natural language text (for conversation)
         """
         try:
-            # 🚀 PHASE OMEGA: Multi-Agent Pipeline Integration
-            agent_response = None
-            try:
-                from ..agents.agent_router import get_agent_router
+            # 🚨 CRITICAL FIX: Removed agent router call from orchestrator to prevent double-invocation
+            # Agent routing is now handled ONLY in ai_webhooks_v3.py (handle_new_message_background)
+            # This eliminates the circular dependency:
+            #   OLD: webhook → agent router → orchestrator → agent router (DUPLICATE!)
+            #   NEW: webhook → agent router OR orchestrator (SINGLE PATH)
 
-                agent_router = get_agent_router()
-                agent_context = {
-                    "stage": meta_context.stage,
-                    "active_incident_id": meta_context.active_incident_id,
-                    "persona": meta_context.persona,
-                    "metadata": meta_context.metadata,
-                }
-
-                agent_response = await agent_router.route(
-                    message=user_message,
-                    context=agent_context,
-                )
-
-                logger.info(f"🤖 Agent router: {agent_response.get('agent_type', 'unknown')}")
-
-                if agent_response and agent_response.get("structured_output"):
-                    structured = agent_response["structured_output"]
-                    if structured.get("function_call"):
-                        logger.info(f"🎯 Agent pre-selected function: {structured['function_call']}")
-
-            except Exception as e:
-                logger.error(f"Agent router error: {e}", exc_info=True)
-                agent_response = None
-
-            # 🚀 PHASE OMEGA: Topic Graph Integration
-            topic_shift_detected = False
-            incident_graph_context = None
-            try:
-                from ..services.incident_topic_graph import get_incident_graph
-
-                if meta_context.active_incident_id:
-                    incident_graph = get_incident_graph(meta_context.user_id)
-
-                    shift_result = incident_graph.detect_topic_shift(
-                        new_message=user_message,
-                        current_incident_id=meta_context.active_incident_id
-                    )
-
-                    topic_shift_detected = shift_result.get("is_shift", False)
-
-                    if topic_shift_detected:
-                        logger.info(f"🔀 Topic shift detected: {shift_result.get('reason')}")
-                        incident_graph_context = shift_result
-
-            except Exception as e:
-                logger.error(f"Topic graph error: {e}", exc_info=True)
+            # 🚨 CRITICAL FIX: Topic graph integration moved to webhook layer to prevent duplicate calls
+            # All topic detection now happens in handle_new_message_background() BEFORE calling orchestrator
 
             # 🚀 PHASE OMEGA: State Machine Pre-flight Check
             # Check if state machine can determine next action without LLM
             state_machine_output = self._determine_next_action(
                 meta_context=meta_context,
                 user_message=user_message,
-                agent_structured_output=agent_response.get("structured_output") if agent_response else None,
+                agent_structured_output=None,  # No agent pre-processing in orchestrator
             )
 
             if state_machine_output:
@@ -736,17 +730,8 @@ NEVER mix both modes.
             # Build user message content
             user_content_parts = []
 
-            # Add agent response as context enhancement if available
-            if agent_response and agent_response.get("agent_response"):
-                user_content_parts.append(
-                    f"**🤖 Specialized Agent Input ({agent_response.get('agent_type')}):**\n{agent_response.get('agent_response')}\n"
-                )
-
-            # Add topic shift detection results
-            if topic_shift_detected and incident_graph_context:
-                user_content_parts.append(
-                    f"**🔀 Topic Shift Detected:** User may be discussing a different incident. Details: {incident_graph_context.get('reason')}\n"
-                )
+            # 🚨 CRITICAL FIX: Removed agent response injection to prevent token explosion
+            # Agent routing happens BEFORE orchestrator, not INSIDE it
 
             # Add meta-context
             user_content_parts.append(f"**Meta-Context:**\n```json\n{self._format_meta_context(meta_context)}\n```")
@@ -765,40 +750,25 @@ NEVER mix both modes.
 
             user_content = "\n".join(user_content_parts)
 
-            # 🚨 CRITICAL: Add discovery flow detection hints
+            # 🚨 CRITICAL FIX: Shortened stage hints to reduce token usage (500+ → 100 tokens each)
             if meta_context.stage == "discovery" and meta_context.active_incident_id:
                 user_content = (
-                    f"🔍 **DISCOVERY MODE ACTIVE**\n"
-                    f"Incident {meta_context.active_incident_id} is in discovery.\n"
-                    f"Question index: {meta_context.discovery.question_index}\n"
-                    f"If user sends text answer → call record_discovery_answer\n"
-                    f"If user mentions NEW issue → pause discovery, create new incident\n\n"
+                    f"🔍 Discovery Q{meta_context.discovery.question_index} for {meta_context.active_incident_id}. "
+                    f"Record answer or create new incident if topic shift.\n"
                     + user_content
                 )
 
-            # 🚨 CRITICAL: Add discovery_complete → diagnosing mandatory flow hint
             if meta_context.stage == "discovery_complete" and meta_context.active_incident_id:
                 user_content = (
-                    f"🔬 **DISCOVERY COMPLETE → DIAGNOSIS REQUIRED**\n"
-                    f"Incident {meta_context.active_incident_id} has completed discovery.\n"
-                    f"YOU MUST CALL: start_diagnosis\n"
-                    f"DO NOT call create_incident\n"
-                    f"DO NOT respond with general.chat\n"
-                    f"MANDATORY ACTION: call start_diagnosis immediately\n\n"
+                    f"🔬 Discovery done for {meta_context.active_incident_id}. "
+                    f"MUST call start_diagnosis.\n"
                     + user_content
                 )
 
-            # 🚨 CRITICAL: Add diagnosing stage hint
             if meta_context.stage == "diagnosing" and meta_context.active_incident_id:
                 user_content = (
-                    f"🩺 **DIAGNOSING MODE ACTIVE**\n"
-                    f"Incident {meta_context.active_incident_id} is being diagnosed.\n"
-                    f"🚨 CRITICAL RULES:\n"
-                    f"  - If user says 'yes', 'ok', 'sure' → call create_work_order\n"
-                    f"  - If user says 'no' → respond with general.chat\n"
-                    f"  - If user provides details → call record_diagnosis_result\n"
-                    f"  - DO NOT call create_incident\n"
-                    f"  - DO NOT call start_diagnosis again\n\n"
+                    f"🩺 Diagnosing {meta_context.active_incident_id}. "
+                    f"User approval → create_work_order. User details → record_diagnosis_result.\n"
                     + user_content
                 )
 
@@ -808,22 +778,53 @@ NEVER mix both modes.
             # Call OpenAI API
             logger.info(f"Calling orchestrator LLM (HYBRID MODE) for intent: {meta_context.last_intent or 'initial'}")
 
+            # 🚨 CRITICAL FIX: Apply token budgets to prevent TPM explosion
+            # Trim system prompt if too verbose
+            trimmed_system_prompt = self._trim_to_token_budget(
+                self.system_prompt,
+                self.MAX_SYSTEM_PROMPT_TOKENS
+            )
+
             # Create messages
             messages = [{"role": "user", "content": user_content}]
 
-            # Add conversation history for context
-            for msg in meta_context.conversation_history[-3:]:
+            # Add conversation history for context (LIMIT TO LAST N MESSAGES)
+            history_messages = meta_context.conversation_history[-self.MAX_CONVERSATION_MESSAGES:]
+            for msg in history_messages:
                 if msg.role == "user":
-                    messages.insert(0, {"role": "user", "content": msg.text})
+                    # Trim long user messages to prevent token explosion
+                    trimmed_text = self._trim_to_token_budget(msg.text, 500)
+                    messages.insert(0, {"role": "user", "content": trimmed_text})
                 elif msg.role == "assistant":
-                    messages.insert(0, {"role": "assistant", "content": msg.text})
+                    # Trim long assistant messages
+                    trimmed_text = self._trim_to_token_budget(msg.text, 500)
+                    messages.insert(0, {"role": "assistant", "content": trimmed_text})
 
             # Ensure messages alternate and start with user
             if messages and messages[0]["role"] != "user":
                 messages = messages[1:]
 
-            # Insert system prompt as first message
-            messages.insert(0, {"role": "system", "content": self.system_prompt})
+            # Insert system prompt as first message (with trimming applied)
+            messages.insert(0, {"role": "system", "content": trimmed_system_prompt})
+
+            # 🚨 CRITICAL FIX: Final safety check - estimate total input tokens
+            total_input_text = "".join([m["content"] for m in messages])
+            total_input_tokens = self._estimate_token_count(total_input_text)
+
+            if total_input_tokens > self.MAX_INPUT_TOKENS:
+                logger.error(
+                    f"🚨 Input token budget exceeded: {total_input_tokens}/{self.MAX_INPUT_TOKENS} "
+                    f"- further trimming conversation history"
+                )
+                # Emergency trim: reduce conversation history to 1 message
+                messages = [
+                    messages[0],  # Keep system prompt
+                    messages[-1],  # Keep current user message only
+                ]
+                total_input_tokens = self._estimate_token_count("".join([m["content"] for m in messages]))
+                logger.warning(f"⚠️ Emergency trim applied, new total: {total_input_tokens} tokens")
+
+            logger.info(f"📊 Input tokens: ~{total_input_tokens}, Max output: {self.max_tokens}")
 
             # Call OpenAI with tool use (via rate-limit-aware wrapper)
             try:

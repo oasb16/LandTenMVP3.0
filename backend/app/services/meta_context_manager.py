@@ -38,6 +38,10 @@ class MetaContextManager:
         self._table = None
         self._in_memory_cache = {}  # Fallback cache
 
+        # 🚨 CRITICAL FIX: Write batching to prevent multiple DynamoDB writes per message
+        self._pending_writes = {}  # {(user_id, channel_id): MetaContext}
+        self._write_lock = asyncio.Lock()
+
     @property
     def dynamo_client(self):
         """Lazy DynamoDB client initialization"""
@@ -247,8 +251,24 @@ class MetaContextManager:
         user_id: str,
         channel_id: str,
         meta_context: MetaContext,
+        defer: bool = False,
     ) -> None:
-        """Save meta-context to DynamoDB"""
+        """
+        Save meta-context to DynamoDB.
+
+        Args:
+            user_id: User ID
+            channel_id: Channel ID
+            meta_context: Context to save
+            defer: If True, batch this write and flush later (prevents multiple writes per message)
+        """
+        if defer:
+            # 🚨 CRITICAL FIX: Defer write to batch with other updates
+            async with self._write_lock:
+                self._pending_writes[(user_id, channel_id)] = meta_context
+                logger.debug(f"⏸️ Deferred context save for {user_id}/{channel_id}")
+            return
+
         try:
             pk = f"user#{user_id}"
             sk = f"channel#{channel_id}"
@@ -279,15 +299,44 @@ class MetaContextManager:
             cache_key = f"{user_id}:{channel_id}"
             self._in_memory_cache[cache_key] = context_dict
 
-            logger.info(f"Saved context for user {user_id}, channel {channel_id}")
+            logger.info(f"💾 Saved context for user {user_id}, channel {channel_id}")
 
         except Exception as e:
             logger.error(f"Error saving context to DynamoDB: {e}", exc_info=True)
 
             # Fallback to in-memory only
+            context_dict = meta_context.model_dump(exclude_none=False)
             cache_key = f"{user_id}:{channel_id}"
             self._in_memory_cache[cache_key] = context_dict
             logger.warning(f"Saved context to in-memory cache only: {cache_key}")
+
+    async def flush_pending_writes(self) -> int:
+        """
+        🚨 CRITICAL FIX: Flush all pending deferred writes to DynamoDB.
+        Call this at the END of message processing to batch all context updates into one write.
+
+        Returns:
+            Number of contexts flushed
+        """
+        async with self._write_lock:
+            if not self._pending_writes:
+                return 0
+
+            logger.info(f"💾 Flushing {len(self._pending_writes)} pending context writes")
+
+            flushed_count = 0
+            for (user_id, channel_id), meta_context in self._pending_writes.items():
+                try:
+                    await self.save_context(user_id, channel_id, meta_context, defer=False)
+                    flushed_count += 1
+                except Exception as e:
+                    logger.error(f"Failed to flush context for {user_id}/{channel_id}: {e}")
+
+            # Clear pending writes
+            self._pending_writes.clear()
+
+            logger.info(f"✅ Flushed {flushed_count} context writes")
+            return flushed_count
 
     async def update_context(
         self,
