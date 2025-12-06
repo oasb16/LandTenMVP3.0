@@ -76,6 +76,11 @@ class TaskQueue:
             "total_shed": 0,
         }
 
+        # 🚨 CRITICAL FIX: Deduplication and concurrency control
+        self.processed_task_ids = set()  # Track completed task IDs
+        self.in_flight_task_ids = set()  # Track currently processing task IDs
+        self.task_lock = asyncio.Lock()  # Lock for deduplication checks
+
         logger.info(f"✅ Task queue initialized (max_workers={max_workers})")
 
     async def start(self):
@@ -112,7 +117,7 @@ class TaskQueue:
         channel_id: str,
     ) -> bool:
         """
-        Enqueue a task for background processing.
+        Enqueue a task for background processing with deduplication.
 
         Args:
             task_type: Type of task
@@ -121,10 +126,36 @@ class TaskQueue:
             channel_id: Channel ID
 
         Returns:
-            True if queued successfully, False if shed/rejected
+            True if queued successfully, False if shed/rejected/duplicate
         """
         import time
-        import uuid
+        import hashlib
+
+        # 🚨 CRITICAL FIX: Generate deterministic task_id from message_id (not random UUID)
+        # This enables deduplication of identical webhook events
+        message = payload.get("message", {})
+        message_id = message.get("id")
+
+        if message_id:
+            # Use message_id as deterministic key
+            task_id = f"{channel_id}:{message_id}"
+        else:
+            # Fallback: hash of payload content
+            payload_hash = hashlib.md5(str(payload).encode()).hexdigest()[:8]
+            task_id = f"{channel_id}:{payload_hash}"
+
+        # 🚨 CRITICAL FIX: Check for duplicates (already processed or in-flight)
+        async with self.task_lock:
+            if task_id in self.processed_task_ids:
+                logger.warning(f"⚠️ Duplicate task detected (already processed): {task_id}")
+                return True  # Return True to avoid error message (already handled)
+
+            if task_id in self.in_flight_task_ids:
+                logger.warning(f"⚠️ Duplicate task detected (currently processing): {task_id}")
+                return True  # Return True to avoid error message (being processed)
+
+            # Mark as in-flight
+            self.in_flight_task_ids.add(task_id)
 
         # Check queue size for load shedding
         queue_size = self.queue.qsize()
@@ -134,6 +165,9 @@ class TaskQueue:
                 f"🚨 Queue FULL ({queue_size}/{self.QUEUE_REJECT_THRESHOLD}) - REJECTING task"
             )
             self.stats["total_shed"] += 1
+            # Remove from in-flight since we're not actually queuing it
+            async with self.task_lock:
+                self.in_flight_task_ids.discard(task_id)
             await self._send_overload_message(user_id, channel_id)
             return False
 
@@ -142,6 +176,8 @@ class TaskQueue:
                 f"⚠️ Queue overloaded ({queue_size}/{self.QUEUE_SHED_THRESHOLD}) - shedding task"
             )
             self.stats["total_shed"] += 1
+            async with self.task_lock:
+                self.in_flight_task_ids.discard(task_id)
             await self._send_overload_message(user_id, channel_id)
             return False
 
@@ -152,7 +188,7 @@ class TaskQueue:
 
         # Create task
         task = Task(
-            task_id=str(uuid.uuid4())[:8],
+            task_id=task_id,  # 🚨 CRITICAL FIX: Use deterministic ID
             task_type=task_type,
             payload=payload,
             user_id=user_id,
@@ -171,6 +207,8 @@ class TaskQueue:
         except asyncio.QueueFull:
             logger.error(f"🚨 Queue full - rejecting task")
             self.stats["total_shed"] += 1
+            async with self.task_lock:
+                self.in_flight_task_ids.discard(task_id)
             await self._send_overload_message(user_id, channel_id)
             return False
 
@@ -198,6 +236,18 @@ class TaskQueue:
                         f"[Worker {worker_id}] ✅ Task {task.task_id} completed"
                     )
 
+                    # 🚨 CRITICAL FIX: Mark task as processed and remove from in-flight
+                    async with self.task_lock:
+                        self.in_flight_task_ids.discard(task.task_id)
+                        self.processed_task_ids.add(task.task_id)
+
+                        # Prevent memory leak: limit processed_task_ids size
+                        if len(self.processed_task_ids) > 10000:
+                            # Remove oldest 20% of entries
+                            to_remove = list(self.processed_task_ids)[:2000]
+                            self.processed_task_ids.difference_update(to_remove)
+                            logger.debug(f"🧹 Trimmed processed_task_ids cache ({len(to_remove)} removed)")
+
                 except Exception as e:
                     logger.error(
                         f"[Worker {worker_id}] ❌ Task {task.task_id} failed: {e}",
@@ -211,11 +261,17 @@ class TaskQueue:
                         logger.info(
                             f"[Worker {worker_id}] Retrying task {task.task_id} (attempt {task.retries}/{task.max_retries})"
                         )
+                        # Keep in in_flight_task_ids during retry
                         await self.queue.put(task)
                     else:
                         logger.error(
                             f"[Worker {worker_id}] Task {task.task_id} exhausted retries"
                         )
+                        # Remove from in-flight after final failure
+                        async with self.task_lock:
+                            self.in_flight_task_ids.discard(task.task_id)
+                            self.processed_task_ids.add(task.task_id)  # Mark as processed (failed)
+
                         await self._send_error_message(
                             task.user_id, task.channel_id, task.task_type
                         )
