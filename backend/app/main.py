@@ -85,7 +85,33 @@ async def startup_tasks():
     for w in warnings:
         logging.warning(f"[STARTUP] {w}")
 
-    logging.info("[STARTUP] ✅ Backend Ready (V2 + V3)")
+    # ✅ Task 4: Start Task Queue for Async Processing
+    logging.info("[STARTUP] Starting async task queue...")
+    try:
+        from .services.task_queue import start_task_queue
+        await start_task_queue()
+        logging.info("[STARTUP] ✅ Task queue started")
+    except Exception as e:
+        logging.error(f"[STARTUP] ❌ Failed to start task queue: {e}", exc_info=True)
+
+    logging.info("[STARTUP] ✅ Backend Ready (V2 + V3 + Async Queue)")
+
+
+@app.on_event("shutdown")
+async def shutdown_tasks():
+    """
+    Shutdown tasks:
+    1. Stop task queue gracefully
+    """
+    logging.info("[SHUTDOWN] Stopping task queue...")
+    try:
+        from .services.task_queue import stop_task_queue
+        await stop_task_queue()
+        logging.info("[SHUTDOWN] ✅ Task queue stopped")
+    except Exception as e:
+        logging.error(f"[SHUTDOWN] ❌ Error stopping task queue: {e}", exc_info=True)
+
+    logging.info("[SHUTDOWN] ✅ Graceful shutdown complete")
 
 
 async def register_stream_webhook():

@@ -18,6 +18,7 @@ from ..models.orchestrator_schemas import (
     FunctionCall,
 )
 from ..config.settings import settings
+from ..services.openai_wrapper import get_openai_wrapper, RateLimitExceeded
 
 logger = logging.getLogger(__name__)
 
@@ -824,14 +825,25 @@ NEVER mix both modes.
             # Insert system prompt as first message
             messages.insert(0, {"role": "system", "content": self.system_prompt})
 
-            # Call OpenAI with tool use
-            response = client.chat.completions.create(
-                model=self.model,
-                max_tokens=self.max_tokens,
-                temperature=self.temperature,
-                messages=messages,
-                tools=tools if tools else None,
-            )
+            # Call OpenAI with tool use (via rate-limit-aware wrapper)
+            try:
+                openai_wrapper = get_openai_wrapper()
+                response = await openai_wrapper.chat_completion(
+                    model=self.model,
+                    max_tokens=self.max_tokens,
+                    temperature=self.temperature,
+                    messages=messages,
+                    tools=tools if tools else None,
+                )
+            except RateLimitExceeded as e:
+                logger.error(f"⛔ Rate limit exceeded in orchestrator: {e}")
+                return OrchestratorOutput(
+                    intent="rate_limited",
+                    reasoning=f"Rate limit exceeded: {str(e)}",
+                    context_updates=ContextUpdates(),
+                    function_call=FunctionCall(name=None, arguments={}),
+                    response_to_user="I'm experiencing high demand right now. Let me get back to you in a moment.",
+                )
 
             # Extract response
             message = response.choices[0].message
@@ -926,17 +938,23 @@ NEVER mix both modes.
             else:
                 messages.append({"role": "user", "content": user_message})
 
-            response = client.chat.completions.create(
-                model=self.model,
-                max_tokens=1024,
-                temperature=self.temperature,
-                messages=messages,
-            )
+            # Use wrapper for rate-limit awareness
+            try:
+                openai_wrapper = get_openai_wrapper()
+                response = await openai_wrapper.chat_completion(
+                    model=self.model,
+                    max_tokens=1024,
+                    temperature=self.temperature,
+                    messages=messages,
+                )
 
-            if response.choices and response.choices[0].message.content:
-                return response.choices[0].message.content
+                if response.choices and response.choices[0].message.content:
+                    return response.choices[0].message.content
 
-            return "I'm not sure how to respond to that."
+                return "I'm not sure how to respond to that."
+
+            except RateLimitExceeded:
+                return "I'm experiencing high demand right now. Please try again in a moment."
 
         except Exception as e:
             logger.error(f"Simple orchestrator error: {e}", exc_info=True)

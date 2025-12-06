@@ -1,4 +1,5 @@
 import os,json
+import asyncio
 from typing import Optional
 
 try:  # pragma: no cover - optional dependency
@@ -11,6 +12,10 @@ _openai_client: Optional["OpenAI"] = None
 
 
 def _get_openai_client() -> Optional["OpenAI"]:
+    """
+    DEPRECATED: Use get_openai_wrapper() instead for rate-limit awareness.
+    Kept for backwards compatibility only.
+    """
     global _openai_client
     if _openai_client is not None:
         return _openai_client
@@ -26,14 +31,15 @@ def _get_openai_client() -> Optional["OpenAI"]:
     return _openai_client
 
 
-def get_ai_response(message: str,
-                    persona: Optional[str] = None,
-                    context: Optional[str] = None,
-                    n_refine: int = 3) -> str:
+async def get_ai_response_async(message: str,
+                                 persona: Optional[str] = None,
+                                 context: Optional[str] = None,
+                                 n_refine: int = 3) -> str:
     """
-    TRM-style recursive reasoning loop for a stateless OpenAI API.
-    Each loop refines the previous reasoning (z) and answer (y).
+    ASYNC version with rate-limit awareness.
+    TRM-style recursive reasoning loop using OpenAI wrapper.
     """
+    from .openai_wrapper import get_openai_wrapper, RateLimitExceeded
 
     system_prompt = os.getenv(
         "AGENT_SYSTEM_PROMPT",
@@ -45,10 +51,7 @@ def get_ai_response(message: str,
     if context:
         system_prompt += f" Context: {context}."
 
-    client = _get_openai_client()
-    if not client:
-        return f"(Agent offline) {message[::-1]}"
-
+    openai_wrapper = get_openai_wrapper()
     model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     temperature = float(os.getenv("OPENAI_TEMPERATURE", "0.3"))
 
@@ -66,66 +69,76 @@ information. If so, summarize and propose next actions.
 Chat:
 {message}
 """
-    def normalize_role(msg_type: str) -> str:
-        """
-        Normalize StreamChat message types to valid OpenAI chat roles.
-        """
-        if not msg_type:
-            return "user"
-        msg_type = msg_type.lower()
-        mapping = {
-            "regular": "user",
-            "agent": "assistant", 
-            "ai-message": "assistant",
-            "card": "assistant",
-            "system": "system",
-        }
-        return mapping.get(msg_type, "user")
-    
-    for step in range(n_refine):
-        completion = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": normalize_role("regular"), "content": prompt + "\n\nRespond strictly in JSON format."},
-            ],
-            temperature=temperature,
-            response_format={"type": "json_object"},
-        )
-
-        # FIXED: completion.choices is already a list, not JSON string
-        raw_content = completion.choices[0].message.content
-        print(f"[agent-debug] step={step+1} raw_content={raw_content}")
 
         try:
-            data = json.loads(raw_content)
-            reasoning = data.get("reasoning", reasoning)
-
-            # 🧠 Select best field, supporting lists/dicts
-            answer = (
-                data.get("answer")
-                or data.get("reply")
-                or data.get("summary")
-                or data.get("next_actions")
-                or data.get("response")
-                or data
-                or answer
+            response = await openai_wrapper.chat_completion(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt + "\n\nRespond strictly in JSON format."},
+                ],
+                temperature=temperature,
+                max_tokens=1024,
             )
 
-            # 🔄 Normalize lists/dicts to string for display
-            if isinstance(answer, (list, dict)):
-                answer = json.dumps(answer, indent=2)
+            raw_content = response.choices[0].message.content
+
+            try:
+                data = json.loads(raw_content)
+                reasoning = data.get("reasoning", reasoning)
+
+                # Select best field
+                answer = (
+                    data.get("answer")
+                    or data.get("reply")
+                    or data.get("summary")
+                    or data.get("next_actions")
+                    or data.get("response")
+                    or data
+                    or answer
+                )
+
+                # Normalize lists/dicts to string
+                if isinstance(answer, (list, dict)):
+                    answer = json.dumps(answer, indent=2)
+
+            except Exception as e:
+                reasoning += "\n" + str(raw_content)
+                answer = str(raw_content).strip()
+
+        except RateLimitExceeded:
+            return "(Agent temporarily unavailable due to high demand. Please try again shortly.)"
 
         except Exception as e:
-            print(f"[agent-debug] JSON parse error: {e}")
-            reasoning += "\n" + str(raw_content)
-            answer = str(raw_content).strip()
+            return f"(Agent error: {str(e)})"
 
-    # ✅ Safe text fallback
+    # Safe text fallback
     if not isinstance(answer, str):
         answer = json.dumps(answer, indent=2)
     if not answer.strip():
         answer = "(Agent found no actionable reply.)"
 
     return answer.strip()
+
+
+def get_ai_response(message: str,
+                    persona: Optional[str] = None,
+                    context: Optional[str] = None,
+                    n_refine: int = 3) -> str:
+    """
+    DEPRECATED: Use get_ai_response_async() instead.
+
+    Synchronous wrapper that calls async version.
+    Kept for backwards compatibility with synchronous code.
+    """
+    # Check if we're already in an async context
+    try:
+        loop = asyncio.get_running_loop()
+        # We're in an async context - cannot use asyncio.run()
+        # This is a problem - synchronous code called from async context
+        # For now, return error message
+        return "(Agent error: Synchronous AI call from async context. Use get_ai_response_async() instead.)"
+    except RuntimeError:
+        # No running loop - we can use asyncio.run()
+        return asyncio.run(get_ai_response_async(message, persona, context, n_refine))
 
