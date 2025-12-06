@@ -9,6 +9,7 @@ from abc import ABC, abstractmethod
 from openai import OpenAI
 
 from ..config.settings import settings
+from ..services.openai_wrapper import get_openai_wrapper, RateLimitExceeded
 
 logger = logging.getLogger(__name__)
 
@@ -87,9 +88,10 @@ class BaseAgent(ABC):
         else:
             messages.append({"role": "user", "content": user_message})
 
-        # Call LLM
+        # Call LLM (via rate-limit-aware wrapper)
         try:
-            response = client.chat.completions.create(
+            openai_wrapper = get_openai_wrapper()
+            response = await openai_wrapper.chat_completion(
                 model=self.model,
                 max_tokens=2048,
                 temperature=self.temperature,
@@ -108,6 +110,15 @@ class BaseAgent(ABC):
                     "model": self.model,
                     "tokens_used": response.usage.total_tokens if hasattr(response, 'usage') else None,
                 },
+            }
+
+        except RateLimitExceeded as e:
+            logger.error(f"⛔ [{self.agent_name}] Rate limit exceeded: {e}")
+            return {
+                "success": False,
+                "agent": self.agent_name,
+                "error": "rate_limit_exceeded",
+                "message": "I'm experiencing high demand right now. Please try again in a moment.",
             }
 
         except Exception as e:

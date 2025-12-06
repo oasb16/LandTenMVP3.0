@@ -127,8 +127,9 @@ User's description: {user_message}{context_text}
 
 Return ONLY the questions, one per line, numbered 1-{max_q}."""
 
-        # Use synchronous AI service (function_registry functions are async-wrapped by orchestrator)
-        response = get_ai_response(
+        # Use async AI service with rate-limit awareness
+        from ..services.ai_service import get_ai_response_async
+        response = await get_ai_response_async(
             message=user_prompt,
             persona="assistant",
             context=system_context,

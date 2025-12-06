@@ -22,6 +22,7 @@ from ..functions.function_registry import (
     execute_function,
 )
 from ..models.orchestrator_schemas import MetaContext, FunctionResult
+from ..services.task_queue import get_task_queue, TaskType
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -106,7 +107,7 @@ async def handle_stream_webhook(
 
     # Handle different event types
     if event_type == "message.new":
-        logger.info("Routing to handle_new_message()")
+        logger.info("Routing to handle_new_message() [ASYNC QUEUE MODE]")
         return await handle_new_message(payload)
 
     elif event_type == "message.updated":
@@ -144,8 +145,99 @@ async def _save_graph_background(graph, user_id: str):
 
 async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Universal message handler using LLM orchestrator.
-    No hardcoded logic - all decisions made by LLM.
+    FIRE-AND-FORGET webhook handler - NEVER blocks.
+
+    This is the NEW async-queue-based handler that:
+    1. Sends immediate fallback message
+    2. Queues task for background processing
+    3. Returns 200 OK in <200ms
+
+    This prevents H12 timeouts from 429 rate-limit errors.
+    """
+    try:
+        # Extract message details
+        message = payload.get("message", {})
+        user = payload.get("user", {})
+        channel_id = payload.get("channel_id", "unknown")
+        user_id = user.get("id", "unknown")
+        message_text = message.get("text", "")
+
+        logger.info(f"========== ASYNC QUEUE MODE: New Message ==========")
+        logger.info(f"Channel: {channel_id}")
+        logger.info(f"User: {user_id} ({user.get('name', 'unknown')})")
+        logger.info(f"Text: {message_text[:120]}")
+
+        # Ignore bot messages
+        if user.get("is_bot") or str(user_id).startswith("ai-"):
+            logger.debug(f"Ignoring bot message from: {user_id}")
+            return {"status": "ignored", "reason": "bot_message"}
+
+        # Check if agent is enabled
+        metadata = message.get("metadata", {}) or {}
+        agent_enabled = metadata.get("agentEnabled", True)
+        if agent_enabled is False:
+            logger.debug("Agent disabled via metadata for this message")
+            return {"status": "ignored", "reason": "agent_disabled"}
+
+        # IMMEDIATE: Send "processing" message to user
+        bot = get_bot()
+        bot.send_ai_message(
+            channel_id=channel_id,
+            persona="tenant",
+            text="I'm working on your request, one moment...",
+            metadata={"type": "processing", "actionable": False},
+        )
+
+        # Queue task for background processing
+        task_queue = get_task_queue()
+        queued = await task_queue.enqueue(
+            task_type=TaskType.PROCESS_MESSAGE,
+            payload=payload,
+            user_id=user_id,
+            channel_id=channel_id,
+        )
+
+        if queued:
+            logger.info(f"✅ Task queued for background processing")
+            return {
+                "status": "queued",
+                "message": "Processing in background",
+                "user_id": user_id,
+                "channel_id": channel_id,
+            }
+        else:
+            logger.error(f"❌ Task queue full - load shedding")
+            return {
+                "status": "shed",
+                "message": "Queue full, sent overload message",
+                "user_id": user_id,
+                "channel_id": channel_id,
+            }
+
+    except Exception as e:
+        logger.error(f"Error in async queue handler: {e}", exc_info=True)
+
+        # Send error message to user
+        try:
+            bot = get_bot()
+            bot.send_ai_message(
+                channel_id=channel_id,
+                persona="tenant",
+                text="I encountered an error processing your request. Please try again or contact support.",
+                metadata={"error": True},
+            )
+        except:
+            pass
+
+        return {"status": "error", "error": str(e)}
+
+
+async def handle_new_message_background(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    BACKGROUND processing handler - runs in task queue worker.
+
+    This is the ORIGINAL handler logic, now moved to background.
+    Called by task queue workers, NOT by webhooks directly.
     """
     try:
         start_time = time.time()
@@ -750,19 +842,133 @@ async def get_bot_status():
 
         return {
             "status": "operational",
-            "version": "3.0-orchestrator",
+            "version": "3.0-orchestrator-async",
             "model": orchestrator.model,
             "temperature": orchestrator.temperature,
-            "architecture": "llm-driven",
+            "architecture": "llm-driven-async-queue",
             "features": [
                 "universal_orchestrator",
                 "function_calling",
                 "meta_context_management",
                 "multi_turn_reasoning",
                 "dynamic_intent_classification",
+                "rate_limit_management",
+                "async_task_queue",
+                "load_shedding",
             ],
         }
 
     except Exception as e:
         logger.error(f"Error getting bot status: {e}", exc_info=True)
+        return {"status": "error", "error": str(e)}
+
+
+@router.get("/ai/rate-limits")
+async def get_rate_limits():
+    """Get current rate-limit status for all models"""
+    try:
+        from ..services.rate_limit_manager import get_rate_limit_manager
+
+        rate_limiter = get_rate_limit_manager()
+        all_quotas = rate_limiter.get_all_quotas()
+
+        return {
+            "status": "ok",
+            "quotas": {
+                model: {
+                    "rpm_used": quota.rpm_used,
+                    "rpm_limit": quota.rpm_limit,
+                    "rpm_available": quota.rpm_available,
+                    "tpm_used": quota.tpm_used,
+                    "tpm_limit": quota.tpm_limit,
+                    "tpm_available": quota.tpm_available,
+                    "utilization_pct": round(quota.utilization_pct, 2),
+                }
+                for model, quota in all_quotas.items()
+            },
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting rate limits: {e}", exc_info=True)
+        return {"status": "error", "error": str(e)}
+
+
+@router.get("/ai/queue-status")
+async def get_queue_status():
+    """Get current task queue status"""
+    try:
+        task_queue = get_task_queue()
+        stats = task_queue.get_stats()
+
+        return {
+            "status": "ok",
+            "queue_size": stats["queue_size"],
+            "max_size": stats["max_size"],
+            "workers": stats["workers"],
+            "running": stats["running"],
+            "utilization_pct": round(stats["utilization_pct"], 2),
+            "stats": stats["stats"],
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting queue status: {e}", exc_info=True)
+        return {"status": "error", "error": str(e)}
+
+
+@router.get("/ai/health")
+async def get_health():
+    """Comprehensive health check including rate limits and queue"""
+    try:
+        from ..services.rate_limit_manager import get_rate_limit_manager
+
+        orchestrator = get_orchestrator()
+        rate_limiter = get_rate_limit_manager()
+        task_queue = get_task_queue()
+
+        all_quotas = rate_limiter.get_all_quotas()
+        queue_stats = task_queue.get_stats()
+
+        # Calculate overall health
+        max_utilization = max(quota.utilization_pct for quota in all_quotas.values())
+        queue_utilization = queue_stats["utilization_pct"]
+
+        health_status = "healthy"
+        if max_utilization > 95 or queue_utilization > 95:
+            health_status = "critical"
+        elif max_utilization > 80 or queue_utilization > 80:
+            health_status = "warning"
+
+        return {
+            "status": health_status,
+            "version": "3.0-async",
+            "timestamp": time.time(),
+            "orchestrator": {
+                "model": orchestrator.model,
+                "temperature": orchestrator.temperature,
+            },
+            "rate_limits": {
+                "max_utilization_pct": round(max_utilization, 2),
+                "models": {
+                    model: {
+                        "utilization_pct": round(quota.utilization_pct, 2),
+                        "rpm_available": quota.rpm_available,
+                        "tpm_available": quota.tpm_available,
+                    }
+                    for model, quota in all_quotas.items()
+                },
+            },
+            "queue": {
+                "size": queue_stats["queue_size"],
+                "max_size": queue_stats["max_size"],
+                "utilization_pct": round(queue_utilization, 2),
+                "workers": queue_stats["workers"],
+                "running": queue_stats["running"],
+                "total_processed": queue_stats["stats"]["total_processed"],
+                "total_failed": queue_stats["stats"]["total_failed"],
+                "total_shed": queue_stats["stats"]["total_shed"],
+            },
+        }
+
+    except Exception as e:
+        logger.error(f"Error in health check: {e}", exc_info=True)
         return {"status": "error", "error": str(e)}
