@@ -18,7 +18,7 @@ export default async function LandingPage() {
           A unified command center for landlords, tenants, and contractors. Coordinate maintenance,
           chat in real time, and automate follow-ups with AI assistance.
         </p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl mx-auto">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 max-w-3xl mx-auto">
           <Link
             href="/ai-support"
             className="inline-flex items-center justify-center rounded-md bg-gradient-to-r from-blue-600 to-purple-600 px-6 py-3 font-semibold text-white hover:from-blue-700 hover:to-purple-700 transition shadow-lg"
@@ -45,6 +45,12 @@ export default async function LandingPage() {
           >
             📚 View Legacy MVP2.0
           </a>
+          <Link
+            href="/workflow"
+            className="inline-flex items-center justify-center rounded-md bg-blue-600 px-6 py-3 font-semibold text-white hover:bg-blue-500 transition shadow-lg col-span-1 sm:col-span-2"
+          >
+            ⚡ Full Workflow Experience
+          </Link>
         </div>
         <div className="grid sm:grid-cols-3 gap-6 text-left">
           <div className="rounded-lg border border-slate-700 p-4 bg-slate-900/60">

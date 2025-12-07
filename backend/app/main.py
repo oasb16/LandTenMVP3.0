@@ -2,9 +2,20 @@
 LandTen MVP3 Backend - Main Application Entry Point
 V3 Architecture with V2 Fallback
 """
+import logging
+import os
+import time
+import uuid
+
+import boto3
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from mangum import Mangum
+from sentry_sdk.integrations.fastapi import FastApiIntegration
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from backend.config.production import get_config
+from backend.middleware.monitoring import monitor_requests
 from .routes import (
     chat,
     incident,
@@ -25,8 +36,6 @@ from .routes import (
     ai_webhooks_v3,  # ✅ V3 ORCHESTRATOR
     ai_analytics,    # ✅ ANALYTICS DASHBOARD
 )
-from starlette.middleware.base import BaseHTTPMiddleware
-import time, uuid, logging
 from .utils.rate_limit import SimpleRateLimiter
 from .utils.startup_checks import validate_env
 
@@ -42,6 +51,27 @@ app = FastAPI(
     description="V3 LLM-Driven Orchestrator with V2 Fallback",
     version="3.0.0",
 )
+
+# Initialize Sentry for error tracking
+try:
+    import sentry_sdk
+
+    if os.getenv("SENTRY_DSN"):
+        sentry_sdk.init(
+            dsn=os.getenv("SENTRY_DSN"),
+            integrations=[FastApiIntegration()],
+            environment=os.getenv("ENVIRONMENT", "production"),
+        )
+except Exception as sentry_exc:
+    logging.warning(f"[Sentry] Failed to initialize: {sentry_exc}")
+
+# Production configuration
+config = None
+try:
+    config = get_config()
+    config.validate()
+except Exception as config_exc:
+    logging.warning(f"[config] Production config validation skipped: {config_exc}")
 
 def get_base_url():
     import os
@@ -218,9 +248,12 @@ async def register_stream_webhook():
 
 
 # CORS Configuration
-import os
 cors_origins_env = os.getenv("BACKEND_CORS_ORIGINS", "*")
-origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
+origins = (
+    config.ALLOWED_ORIGINS
+    if config
+    else [o.strip() for o in cors_origins_env.split(",") if o.strip()]
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -253,6 +286,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(LoggingMiddleware)
+app.middleware("http")(monitor_requests)
 
 
 # Rate Limiting Middleware
@@ -314,13 +348,36 @@ def root():
 
 
 @app.get("/health")
-def health():
+async def health():
+    """Production health check for monitoring."""
     return {
         "status": "healthy",
         "version": "3.0.0",
         "architecture": "hybrid",
         "endpoints": ["v2", "v3"],
+        "aws_configured": bool(os.getenv("AWS_ACCESS_KEY_ID")),
+        "stripe_configured": bool(os.getenv("STRIPE_SECRET_KEY")),
+        "dynamodb": await check_dynamodb_connection(),
+        "s3": await check_s3_connection(),
     }
+
+
+async def check_dynamodb_connection():
+    try:
+        dynamodb = boto3.client("dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1"))
+        dynamodb.list_tables()
+        return "connected"
+    except Exception as e:
+        return f"error: {str(e)}"
+
+
+async def check_s3_connection():
+    try:
+        s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
+        s3.list_buckets()
+        return "connected"
+    except Exception as e:
+        return f"error: {str(e)}"
 
 
 # Lambda Handler
