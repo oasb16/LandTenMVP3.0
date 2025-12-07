@@ -91,3 +91,4 @@ yarl==1.22.0
 zappa==0.60.2
 sentry-sdk==2.17.0
 python-multipart==0.0.9
+email-validator==2.2.0
