@@ -837,13 +837,20 @@ NEVER mix both modes.
                     tools=tools if tools else None,
                 )
             except RateLimitExceeded as e:
+                from ..utils.creative_messages import get_rate_limit_message
+
                 logger.error(f"⛔ Rate limit exceeded in orchestrator: {e}")
+
+                # Check if this is urgent based on incident urgency
+                is_urgent = meta_context.metadata.get("urgency") in ["high", "emergency", "urgent"]
+                persona = meta_context.persona or "tenant"
+
                 return OrchestratorOutput(
                     intent="rate_limited",
                     reasoning=f"Rate limit exceeded: {str(e)}",
                     context_updates=ContextUpdates(),
                     function_call=FunctionCall(name=None, arguments={}),
-                    response_to_user="I'm experiencing high demand right now. Let me get back to you in a moment.",
+                    response_to_user=get_rate_limit_message(persona, urgent=is_urgent),
                 )
 
             # Extract response
@@ -955,7 +962,8 @@ NEVER mix both modes.
                 return "I'm not sure how to respond to that."
 
             except RateLimitExceeded:
-                return "I'm experiencing high demand right now. Please try again in a moment."
+                from ..utils.creative_messages import get_rate_limit_message
+                return get_rate_limit_message("tenant", urgent=False)
 
         except Exception as e:
             logger.error(f"Simple orchestrator error: {e}", exc_info=True)

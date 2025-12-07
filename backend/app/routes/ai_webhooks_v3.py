@@ -214,11 +214,13 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
             return {"status": "ignored", "reason": "agent_disabled"}
 
         # IMMEDIATE: Send "processing" message to user
+        from ..utils.creative_messages import get_processing_message
+
         bot = get_bot()
         bot.send_ai_message(
             channel_id=channel_id,
             persona="tenant",
-            text="I'm working on your request, one moment...",
+            text=get_processing_message("tenant"),
             metadata={"type": "processing", "actionable": False},
         )
 
