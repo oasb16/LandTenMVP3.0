@@ -8,6 +8,7 @@ from mangum import Mangum
 from .routes import (
     chat,
     incident,
+    incidents,       # ✅ PHASE 2A: Tenant incident reporting flow
     job,
     agent,
     thread,
@@ -267,6 +268,7 @@ async def rate_limit_middleware(request, call_next):
 # ✅ REGISTER ROUTES (V2 + V3)
 app.include_router(chat.router)
 app.include_router(incident.router)
+app.include_router(incidents.router)  # ✅ PHASE 2A: Tenant incident reporting flow
 app.include_router(job.router)
 app.include_router(agent.router)
 app.include_router(thread.router)
