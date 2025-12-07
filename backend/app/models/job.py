@@ -6,14 +6,14 @@ Posted → Bidding → Awarded → Scheduled → In Progress → Completed → P
 """
 
 from datetime import datetime
-from enum import StrEnum
+from enum import Enum
 from typing import List, Optional
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
 
-class JobStatus(StrEnum):
+class JobStatus(str, Enum):
     """Status progression for jobs."""
     POSTED = "posted"  # Job posted, open for bids
     BIDDING = "bidding"  # Actively accepting bids
@@ -24,7 +24,7 @@ class JobStatus(StrEnum):
     PAID = "paid"  # Payment processed, job closed
 
 
-class PaymentStatus(StrEnum):
+class PaymentStatus(str, Enum):
     """Payment status for jobs."""
     PENDING = "pending"  # No payment initiated
     AUTHORIZED = "authorized"  # Payment authorized but not captured

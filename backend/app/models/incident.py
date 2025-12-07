@@ -6,14 +6,14 @@ Tenant reports → Discovery → Landlord review → Job creation → Completion
 """
 
 from datetime import datetime
-from enum import StrEnum
+from enum import Enum
 from typing import List, Optional
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
 
-class IncidentStatus(StrEnum):
+class IncidentStatus(str, Enum):
     """Status progression for incidents."""
     CREATED = "created"  # Initial state when tenant reports
     DISCOVERY = "discovery"  # AI is gathering additional information
@@ -23,7 +23,7 @@ class IncidentStatus(StrEnum):
     CANCELLED = "cancelled"  # Incident cancelled (duplicate, resolved directly, etc.)
 
 
-class IncidentCategory(StrEnum):
+class IncidentCategory(str, Enum):
     """Categories of maintenance incidents."""
     PLUMBING = "plumbing"
     ELECTRICAL = "electrical"
@@ -36,7 +36,7 @@ class IncidentCategory(StrEnum):
     OTHER = "other"
 
 
-class IncidentUrgency(StrEnum):
+class IncidentUrgency(str, Enum):
     """Urgency levels for incidents."""
     ROUTINE = "routine"  # Can wait, normal maintenance
     URGENT = "urgent"  # Should be addressed within days

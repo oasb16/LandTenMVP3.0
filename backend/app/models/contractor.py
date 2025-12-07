@@ -6,14 +6,14 @@ They receive payments via Stripe Connect.
 """
 
 from datetime import datetime
-from enum import StrEnum
+from enum import Enum
 from typing import List, Optional
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, EmailStr
 
 
-class ContractorStatus(StrEnum):
+class ContractorStatus(str, Enum):
     """Contractor account status."""
     PENDING = "pending"  # Registration submitted, awaiting verification
     ACTIVE = "active"  # Verified and can bid on jobs
@@ -21,7 +21,7 @@ class ContractorStatus(StrEnum):
     DEACTIVATED = "deactivated"  # Account deactivated
 
 
-class InsuranceStatus(StrEnum):
+class InsuranceStatus(str, Enum):
     """Insurance verification status."""
     NOT_VERIFIED = "not_verified"
     PENDING = "pending"

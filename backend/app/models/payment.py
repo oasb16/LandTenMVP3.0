@@ -7,14 +7,14 @@ Landlord pays gross amount → Platform takes 15% → Contractor receives 85%
 
 from datetime import datetime
 from decimal import Decimal
-from enum import StrEnum
+from enum import Enum
 from typing import Optional
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
 
-class PaymentStatus(StrEnum):
+class PaymentStatus(str, Enum):
     """Payment processing status."""
     PENDING = "pending"  # Payment not yet initiated
     AUTHORIZED = "authorized"  # Payment authorized but not captured

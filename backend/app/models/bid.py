@@ -6,14 +6,14 @@ Landlord reviews and accepts/rejects bids.
 """
 
 from datetime import datetime
-from enum import StrEnum
+from enum import Enum
 from typing import Optional
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
 
-class BidStatus(StrEnum):
+class BidStatus(str, Enum):
     """Status progression for bids."""
     SUBMITTED = "submitted"  # Bid submitted by contractor
     UNDER_REVIEW = "under_review"  # Landlord is reviewing
