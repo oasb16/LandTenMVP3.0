@@ -316,7 +316,8 @@ async def create_incident(
             from ..services.incident_topic_graph import get_incident_graph
             incident_graph = get_incident_graph(user_id)
             incident_graph.add_incident(incident_id, title, category, description)
-            incident_graph.save()
+            # 🚨 CRITICAL FIX: Removed duplicate save
+            # Graph is saved once at end of message processing (ai_webhooks_v3.py)
         except Exception as e:
             logger.error(f"Error adding incident to topic graph: {e}")
 
@@ -1265,7 +1266,8 @@ async def create_work_order(
             incident_graph = get_incident_graph(user_id)
             incident_graph.add_node("work_order", job_id, {"incident_id": incident_id, "title": title})
             incident_graph.add_edge(incident_id, job_id, "work_order_created")
-            incident_graph.save()
+            # 🚨 CRITICAL FIX: Removed duplicate save
+            # Graph is saved once at end of message processing (ai_webhooks_v3.py)
         except Exception as e:
             logger.error(f"Error adding work order to topic graph: {e}")
 
