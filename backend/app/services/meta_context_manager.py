@@ -15,6 +15,7 @@ Key responsibilities:
 CRITICAL: This is the single source of truth for conversational context.
 """
 from typing import Dict, Any, Optional, List
+import asyncio
 import boto3
 from datetime import datetime, timedelta
 from decimal import Decimal
