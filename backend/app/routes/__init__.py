@@ -1,6 +1,7 @@
 from . import (
     chat,
     incident,
+    incidents,
     job,
     agent,
     thread,
@@ -16,6 +17,7 @@ from . import (
 __all__ = [
     "chat",
     "incident",
+    "incidents",
     "job",
     "agent",
     "thread",
