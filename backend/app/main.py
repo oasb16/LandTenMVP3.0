@@ -11,7 +11,6 @@ import boto3
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from mangum import Mangum
-from sentry_sdk.integrations.fastapi import FastApiIntegration
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from backend.config.production import get_config
@@ -55,6 +54,7 @@ app = FastAPI(
 # Initialize Sentry for error tracking
 try:
     import sentry_sdk
+    from sentry_sdk.integrations.fastapi import FastApiIntegration
 
     if os.getenv("SENTRY_DSN"):
         sentry_sdk.init(
@@ -63,7 +63,7 @@ try:
             environment=os.getenv("ENVIRONMENT", "production"),
         )
 except Exception as sentry_exc:
-    logging.warning(f"[Sentry] Failed to initialize: {sentry_exc}")
+    logging.warning(f"[Sentry] Failed to initialize or missing dependency: {sentry_exc}")
 
 # Production configuration
 config = None
