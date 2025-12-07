@@ -1,0 +1,6 @@
+backend/
+docs/
+scripts/
+tests/
+*.md
+!README.md
