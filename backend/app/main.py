@@ -12,6 +12,7 @@ from .routes import (
     job,
     jobs,            # ✅ PHASE 2B: Landlord job creation and bid management
     contractors,     # ✅ PHASE 2C: Contractor work scheduling and completion
+    payments,        # ✅ PHASE 2D: Stripe payment processing with 15% platform fee
     agent,
     thread,
     agent_summary,
@@ -274,6 +275,7 @@ app.include_router(incidents.router)  # ✅ PHASE 2A: Tenant incident reporting 
 app.include_router(job.router)
 app.include_router(jobs.router)  # ✅ PHASE 2B: Landlord job creation and bid management
 app.include_router(contractors.router)  # ✅ PHASE 2C: Contractor work scheduling and completion
+app.include_router(payments.router)  # ✅ PHASE 2D: Stripe payment processing with 15% platform fee
 app.include_router(agent.router)
 app.include_router(thread.router)
 app.include_router(agent_summary.router)
