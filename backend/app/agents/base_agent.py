@@ -113,12 +113,26 @@ class BaseAgent(ABC):
             }
 
         except RateLimitExceeded as e:
+            from ..utils.creative_messages import get_rate_limit_message
+
             logger.error(f"⛔ [{self.agent_name}] Rate limit exceeded: {e}")
+
+            # Map agent name to persona
+            persona_map = {
+                "TenantAgent": "tenant",
+                "LandlordAgent": "landlord",
+                "ContractorAgent": "contractor",
+            }
+            persona = persona_map.get(self.agent_name, "tenant")
+
+            # Check urgency from context if available
+            is_urgent = context and context.get("urgency") in ["high", "emergency", "urgent"] if context else False
+
             return {
                 "success": False,
                 "agent": self.agent_name,
                 "error": "rate_limit_exceeded",
-                "message": "I'm experiencing high demand right now. Please try again in a moment.",
+                "message": get_rate_limit_message(persona, urgent=is_urgent),
             }
 
         except Exception as e:
