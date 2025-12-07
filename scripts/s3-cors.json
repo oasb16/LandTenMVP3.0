@@ -1,0 +1,28 @@
+{
+  "CORSRules": [
+    {
+      "AllowedOrigins": [
+        "http://localhost:3000",
+        "http://localhost:8000",
+        "https://*.landten.app",
+        "https://landten.app"
+      ],
+      "AllowedMethods": [
+        "GET",
+        "PUT",
+        "POST",
+        "DELETE",
+        "HEAD"
+      ],
+      "AllowedHeaders": [
+        "*"
+      ],
+      "ExposeHeaders": [
+        "ETag",
+        "Content-Length",
+        "Content-Type"
+      ],
+      "MaxAgeSeconds": 3000
+    }
+  ]
+}
