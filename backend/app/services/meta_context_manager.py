@@ -163,12 +163,8 @@ class MetaContextManager:
                     meta_context.metadata["incident_graph"] = graph_dict
                     logger.debug(f"📊 Attached incident graph with {len(incident_graph.nodes)} nodes")
 
-                    # PHASE OMEGA OBJECTIVE #3: TOPIC GRAPH PERSISTENCE
-                    # Save graph after attaching
-                    try:
-                        incident_graph.save()
-                    except Exception as save_err:
-                        logger.error(f"Failed to save incident graph: {save_err}")
+                    # 🚨 CRITICAL FIX: Removed duplicate save during load
+                    # Graph is saved once at end of message processing (ai_webhooks_v3.py)
 
                     # Sync active incident to graph if missing
                     if meta_context.active_incident_id:
@@ -185,11 +181,8 @@ class MetaContextManager:
                                         incident.get("category", ""),
                                         incident.get("description", "")
                                     )
-                                    # PHASE OMEGA OBJECTIVE #3: TOPIC GRAPH PERSISTENCE
-                                    try:
-                                        incident_graph.save()
-                                    except Exception as save_err:
-                                        logger.error(f"Failed to save incident graph after sync: {save_err}")
+                                    # 🚨 CRITICAL FIX: Removed duplicate save during sync
+                                    # Graph is saved once at end of message processing
                             except Exception as e:
                                 logger.error(f"Error syncing incident to graph: {e}")
 
@@ -231,8 +224,8 @@ class MetaContextManager:
             updated_at=now,
         )
 
-        # Save to DynamoDB
-        await self.save_context(user_id, channel_id, meta_context)
+        # Save to DynamoDB (deferred to batch with other writes)
+        await self.save_context(user_id, channel_id, meta_context, defer=True)
 
         # Initialize incident graph in metadata
         try:
@@ -381,8 +374,8 @@ class MetaContextManager:
         # Create updated context
         updated_context = MetaContext(**context_dict)
 
-        # Save to DynamoDB
-        await self.save_context(user_id, channel_id, updated_context)
+        # Save to DynamoDB (deferred to batch with other writes)
+        await self.save_context(user_id, channel_id, updated_context, defer=True)
 
         logger.info(f"Updated context for user {user_id}, channel {channel_id}: {list(updates.keys())}")
 
@@ -449,11 +442,8 @@ class MetaContextManager:
                 )
                 logger.info(f"📊 Added incident {incident_id} to topic graph")
 
-                # PHASE OMEGA OBJECTIVE #3: TOPIC GRAPH PERSISTENCE
-                try:
-                    incident_graph.save()
-                except Exception as save_err:
-                    logger.error(f"Failed to save incident graph: {save_err}")
+                # 🚨 CRITICAL FIX: Removed duplicate save
+                # Graph is saved once at end of message processing
         except Exception as e:
             logger.error(f"Error adding incident to topic graph: {e}", exc_info=True)
 
@@ -700,11 +690,8 @@ class MetaContextManager:
 
             await self.set_active_incident(user_id, channel_id, new_incident_id)
 
-            # PHASE OMEGA OBJECTIVE #3: TOPIC GRAPH PERSISTENCE
-            try:
-                incident_graph.save()
-            except Exception as save_err:
-                logger.error(f"Failed to save incident graph after switch: {save_err}")
+            # 🚨 CRITICAL FIX: Removed duplicate save
+            # Graph is saved once at end of message processing
 
             logger.info(f"🔀 Switched active incident to {new_incident_id}: {reason}")
 

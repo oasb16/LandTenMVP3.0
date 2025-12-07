@@ -438,6 +438,11 @@ class IncidentTopicGraph:
             retry_count: Current retry attempt (internal)
             max_retries: Maximum number of retries
         """
+        # 🚨 CRITICAL FIX: Don't save empty graphs (wastes DynamoDB writes)
+        if len(self.nodes) == 0:
+            logger.debug(f"⏭️ Skipping save of empty incident graph for user {self.user_id}")
+            return
+
         try:
             from ..services.dynamo_service import get_dynamodb_resource
 
@@ -454,9 +459,11 @@ class IncidentTopicGraph:
             print("===== user_id: ========", self.user_id)
 
             # Save to DynamoDB with PK/SK pattern
+            # SCHEMA FIX: landten_incidents has PK=user_id, SK=incident_id
             item = {
-                "incident_id": f"GRAPH#{self.user_id}",  # Use incident_id as PK
-                "tenant_id": self.user_id,
+                "user_id": self.user_id,  # PK: user_id
+                "incident_id": f"GRAPH#{self.user_id}",  # SK: incident_id with GRAPH# prefix
+                "tenant_id": self.user_id,  # Keep for compatibility
                 "graph_data": graph_data_serialized,  # Store dict directly, no json.dumps
                 "node_count": len(self.nodes),
                 "edge_count": len(self.edges),
@@ -468,7 +475,6 @@ class IncidentTopicGraph:
                 "category": "system",
                 "severity": "low",
                 "urgency": "routine",
-                "user_id": self.user_id
             }
 
             table.put_item(Item=item)
@@ -535,11 +541,11 @@ class IncidentTopicGraph:
             table = dynamodb.Table("landten_incidents")
 
             # Query DynamoDB using composite primary key (PK + SK)
-            # FIXED: Include both incident_id (PK) and tenant_id (SK) to match table schema
+            # SCHEMA FIX: landten_incidents has PK=user_id, SK=incident_id
             response = table.get_item(
                 Key={
-                    "incident_id": f"GRAPH#{user_id}",  # PK
-                    "tenant_id": user_id,                # SK
+                    "user_id": user_id,                  # PK
+                    "incident_id": f"GRAPH#{user_id}",  # SK
                 }
             )
 
