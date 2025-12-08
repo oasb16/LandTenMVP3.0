@@ -65,6 +65,11 @@ class ResponseHandler:
         logger.info(f"ResponseHandler initialized with prompt: {self.prompt_id}")
         logger.info(f"Loaded {len(self.tools)} tools for function calling")
 
+        # DEBUG: Log first tool structure to verify format
+        if self.tools:
+            import json
+            logger.info(f"🔍 DEBUG: First tool structure: {json.dumps(self.tools[0], indent=2)}")
+
     async def process_message(
         self,
         channel_id: str,
