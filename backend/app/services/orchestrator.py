@@ -210,13 +210,26 @@ NEVER mix both modes.
             # If response looks like JSON, parse it as a tool call
             # If response is natural language, treat it as conversational response
 
-            is_json = response_text.startswith("{") or response_text.startswith("```")
+            # 🚨 FIX: Extract JSON from response even if there's explanatory text before it
+            # LLM sometimes outputs: "explanation text\n```json\n{...}\n```"
+            json_block_match = None
+            if "```json" in response_text or "```\n{" in response_text:
+                import re
+                # Extract JSON from code block
+                json_block_pattern = r'```(?:json)?\s*\n([\s\S]*?)\n```'
+                match = re.search(json_block_pattern, response_text)
+                if match:
+                    json_block_match = match.group(1).strip()
+                    logger.info(f"📦 Extracted JSON from code block (ignoring explanatory text)")
+                    response_text = json_block_match
+
+            is_json = response_text.startswith("{") or json_block_match is not None
 
             # If NOT JSON, check if it's intentional natural language
             if not is_json:
                 # Check for natural language patterns
                 natural_indicators = [
-                    response_text.lower().startswith(("hi", "hello", "i ", "that ", "got it", "sure", "we're")),
+                    response_text.lower().startswith(("hi", "hello", "that ", "got it", "sure", "we're")),
                     "?" in response_text,
                     len(response_text.split()) > 3 and not response_text.startswith("{"),
                 ]
@@ -236,7 +249,7 @@ NEVER mix both modes.
                     raise ValueError(f"Response is neither valid JSON nor natural language: {response_text[:50]}")
 
             # === JSON PARSING MODE ===
-            # Handle markdown code blocks
+            # Handle markdown code blocks at start of response
             if response_text.startswith("```"):
                 lines = response_text.split("\n")
                 # Strip ```json or ``` from first line
