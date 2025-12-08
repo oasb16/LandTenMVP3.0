@@ -157,9 +157,9 @@ NEVER mix both modes.
                 "question_index": meta_context.discovery.question_index if meta_context.discovery else 0,
                 "questions": meta_context.discovery.questions if meta_context.discovery else [],
                 "answers": meta_context.discovery.answers if meta_context.discovery else {},
-                # is_active should be True when stage is "discovery", regardless of active_incident_id
+                # is_active should be True when stage is "discovery" or when there are questions in progress
                 # This supports both pre-incident discovery (incident_id=None) and incident-based discovery
-                "is_active": meta_context.stage == "discovery" or (meta_context.discovery and meta_context.discovery.is_active),
+                "is_active": meta_context.stage == "discovery" or (meta_context.discovery and len(meta_context.discovery.questions) > 0),
             },
 
             "last_intent": meta_context.last_intent,
