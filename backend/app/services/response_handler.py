@@ -1,0 +1,379 @@
+"""
+ResponseHandler - OpenAI Responses API Integration
+
+Replaces dual-agent flow (TenantAgent + Orchestrator) with single unified flow.
+Handles empathetic conversation + function calling in one Responses API call.
+"""
+
+import os
+import json
+import logging
+from typing import Dict, Any, List, Optional
+import openai
+
+from .conversation_manager import get_conversation_manager
+from ..functions.function_registry import execute_function
+from .stream_bot import get_bot
+
+logger = logging.getLogger(__name__)
+
+
+class ResponseHandler:
+    """
+    Handles message processing using OpenAI Responses API.
+
+    Replaces the old dual-agent architecture:
+    - OLD: User → TenantAgent (empathy) → Orchestrator (functions) → Execute
+    - NEW: User → Single Response (empathy + functions) → Execute tools
+
+    Key Features:
+    - Single unified prompt (empathy + function calling)
+    - Explicit tool loop management
+    - State management via Conversations API
+    - Preserves empathetic responses
+    """
+
+    def __init__(self):
+        """Initialize ResponseHandler"""
+        self.openai_client = openai.Client(api_key=os.getenv("OPENAI_API_KEY"))
+        self.conversation_manager = get_conversation_manager()
+        self.bot = get_bot()
+        self.prompt_id = os.getenv("LANDTEN_PROMPT_ID")
+
+        if not self.prompt_id:
+            raise ValueError(
+                "LANDTEN_PROMPT_ID environment variable not set. "
+                "Please create prompt in OpenAI dashboard and set the ID."
+            )
+
+        logger.info(f"ResponseHandler initialized with prompt: {self.prompt_id}")
+
+    async def process_message(
+        self,
+        channel_id: str,
+        user_id: str,
+        message: str,
+        persona: str = "tenant"
+    ) -> Dict[str, Any]:
+        """
+        Process user message using Responses API.
+
+        This is the main entry point that replaces the old dual-agent flow.
+
+        Flow:
+        1. Get or create conversation
+        2. Call Responses API with user message
+        3. Extract assistant message + tool calls
+        4. Send assistant message to user FIRST (preserve empathy!)
+        5. If tool calls exist, execute them in a loop
+        6. Update conversation state
+
+        Args:
+            channel_id: Slack channel ID
+            user_id: User identifier
+            message: User's message text
+            persona: User role (tenant, landlord, contractor)
+
+        Returns:
+            dict: Result with success, message, tool_calls_executed, etc.
+        """
+        try:
+            logger.info(f"Processing message for channel: {channel_id}, user: {user_id}")
+
+            # 1. Get or create conversation
+            conversation_id = await self.conversation_manager.get_or_create_conversation(
+                channel_id=channel_id,
+                user_id=user_id,
+                persona=persona
+            )
+
+            logger.info(f"Using conversation: {conversation_id}")
+
+            # 2. Prepare input items
+            input_items = [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": message
+                        }
+                    ]
+                }
+            ]
+
+            # 3. Handle tool loop (call Response API + execute tools repeatedly)
+            result = await self.handle_tool_loop(
+                conversation_id=conversation_id,
+                prompt_id=self.prompt_id,
+                input_items=input_items,
+                channel_id=channel_id,
+                user_id=user_id,
+                max_iterations=5
+            )
+
+            logger.info(f"Message processing complete: {result.get('tool_calls_executed', 0)} tool calls executed")
+
+            return {
+                "success": True,
+                "conversation_id": conversation_id,
+                "tool_calls_executed": result.get("tool_calls_executed", 0),
+                "final_message": result.get("final_message"),
+            }
+
+        except Exception as e:
+            logger.error(f"Error processing message: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": str(e),
+                "tool_calls_executed": 0
+            }
+
+    async def handle_tool_loop(
+        self,
+        conversation_id: str,
+        prompt_id: str,
+        input_items: List[Dict[str, Any]],
+        channel_id: str,
+        user_id: str,
+        max_iterations: int = 5
+    ) -> Dict[str, Any]:
+        """
+        Handle explicit tool loop for Responses API.
+
+        Responses API doesn't auto-loop like Assistants did, so we must:
+        1. Call responses.create()
+        2. Check for tool calls
+        3. If tool calls exist, execute them
+        4. Add tool outputs as new input items
+        5. Repeat until no more tool calls (or max iterations reached)
+
+        Args:
+            conversation_id: OpenAI Conversation ID
+            prompt_id: Prompt ID from dashboard
+            input_items: Initial input items (user message or tool outputs)
+            channel_id: Slack channel ID
+            user_id: User identifier
+            max_iterations: Maximum tool loop iterations (default: 5)
+
+        Returns:
+            dict: Result with tool_calls_executed count and final_message
+        """
+        iteration = 0
+        total_tool_calls = 0
+        current_input = input_items
+        final_message = None
+
+        while iteration < max_iterations:
+            iteration += 1
+            logger.info(f"Tool loop iteration {iteration}/{max_iterations}")
+
+            # Call Responses API
+            try:
+                response = self.openai_client.responses.create(
+                    prompt={"id": prompt_id},
+                    conversation=conversation_id,
+                    input=current_input
+                )
+
+                logger.info(f"Response received: {response.id}")
+
+            except Exception as e:
+                logger.error(f"Responses API error: {e}", exc_info=True)
+                # Send error message to user
+                self.bot.send_ai_message(
+                    channel_id=channel_id,
+                    persona="tenant",
+                    text="I encountered an error processing your request. Please try again.",
+                    metadata={"error": str(e)}
+                )
+                break
+
+            # Extract response content
+            content = await self.extract_response_content(response)
+
+            # Send assistant message to user FIRST (preserve empathy!)
+            if content.get("assistant_message"):
+                final_message = content["assistant_message"]
+                self.bot.send_ai_message(
+                    channel_id=channel_id,
+                    persona="tenant",
+                    text=final_message,
+                    metadata={"response_id": response.id}
+                )
+                logger.info(f"Sent assistant message to user")
+
+            # Check for tool calls
+            tool_calls = content.get("tool_calls", [])
+
+            if not tool_calls:
+                # No more tool calls - we're done
+                logger.info(f"No tool calls in response, loop complete")
+                break
+
+            logger.info(f"Found {len(tool_calls)} tool calls to execute")
+
+            # Execute tool calls
+            tool_outputs = await self.execute_tool_calls(
+                tool_calls=tool_calls,
+                context={
+                    "channel_id": channel_id,
+                    "user_id": user_id,
+                    "conversation_id": conversation_id
+                }
+            )
+
+            total_tool_calls += len(tool_calls)
+
+            # Prepare next iteration input (tool outputs)
+            current_input = tool_outputs
+
+        if iteration >= max_iterations:
+            logger.warning(f"Tool loop reached max iterations ({max_iterations})")
+            self.bot.send_ai_message(
+                channel_id=channel_id,
+                persona="tenant",
+                text="I'm processing your request. This might take a moment...",
+                metadata={"max_iterations_reached": True}
+            )
+
+        return {
+            "tool_calls_executed": total_tool_calls,
+            "final_message": final_message,
+            "iterations": iteration
+        }
+
+    async def execute_tool_calls(
+        self,
+        tool_calls: List[Dict[str, Any]],
+        context: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """
+        Execute tool calls and convert results to tool_output items.
+
+        Integrates with existing function_registry.execute_function().
+
+        Args:
+            tool_calls: List of tool call objects from Response
+            context: Execution context (channel_id, user_id, etc.)
+
+        Returns:
+            list: Tool output items ready for next Responses API call
+        """
+        tool_outputs = []
+
+        for tool_call in tool_calls:
+            try:
+                # Extract function details
+                tool_call_id = tool_call.get("id")
+                function_name = tool_call.get("function", {}).get("name")
+                arguments_str = tool_call.get("function", {}).get("arguments", "{}")
+
+                # Parse arguments
+                try:
+                    arguments = json.loads(arguments_str)
+                except json.JSONDecodeError:
+                    logger.error(f"Failed to parse arguments: {arguments_str}")
+                    arguments = {}
+
+                logger.info(f"Executing tool: {function_name} with args: {arguments}")
+
+                # Execute function via function_registry
+                result = await execute_function(
+                    function_name=function_name,
+                    arguments=arguments,
+                    context=context
+                )
+
+                # Convert FunctionResult to tool_output format
+                output_data = {
+                    "success": result.success,
+                    "data": result.data,
+                    "message": result.message,
+                    "error": result.error
+                }
+
+                tool_outputs.append({
+                    "type": "tool_output",
+                    "tool_call_id": tool_call_id,
+                    "output": json.dumps(output_data)
+                })
+
+                logger.info(f"Tool {function_name} executed: success={result.success}")
+
+            except Exception as e:
+                logger.error(f"Error executing tool call: {e}", exc_info=True)
+
+                # Add error output
+                tool_outputs.append({
+                    "type": "tool_output",
+                    "tool_call_id": tool_call.get("id"),
+                    "output": json.dumps({
+                        "success": False,
+                        "error": str(e),
+                        "message": "Tool execution failed"
+                    })
+                })
+
+        return tool_outputs
+
+    async def extract_response_content(
+        self,
+        response: Any
+    ) -> Dict[str, Any]:
+        """
+        Extract assistant message and tool calls from Response object.
+
+        Args:
+            response: OpenAI Response object
+
+        Returns:
+            dict: {
+                "assistant_message": str or None,
+                "tool_calls": list of tool call objects
+            }
+        """
+        content = {
+            "assistant_message": None,
+            "tool_calls": []
+        }
+
+        # Iterate through output items
+        for item in response.output:
+            # Extract assistant messages
+            if item.type == "message" and item.role == "assistant":
+                # Get text from content
+                if item.content and len(item.content) > 0:
+                    for content_item in item.content:
+                        if hasattr(content_item, "text"):
+                            content["assistant_message"] = content_item.text
+                            break
+                        elif content_item.get("type") == "text":
+                            content["assistant_message"] = content_item.get("text", "")
+                            break
+
+            # Extract tool calls
+            elif item.type == "function_call" or hasattr(item, "function"):
+                content["tool_calls"].append({
+                    "id": item.id,
+                    "type": "function",
+                    "function": {
+                        "name": item.function.name,
+                        "arguments": item.function.arguments
+                    }
+                })
+
+        return content
+
+
+# Singleton instance
+_response_handler = None
+
+
+def get_response_handler():
+    """Get or create ResponseHandler singleton"""
+    global _response_handler
+    if _response_handler is None:
+        _response_handler = ResponseHandler()
+    return _response_handler
