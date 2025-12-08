@@ -187,7 +187,7 @@ class MetaContextManager:
                 context_data.pop("embedding", None)
                 context_data.pop("embedding_model", None)
                 meta_context.embedding = None
-                logger.info(f"Loaded context for user {user_id}, channel {channel_id}, context_data {context_data}, meta_context {meta_context} ")
+                logger.info(f"Loaded context for user {user_id}, channel {channel_id} ")
                 return meta_context
 
             elif create_if_missing:
