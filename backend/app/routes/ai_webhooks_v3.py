@@ -505,20 +505,69 @@ async def handle_new_message_background(payload: Dict[str, Any]) -> Dict[str, An
                         "questions": function_result.data["questions"],
                         "question_index": function_result.data.get("question_index", 0),
                         "incident_id": function_result.data.get("incident_id"),
+                        "is_active": True,
+                        "answers": function_result.data.get("discovery_data", {}).get("answers", {}),
                     }
+                    # Mark stage as discovery (for pre-incident flow)
+                    if not meta_context.active_incident_id:
+                        context_updates["stage"] = "discovery"
                     logger.info(f"✅ Updated discovery state: Q{function_result.data.get('question_index', 0) + 1}/{len(function_result.data['questions'])}")
 
-                # Update discovery question index if advancing
+                # Update discovery question index and answers if advancing
                 if "next_question_index" in function_result.data:
                     current_discovery = meta_context.discovery.model_dump()
                     current_discovery["question_index"] = function_result.data["next_question_index"]
+                    current_discovery["is_active"] = True
+
+                    # Update answers if provided (pre-incident flow)
+                    if function_result.data.get("discovery_data"):
+                        current_discovery["answers"] = function_result.data["discovery_data"].get("answers", {})
+                        current_discovery["questions"] = function_result.data["discovery_data"].get("questions", current_discovery.get("questions", []))
+
                     context_updates["discovery"] = current_discovery
                     logger.info(f"✅ Advanced to discovery Q{function_result.data['next_question_index'] + 1}")
 
-                # Check if discovery is complete
+                # 🚨 NEW: Check if discovery is complete
                 if function_result.data.get("discovery_complete"):
-                    context_updates["stage"] = "discovery_complete"
-                    logger.info("✅ Discovery complete, transitioning to discovery_complete stage")
+                    # For pre-incident discovery: call create_incident_from_discovery
+                    if not meta_context.active_incident_id and function_result.data.get("discovery_data"):
+                        logger.info("✅ Pre-incident discovery complete - creating incident from Q&A")
+
+                        # Get the last user message (initial issue report)
+                        initial_message = text if text else "Maintenance issue reported"
+
+                        # Build discovery_data with initial message
+                        discovery_data = function_result.data["discovery_data"]
+                        discovery_data["initial_message"] = initial_message
+
+                        # Call create_incident_from_discovery
+                        from ..functions.function_registry import create_incident_from_discovery
+                        incident_result = await create_incident_from_discovery(
+                            channel_id=channel_id,
+                            user_id=user_id,
+                            discovery_data=discovery_data,
+                            property_id=meta_context.metadata.get("property_id"),
+                        )
+
+                        if incident_result.success:
+                            incident_id = incident_result.data.get("incident_id")
+                            context_updates["active_incident_id"] = incident_id
+                            context_updates["stage"] = "detected"  # Incident created, move to detected
+                            context_updates["discovery"] = {
+                                "is_active": False,
+                                "question_index": 0,
+                                "questions": [],
+                                "answers": {},
+                                "incident_id": None,
+                            }
+                            logger.info(f"✅ Created incident {incident_id} from discovery")
+                            function_sent_user_message = True  # create_incident_from_discovery sends message
+                        else:
+                            logger.error(f"Failed to create incident from discovery: {incident_result.error}")
+                    else:
+                        # Traditional flow: incident exists, mark as discovery_complete
+                        context_updates["stage"] = "discovery_complete"
+                        logger.info("✅ Discovery complete, transitioning to discovery_complete stage")
 
                 # Apply all context updates
                 if context_updates:

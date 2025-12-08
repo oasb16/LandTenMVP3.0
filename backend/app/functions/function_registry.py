@@ -824,39 +824,54 @@ Return ONLY a JSON object with these exact fields:
 
 
 async def record_discovery_answer(
-    incident_id: str,
-    question_index: int,
     answer: str,
+    question_index: int,
     channel_id: str,
     user_id: str,
-    total_questions: Optional[int] = None,
+    incident_id: Optional[str] = None,
+    total_questions: Optional[int] = 5,
 ) -> FunctionResult:
     """
-    Record discovery answer and dynamically regenerate next question based on conversation context.
-    ChatGPT-style: each follow-up question is context-aware of previous answers.
+    Record discovery answer and ask next question.
+
+    🚨 NEW: Works with OR without incident_id
+    - WITH incident_id: Traditional flow (save to incident in DynamoDB)
+    - WITHOUT incident_id: Pre-incident discovery (answers stored in meta_context)
     """
     try:
         dynamo = get_dynamo_service()
         bot = get_bot()
 
-        # Get incident to determine total questions if not provided
-        incident = dynamo.get_incident(incident_id, user_id)
-        if not incident:
-            return FunctionResult(
-                success=False,
-                error="Incident not found",
-                message=f"Cannot record answer: incident {incident_id} not found",
-            )
+        # Initialize variables
+        incident = None
+        stored_questions = []
+        existing_answers = {}
+        category = "general"
+        severity = "medium"
+        description = ""
 
-        # Get stored questions from incident
-        discovery_responses = incident.get("discovery_responses", {})
-        stored_questions = discovery_responses.get("questions", [])
+        if incident_id:
+            # Traditional flow: get incident from DynamoDB
+            incident = dynamo.get_incident(incident_id, user_id)
+            if not incident:
+                return FunctionResult(
+                    success=False,
+                    error="Incident not found",
+                    message=f"Cannot record answer: incident {incident_id} not found",
+                )
+
+            # Get stored questions and answers from incident
+            discovery_responses = incident.get("discovery_responses", {})
+            stored_questions = discovery_responses.get("questions", [])
+            existing_answers = incident.get("discovery_answers", {})
+            category = incident.get("category", "general")
+            severity = incident.get("severity", "medium")
+            description = incident.get("description", "")
 
         if total_questions is None:
             total_questions = len(stored_questions) if stored_questions else 5
 
-        # Save answer to DynamoDB incident
-        existing_answers = incident.get("discovery_answers", {})
+        # Save answer
         if isinstance(existing_answers, dict):
             existing_answers[f"q{question_index}"] = answer
         else:
@@ -864,51 +879,46 @@ async def record_discovery_answer(
 
         next_index = question_index + 1
 
-        # Save answer + increment discovery_index
-        update_success = dynamo.update_incident_status(
-            incident_id=incident_id,
-            status="discovery",  # Keep in discovery state
-            user_id=user_id,
-            discovery_answers=existing_answers,
-            discovery_index=next_index,
-        )
+        # Save answer to incident (if incident exists)
+        if incident_id and incident:
+            update_success = dynamo.update_incident_status(
+                incident_id=incident_id,
+                status="discovery",  # Keep in discovery state
+                user_id=user_id,
+                discovery_answers=existing_answers,
+                discovery_index=next_index,
+            )
 
-        if not update_success:
-            logger.error(f"Failed to save discovery answer for {incident_id}")
+            if not update_success:
+                logger.error(f"Failed to save discovery answer for {incident_id}")
 
         user_message_sent = True
 
         # Check if discovery is complete
         if next_index >= total_questions:
-            logger.info(f"✅ Discovery completed for incident {incident_id}")
+            logger.info(f"✅ Discovery completed (Q{next_index}/{total_questions})")
 
-            # Transition to discovery_complete
-            dynamo.update_incident_status(
-                incident_id=incident_id,
-                status="discovery_complete",
-                user_id=user_id,
-            )
-
-            # Send completion message
-            completion_msg = (
-                f"Perfect! I have all the information I need. Let me analyze the issue and determine the best course of action."
-            )
-
-            preview = collapse_text(completion_msg, limit=500)
-            expandable_text = (
-                f"<ai-expanded>\n"
-                f"RAW:\n{completion_msg}\n\n"
-                f"PREVIEW:\n{preview}\n\n"
-                f"EXPANDABLE: true\n"
-                f"</ai-expanded>"
-            )
+            if incident_id:
+                # Traditional flow: mark incident as discovery_complete
+                dynamo.update_incident_status(
+                    incident_id=incident_id,
+                    status="discovery_complete",
+                    user_id=user_id,
+                )
+                completion_msg = "Perfect! I have all the information I need. Let me analyze the issue and determine the best course of action."
+                next_stage = "diagnosing"
+            else:
+                # Pre-incident flow: signal to create incident
+                completion_msg = "Perfect! I have all the information I need. Let me create the incident for you now."
+                next_stage = "create_incident"
 
             bot.send_ai_message(
                 channel_id=channel_id,
                 persona="tenant",
-                text=expandable_text,
+                text=completion_msg,
                 metadata={
                     "incident_id": incident_id,
+                    "discovery_complete": True,
                     "actionable": True,
                 },
             )
@@ -920,16 +930,19 @@ async def record_discovery_answer(
                     "question_index": question_index,
                     "answer": answer,
                     "discovery_complete": True,
-                    "next_stage": "diagnosing",
+                    "next_stage": next_stage,
                     "user_message_sent": user_message_sent,
+                    # For pre-incident flow: return discovery data
+                    "discovery_data": {
+                        "questions": stored_questions,
+                        "answers": existing_answers,
+                    } if not incident_id else None,
                 },
-                message="Discovery questions completed, moving to diagnosis",
+                message="Discovery questions completed" + (", ready to create incident" if not incident_id else ", moving to diagnosis"),
             )
 
         # Dynamically regenerate next question based on conversation context
-        category = incident.get("category", "general")
-        severity = incident.get("severity", "medium")
-        description = incident.get("description", "")
+        # category, severity, description already set above (from incident or defaults)
 
         # Build conversation context from previous Q&A
         conversation_context = []
@@ -955,13 +968,17 @@ async def record_discovery_answer(
         if new_questions:
             # Keep existing questions and append new ones
             updated_questions = stored_questions[:next_index] + new_questions
-            discovery_responses["questions"] = updated_questions
-            dynamo.update_incident_status(
-                incident_id=incident_id,
-                status="discovery",
-                user_id=user_id,
-                discovery_responses=discovery_responses,
-            )
+            stored_questions = updated_questions
+
+            # Save to incident if exists
+            if incident_id and incident:
+                discovery_responses["questions"] = updated_questions
+                dynamo.update_incident_status(
+                    incident_id=incident_id,
+                    status="discovery",
+                    user_id=user_id,
+                    discovery_responses=discovery_responses,
+                )
 
             next_question = new_questions[0]
         elif next_index < len(stored_questions):
@@ -973,23 +990,14 @@ async def record_discovery_answer(
 
         # ChatGPT-style conversational next question
         full_message = (
-            f"Thanks for that information. \n\n"
+            f"Thanks for that information.\n\n"
             f"**Question {next_index + 1} of {total_questions}:** {next_question}"
-        )
-
-        preview = collapse_text(full_message, limit=500)
-        expandable_text = (
-            f"<ai-expanded>\n"
-            f"RAW:\n{full_message}\n\n"
-            f"PREVIEW:\n{preview}\n\n"
-            f"EXPANDABLE: true\n"
-            f"</ai-expanded>"
         )
 
         bot.send_ai_message(
             channel_id=channel_id,
             persona="tenant",
-            text=expandable_text,
+            text=full_message,  # Plain text, no expandable
             metadata={
                 "incident_id": incident_id,
                 "question_index": next_index,
@@ -998,7 +1006,10 @@ async def record_discovery_answer(
             },
         )
 
-        logger.info(f"✅ Sent dynamically generated discovery question {next_index+1}/{total_questions} for incident {incident_id}")
+        if incident_id:
+            logger.info(f"✅ Sent discovery question {next_index+1}/{total_questions} for incident {incident_id}")
+        else:
+            logger.info(f"✅ Sent pre-incident discovery question {next_index+1}/{total_questions}")
 
         return FunctionResult(
             success=True,
@@ -1009,6 +1020,11 @@ async def record_discovery_answer(
                 "discovery_complete": False,
                 "next_question_index": next_index,
                 "user_message_sent": user_message_sent,
+                # For pre-incident flow: return updated discovery data
+                "discovery_data": {
+                    "questions": stored_questions,
+                    "answers": existing_answers,
+                } if not incident_id else None,
             },
             message=f"Discovery answer {question_index} recorded, next question sent",
         )
