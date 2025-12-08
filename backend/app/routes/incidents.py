@@ -580,11 +580,12 @@ async def get_my_incidents(
         # Get tenant user ID
         tenant_id = get_current_user_from_token(current_user)
 
-        # Query incidents by user_id (which is the partition key for tenant incidents)
+        # Query incidents by user_id
+        # Note: Using scan with filter since table may have incident_id as primary key
         try:
-            # Use query on partition key for efficient retrieval
-            response = incidents_table.query(
-                KeyConditionExpression="user_id = :uid",
+            # Use scan with filter expression to find all incidents for this user
+            response = incidents_table.scan(
+                FilterExpression="user_id = :uid OR tenant_id = :uid",
                 ExpressionAttributeValues={":uid": tenant_id}
             )
 
@@ -592,8 +593,8 @@ async def get_my_incidents(
 
             # Handle pagination if there are more items
             while 'LastEvaluatedKey' in response:
-                response = incidents_table.query(
-                    KeyConditionExpression="user_id = :uid",
+                response = incidents_table.scan(
+                    FilterExpression="user_id = :uid OR tenant_id = :uid",
                     ExpressionAttributeValues={":uid": tenant_id},
                     ExclusiveStartKey=response['LastEvaluatedKey']
                 )
@@ -607,11 +608,8 @@ async def get_my_incidents(
 
             logger.info(f"[incidents] ✅ Found {len(incidents)} incidents for {tenant_id}")
 
-            return {
-                "success": True,
-                "count": len(incidents),
-                "incidents": incidents
-            }
+            # Return incidents array directly (frontend expects array, not nested object)
+            return incidents
 
         except ClientError as e:
             logger.error(f"[incidents] DynamoDB query error: {str(e)}")
