@@ -157,34 +157,32 @@ class MetaContextManager:
                     **context_data,
                 )
 
-                # Attach incident graph to metadata
-                if incident_graph:
-                    graph_dict = incident_graph.to_dict()
-                    meta_context.metadata["incident_graph"] = graph_dict
-                    logger.debug(f"📊 Attached incident graph with {len(incident_graph.nodes)} nodes")
+                # 🚨 REMOVED: Don't attach incident graph to metadata - causes context bloat
+                # The graph includes embeddings which blow up the context and cause rate limits
+                # if incident_graph:
+                #     graph_dict = incident_graph.to_dict()
+                #     meta_context.metadata["incident_graph"] = graph_dict
+                #     logger.debug(f"📊 Attached incident graph with {len(incident_graph.nodes)} nodes")
 
-                    # 🚨 CRITICAL FIX: Removed duplicate save during load
-                    # Graph is saved once at end of message processing (ai_webhooks_v3.py)
-
-                    # Sync active incident to graph if missing
-                    if meta_context.active_incident_id:
-                        # graph_dict["nodes"] is a dict {incident_id: node_data}, not a list
-                        if meta_context.active_incident_id not in graph_dict.get("nodes", {}):
-                            try:
-                                from ..services.dynamo_service import get_dynamo_service
-                                dynamo = get_dynamo_service()
-                                incident = dynamo.get_incident(meta_context.active_incident_id, user_id)
-                                if incident:
-                                    incident_graph.add_incident(
-                                        meta_context.active_incident_id,
-                                        incident.get("title", ""),
-                                        incident.get("category", ""),
-                                        incident.get("description", "")
-                                    )
-                                    # 🚨 CRITICAL FIX: Removed duplicate save during sync
-                                    # Graph is saved once at end of message processing
-                            except Exception as e:
-                                logger.error(f"Error syncing incident to graph: {e}")
+                # Sync active incident to graph if missing (without bloating context)
+                if incident_graph and meta_context.active_incident_id:
+                    # Check if incident exists in graph nodes directly
+                    if meta_context.active_incident_id not in incident_graph.nodes:
+                        try:
+                            from ..services.dynamo_service import get_dynamo_service
+                            dynamo = get_dynamo_service()
+                            incident = dynamo.get_incident(meta_context.active_incident_id, user_id)
+                            if incident:
+                                incident_graph.add_incident(
+                                    meta_context.active_incident_id,
+                                    incident.get("title", ""),
+                                    incident.get("category", ""),
+                                    incident.get("description", "")
+                                )
+                                # 🚨 CRITICAL FIX: Removed duplicate save during sync
+                                # Graph is saved once at end of message processing
+                        except Exception as e:
+                            logger.error(f"Error syncing incident to graph: {e}")
 
                 logger.info(f"Loaded context for user {user_id}, channel {channel_id}")
                 return meta_context
@@ -227,15 +225,16 @@ class MetaContextManager:
         # Save to DynamoDB (deferred to batch with other writes)
         await self.save_context(user_id, channel_id, meta_context, defer=True)
 
-        # Initialize incident graph in metadata
-        try:
-            from .incident_topic_graph import get_incident_graph
-            incident_graph = get_incident_graph(user_id)
-            graph_dict = incident_graph.to_dict()
-            meta_context.metadata["incident_graph"] = graph_dict
-            logger.debug(f"📊 Initialized incident graph in metadata")
-        except Exception as e:
-            logger.error(f"Error initializing incident graph: {e}")
+        # 🚨 REMOVED: Don't initialize incident graph in metadata - causes context bloat
+        # The graph includes embeddings which blow up the context and cause rate limits
+        # try:
+        #     from .incident_topic_graph import get_incident_graph
+        #     incident_graph = get_incident_graph(user_id)
+        #     graph_dict = incident_graph.to_dict()
+        #     meta_context.metadata["incident_graph"] = graph_dict
+        #     logger.debug(f"📊 Initialized incident graph in metadata")
+        # except Exception as e:
+        #     logger.error(f"Error initializing incident graph: {e}")
 
         logger.info(f"Created new context for user {user_id}, channel {channel_id}")
         return meta_context
