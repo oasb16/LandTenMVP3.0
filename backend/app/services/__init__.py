@@ -14,7 +14,7 @@ See backend/app/archived/README.md for details on deprecated services.
 from .dynamo_service import DynamoService, get_dynamo_service
 from .conversation_manager import ConversationManager, get_conversation_manager
 from .response_handler import ResponseHandler, get_response_handler
-from .meta_context_manager import MetaContextManager, get_context_manager
+from .meta_context_manager import MetaContextManager, get_meta_context_manager
 
 __all__ = [
     "DynamoService",
@@ -24,5 +24,5 @@ __all__ = [
     "ResponseHandler",
     "get_response_handler",
     "MetaContextManager",
-    "get_context_manager",
+    "get_meta_context_manager",
 ]
