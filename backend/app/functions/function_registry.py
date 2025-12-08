@@ -140,20 +140,37 @@ Return ONLY the questions, one per line, numbered 1-{max_q}."""
         questions = []
         try:
             import json
-            data = json.loads(response)
+            import re
+
+            # Strip markdown code blocks (```json ... ```)
+            cleaned_response = response.strip()
+            # Remove opening ```json or ```
+            cleaned_response = re.sub(r'^```(?:json)?\s*\n', '', cleaned_response)
+            # Remove closing ```
+            cleaned_response = re.sub(r'\n```\s*$', '', cleaned_response)
+
+            data = json.loads(cleaned_response)
             if isinstance(data, dict) and "questions" in data:
                 questions = data["questions"]
             elif isinstance(data, list):
                 questions = data
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, Exception) as e:
+            logger.warning(f"Failed to parse JSON response, trying plain text fallback: {e}")
             # Fallback to old plain text parsing if JSON fails
             lines = response.strip().split("\n")
+            import re
             for line in lines:
+                # Skip markdown code fences and JSON structure lines
+                if line.strip() in ['```', '```json', '{', '}', '[', ']'] or '"questions"' in line:
+                    continue
+
                 # Remove numbering and clean up
                 cleaned = line.strip()
                 # Remove leading numbers like "1.", "1)", etc.
-                import re
                 cleaned = re.sub(r"^\d+[\.\)]\s*", "", cleaned)
+                # Remove quotes if it's a JSON string
+                cleaned = re.sub(r'^"(.*)"[,]?$', r'\1', cleaned)
+
                 if cleaned and len(cleaned) > 10:  # Reasonable question length
                     questions.append(cleaned)
 
