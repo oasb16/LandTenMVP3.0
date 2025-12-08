@@ -14,6 +14,8 @@ from fastapi import APIRouter, Request, HTTPException, Header
 
 from ..config.settings import settings
 from ..services.stream_bot import get_bot
+from ..services.response_handler import get_response_handler
+from ..services.conversation_manager import get_conversation_manager
 from ..services.meta_context_manager import get_meta_context_manager
 from ..services.orchestrator import get_orchestrator
 from ..services.ai_support_orchestrator import get_ai_support_orchestrator
@@ -302,474 +304,545 @@ async def handle_new_message_background(payload: Dict[str, Any]) -> Dict[str, An
             logger.debug("Agent disabled via metadata for this message")
             return {"status": "ignored", "reason": "agent_disabled"}
 
+        # ============================================================================
+        # NEW: RESPONSES API SINGLE-FLOW ARCHITECTURE
+        # ============================================================================
+        # Using ResponseHandler (replaces TenantAgent + Orchestrator dual-agent flow)
+
         # Initialize services
         bot = get_bot()
-        context_manager = get_meta_context_manager()
-        orchestrator = get_orchestrator()
+        response_handler = get_response_handler()
+        conversation_manager = get_conversation_manager()
 
-        # Load or create meta-context
-        logger.debug(f"Loading context for user={user_id} channel={channel_id}")
-        meta_context = await context_manager.load_context(user_id, channel_id, create_if_missing=True)
+        # Detect persona
+        persona = metadata.get("persona", "tenant")
+        if not persona or persona == "tenant":
+            persona = await _detect_persona(channel_id, bot)
 
-        # Detect persona if not set
-        if not meta_context.persona or meta_context.persona == "tenant":
-            persona = metadata.get("persona") or await _detect_persona(channel_id, bot)
-            meta_context.persona = persona
-            # 🚨 CRITICAL FIX: Defer save to batch writes at end of message processing
-            await context_manager.save_context(user_id, channel_id, meta_context, defer=True)
+        logger.info(f"Processing message with ResponseHandler for persona: {persona}")
 
-        logger.info(f"Persona: {meta_context.persona}, Stage: {meta_context.stage}")
-
-        # 🚀 PHASE OMEGA: Agent Router Integration
-        agent_enhanced_context = None
-        agent_blocks_orchestrator = False
+        # Process message using new single-flow architecture
         try:
-            from ..agents.agent_router import get_agent_router
-
-            agent_router = get_agent_router()
-            agent_response = await agent_router.route(
+            result = await response_handler.process_message(
+                channel_id=channel_id,
+                user_id=user_id,
                 message=message_text,
-                context={
-                    "stage": meta_context.stage,
-                    "active_incident_id": meta_context.active_incident_id,
-                    "persona": meta_context.persona,
-                    "metadata": meta_context.metadata,
-                },
+                persona=persona
             )
 
-            if agent_response and agent_response.get("agent_response"):
-                agent_enhanced_context = agent_response.get("agent_response")
-                logger.info(f"🤖 Routed to {agent_response.get('agent_type', 'unknown')} agent")
+            if result.get("success"):
+                logger.info(f"✅ Message processed successfully: {result.get('tool_calls_executed', 0)} tool calls executed")
 
-                # PHASE OMEGA OBJECTIVE #1: STOP SIGNAL ROUTING
-                # If agent blocks orchestrator, return immediately without calling orchestrator
-                if agent_response.get("block_orchestrator"):
-                    logger.info(f"🛑 Agent blocked orchestrator - returning agent result directly")
-                    agent_blocks_orchestrator = True
+                # Log performance
+                duration = (time.time() - start_time) * 1000
+                logger.info(f"Message processing completed in {duration:.2f}ms")
 
-        except Exception as e:
-            logger.error(f"Agent routing error: {e}", exc_info=True)
+                return {
+                    "status": "success",
+                    "conversation_id": result.get("conversation_id"),
+                    "tool_calls_executed": result.get("tool_calls_executed", 0),
+                    "duration_ms": duration,
+                }
+            else:
+                logger.error(f"❌ Message processing failed: {result.get('error')}")
 
-        # 🚀 PHASE OMEGA: Topic Graph Update
-        try:
-            from ..services.incident_topic_graph import get_incident_graph
-
-            if meta_context.active_incident_id:
-                incident_graph = get_incident_graph(user_id)
-
-                # 🚨 CRITICAL FIX: Removed duplicate background saves (caused concurrent write races)
-                # Graph is now saved ONCE at end of message processing
-
-                shift_result = incident_graph.detect_topic_shift(
-                    new_message=message_text,
-                    current_incident_id=meta_context.active_incident_id,
+                # Send error message to user
+                bot.send_ai_message(
+                    channel_id=channel_id,
+                    persona=persona,
+                    text="I encountered an error processing your request. Please try again.",
+                    metadata={"error": result.get("error")}
                 )
 
-                if shift_result.get("is_shift"):
-                    logger.info(f"🔀 Topic shift detected: {shift_result.get('reason')}")
-
-                    target_incident = shift_result.get("target_incident_id")
-
-                    if target_incident:
-                        logger.info(f"↪️ Switching to existing incident: {target_incident}")
-                        meta_context = await context_manager.update_context(
-                            user_id,
-                            channel_id,
-                            {
-                                "active_incident_id": target_incident,
-                                "stage": shift_result.get("target_stage", "discovery"),
-                            },
-                        )
-
-                        # 🚨 CRITICAL FIX: Graph saved once at end, not here
+                return {
+                    "status": "error",
+                    "error": result.get("error")
+                }
 
         except Exception as e:
-            logger.error(f"Topic graph update error: {e}", exc_info=True)
+            logger.error(f"Exception in ResponseHandler: {e}", exc_info=True)
 
-        # 🚀 PHASE OMEGA: Dynamic Incident Cards
-        enhanced_metadata = {
-            "persona": meta_context.persona,
-            "stage": meta_context.stage,
-            "active_incident_id": meta_context.active_incident_id,
-        }
-
-        try:
-            from ..services.dynamic_incident_cards import get_card_generator
-
-            card_generator = get_card_generator()
-            enhanced_metadata["card_generator_available"] = True
-
-        except Exception as e:
-            logger.error(f"Card generator initialization error: {e}", exc_info=True)
-            enhanced_metadata["card_generator_available"] = False
-
-        # Append user message to conversation history
-        await context_manager.append_message(user_id, channel_id, "user", message_text)
-
-        # Reload context after appending message
-        meta_context = await context_manager.load_context(user_id, channel_id)
-
-        # 🔧 STATE NORMALIZATION: Fix corrupted discovery state
-        # Clear discovery state ONLY if stage is incompatible AND discovery is not actively in use
-        # For pre-incident discovery: stage="discovery", incident_id=None is VALID
-        # For post-incident discovery: stage="discovery", incident_id=set is VALID
-        # Only clear if stage is NOT "discovery" but discovery has leftover questions from a completed flow
-        if meta_context.stage not in ["discovery", "idle"] and meta_context.discovery and len(meta_context.discovery.questions) > 0:
-            # Check if discovery is actually complete (incident was already created)
-            if meta_context.active_incident_id and meta_context.stage in ["detected", "diagnosing", "work_order", "completed"]:
-                logger.warning(f"⚠️ Detected stale discovery state: stage={meta_context.stage} but discovery has {len(meta_context.discovery.questions)} leftover questions. Clearing discovery state.")
-                await context_manager.update_context(user_id, channel_id, {
-                    "discovery": {
-                        "question_index": 0,
-                        "questions": [],
-                        "answers": {},
-                        "is_active": False,
-                    }
-                })
-                meta_context = await context_manager.load_context(user_id, channel_id)
-
-        # PHASE OMEGA OBJECTIVE #1: If agent blocked orchestrator, return immediately
-        if agent_blocks_orchestrator:
-            logger.info("Agent blocked orchestrator - skipping orchestration")
-            return {
-                "status": "success",
-                "intent": "agent_handled",
-                "agent_response": agent_enhanced_context,
-            }
-
-        # Get available functions
-        available_functions = get_function_definitions()
-
-        # Call orchestrator
-        logger.info("Calling LLM orchestrator...")
-        orchestrator_output = await orchestrator.run(
-            user_message=message_text,
-            meta_context=meta_context,
-            available_functions=available_functions,
-        )
-
-        logger.info(f"Orchestrator result: intent={orchestrator_output.intent}, function={orchestrator_output.function_call.name or 'none'}")
-        logger.debug(f"Reasoning: {orchestrator_output.reasoning}")
-
-        # PHASE OMEGA OBJECTIVE #2: CANONICAL STAGE ROUTING - Let orchestrator apply stage updates
-        if orchestrator_output.context_updates:
-            context_update_dict = orchestrator_output.context_updates.model_dump(exclude_none=True)
-            if context_update_dict:
-                logger.debug(f"Applying orchestrator context updates: {list(context_update_dict.keys())}")
-                meta_context = await context_manager.merge_context_updates(
-                    user_id,
-                    channel_id,
-                    context_update_dict,
-                )
-
-        # Execute function if requested
-        function_sent_user_message = False
-        function_result = None
-        if orchestrator_output.function_call.name:
-            logger.info(f"Executing function: {orchestrator_output.function_call.name}")
-
-            # Build context for function execution
-            function_context = {
-                "user_id": user_id,
-                "channel_id": channel_id,
-                "persona": meta_context.persona,
-            }
-
-            # Inject meta-context fields into function arguments
-            function_args = {**orchestrator_output.function_call.arguments}
-
-            # Special handling for discovery answer recording
-            if orchestrator_output.function_call.name == "record_discovery_answer":
-                # Auto-inject question_index from meta_context if not provided
-                if "question_index" not in function_args:
-                    function_args["question_index"] = meta_context.discovery.question_index
-                    logger.info(f"✅ Auto-injected question_index={meta_context.discovery.question_index} from meta_context")
-
-                # Auto-inject total_questions from meta_context
-                function_args["total_questions"] = len(meta_context.discovery.questions)
-
-            # Execute function
-            function_result = await execute_function(
-                function_name=orchestrator_output.function_call.name,
-                arguments=function_args,
-                context=function_context,
-            )
-
-            logger.info(f"Function result: success={function_result.success}, message={function_result.message}")
-
-            # PHASE OMEGA OBJECTIVE #8: FUNCTION-CALL OUTPUT GUARD
-            # Check if function already sent a user message
-            if function_result.data and function_result.data.get("user_message_sent"):
-                function_sent_user_message = True
-                logger.info("Function already sent user message - skipping orchestrator response")
-
-            # Update context with function result data
-            if function_result.success and function_result.data:
-                context_updates = {}
-
-                # Update active incident/job IDs if function created them
-                if "incident_id" in function_result.data and not meta_context.active_incident_id:
-                    context_updates["active_incident_id"] = function_result.data["incident_id"]
-                    logger.info(f"✅ Set active_incident_id: {function_result.data['incident_id']}")
-
-                if "job_id" in function_result.data and not meta_context.active_job_id:
-                    context_updates["active_job_id"] = function_result.data["job_id"]
-                    logger.info(f"✅ Set active_job_id: {function_result.data['job_id']}")
-
-                # 🚨 CRITICAL: Check if discovery was auto-started by create_incident
-                # If discovery_auto_started=True, DO NOT call start_discovery again
-                if function_result.data.get("discovery_auto_started"):
-                    logger.info(f"✅ Discovery auto-started by create_incident, updating stage to discovery")
-                    context_updates["stage"] = "discovery"
-                    # Discovery questions and first question were already sent by create_incident
-                    # DO NOT trigger start_discovery again
-
-                # Update discovery state if function returned discovery info
-                if "questions" in function_result.data:
-                    context_updates["discovery"] = {
-                        "questions": function_result.data["questions"],
-                        "question_index": function_result.data.get("question_index", 0),
-                        "incident_id": function_result.data.get("incident_id"),
-                        "is_active": True,
-                        "answers": function_result.data.get("discovery_data", {}).get("answers", {}),
-                    }
-                    # Mark stage as discovery for pre-incident flow
-                    # Check if incident_id is None (pre-incident discovery), not if meta_context has no active_incident_id
-                    if function_result.data.get("incident_id") is None:
-                        context_updates["stage"] = "discovery"
-                        logger.info("✅ Updated stage to 'discovery' for pre-incident flow")
-                    logger.info(f"✅ Updated discovery state: Q{function_result.data.get('question_index', 0) + 1}/{len(function_result.data['questions'])}")
-
-                # Update discovery question index and answers if advancing
-                if "next_question_index" in function_result.data:
-                    current_discovery = meta_context.discovery.model_dump()
-                    current_discovery["question_index"] = function_result.data["next_question_index"]
-                    current_discovery["is_active"] = True
-
-                    # Update answers if provided (pre-incident flow)
-                    if function_result.data.get("discovery_data"):
-                        current_discovery["answers"] = function_result.data["discovery_data"].get("answers", {})
-                        current_discovery["questions"] = function_result.data["discovery_data"].get("questions", current_discovery.get("questions", []))
-
-                    context_updates["discovery"] = current_discovery
-                    logger.info(f"✅ Advanced to discovery Q{function_result.data['next_question_index'] + 1}")
-
-                # 🚨 NEW: Check if discovery is complete
-                if function_result.data.get("discovery_complete"):
-                    # For pre-incident discovery: call create_incident_from_discovery
-                    # Check if incident_id is None (pre-incident discovery), not if meta_context has no active_incident_id
-                    # because there might be an OLD incident still "active" in the context
-                    if function_result.data.get("incident_id") is None and function_result.data.get("discovery_data"):
-                        logger.info("✅ Pre-incident discovery complete - creating incident from Q&A")
-
-                        # Get the last user message (initial issue report)
-                        initial_message = text if text else "Maintenance issue reported"
-
-                        # Build discovery_data with initial message
-                        discovery_data = function_result.data["discovery_data"]
-                        discovery_data["initial_message"] = initial_message
-
-                        # Call create_incident_from_discovery
-                        from ..functions.function_registry import create_incident_from_discovery
-                        incident_result = await create_incident_from_discovery(
-                            channel_id=channel_id,
-                            user_id=user_id,
-                            discovery_data=discovery_data,
-                            property_id=meta_context.metadata.get("property_id"),
-                        )
-
-                        if incident_result.success:
-                            incident_id = incident_result.data.get("incident_id")
-                            context_updates["active_incident_id"] = incident_id
-                            context_updates["stage"] = "detected"  # Incident created, move to detected
-                            context_updates["discovery"] = {
-                                "is_active": False,
-                                "question_index": 0,
-                                "questions": [],
-                                "answers": {},
-                                "incident_id": None,
-                            }
-                            logger.info(f"✅ Created incident {incident_id} from discovery")
-                            function_sent_user_message = True  # create_incident_from_discovery sends message
-                        else:
-                            logger.error(f"Failed to create incident from discovery: {incident_result.error}")
-                    else:
-                        # Traditional flow: incident exists, mark as discovery_complete
-                        context_updates["stage"] = "discovery_complete"
-                        logger.info("✅ Discovery complete, transitioning to discovery_complete stage")
-
-                # Apply all context updates
-                if context_updates:
-                    meta_context = await context_manager.update_context(user_id, channel_id, context_updates)
-                    logger.info(f"✅ Context updated: {list(context_updates.keys())}")
-
-            # Check if we need multi-turn function calling
-            next_action = orchestrator_output.context_updates.next_action
-            if next_action and function_result.success:
-                logger.info(f"Multi-turn action requested: {next_action}")
-
-                # Call orchestrator again with function result
-                orchestrator_output_2 = await orchestrator.run(
-                    user_message=f"Function '{orchestrator_output.function_call.name}' completed successfully. {next_action}",
-                    meta_context=meta_context,
-                    available_functions=available_functions,
-                    function_result=function_result,
-                )
-
-                # Execute second function if requested
-                if orchestrator_output_2.function_call.name:
-                    logger.info(f"Executing second function: {orchestrator_output_2.function_call.name}")
-
-                    function_args_2 = {**orchestrator_output_2.function_call.arguments}
-
-                    # NOTE: DO NOT auto-inject incident_id for start_discovery
-                    # If orchestrator omits incident_id, it means pre-incident discovery (collect info before creating incident)
-                    # Auto-injecting old incident_id would corrupt the discovery flow
-
-                    function_result_2 = await execute_function(
-                        function_name=orchestrator_output_2.function_call.name,
-                        arguments=function_args_2,
-                        context=function_context,
-                    )
-
-                    logger.info(f"Second function result: success={function_result_2.success}")
-
-                    # Update context from second function
-                    if function_result_2.success and function_result_2.data:
-                        if "questions" in function_result_2.data:
-                            await context_manager.update_context(
-                                user_id,
-                                channel_id,
-                                {
-                                    "discovery": {
-                                        "questions": function_result_2.data["questions"],
-                                        "question_index": function_result_2.data.get("question_index", 0),
-                                    },
-                                    "stage": "discovery",
-                                },
-                            )
-
-                # Use second orchestrator's response if available
-                if orchestrator_output_2.response_to_user:
-                    orchestrator_output.response_to_user = orchestrator_output_2.response_to_user
-
-        # 🚨 Handle special intents (garbage, errors, etc.)
-        if orchestrator_output.intent in ["garbage_input", "off_topic"]:
-            logger.info(f"🗑️ Garbage/off-topic input detected: {orchestrator_output.intent}")
-            # Send friendly fallback message
-            fallback_messages = {
-                "garbage_input": "I'm here to help with property maintenance issues. If you're experiencing a problem (leak, broken appliance, etc.), please describe it and I'll help you report it.",
-                "off_topic": "I'm focused on property maintenance. If you have a maintenance issue, I'm here to help report and track it.",
-            }
-            fallback_text = fallback_messages.get(orchestrator_output.intent, "I'm here to help with maintenance issues.")
-
+            # Send error message to user
             bot.send_ai_message(
                 channel_id=channel_id,
-                persona=meta_context.persona,
-                text=fallback_text,
-                metadata={"intent": orchestrator_output.intent},
+                persona=persona,
+                text="I encountered an unexpected error. Please try again.",
+                metadata={"exception": str(e)}
             )
 
-            return {
-                "status": "acknowledged",
-                "intent": orchestrator_output.intent,
-                "reason": "garbage_or_offtopic",
-            }
-
-        # Handle JSON parse errors
-        if orchestrator_output.intent == "json_parse_error":
-            logger.error(f"🚨 LLM JSON parse error: {orchestrator_output.reasoning}")
-            # Don't send error to user, just log and return
             return {
                 "status": "error",
-                "intent": "json_parse_error",
-                "reason": "LLM output invalid JSON",
+                "exception": str(e)
             }
 
-        # PHASE OMEGA OBJECTIVE #8: FUNCTION-CALL OUTPUT GUARD
-        # Send response to user if LLM provided one AND function didn't already send one
-        if orchestrator_output.response_to_user and not function_sent_user_message:
-            logger.info(f"Sending LLM response to user: {orchestrator_output.response_to_user[:100]}")
-
-            response_metadata = {
-                "intent": orchestrator_output.intent,
-                "persona": meta_context.persona,
-                "stage": meta_context.stage,
-            }
-
-            bot.send_ai_message(
-                channel_id=channel_id,
-                persona=meta_context.persona,
-                text=orchestrator_output.response_to_user,
-                metadata=response_metadata,
-            )
-
-            # Append to conversation history
-            await context_manager.append_message(
-                user_id,
-                channel_id,
-                "assistant",
-                orchestrator_output.response_to_user,
-            )
-
-        # 🚀 PHASE OMEGA: Record interaction for auto-evolving skills
-        try:
-            from ..services.orchestrator import record_agent_interaction
-
-            if agent_enhanced_context:
-                await record_agent_interaction(
-                    user_id=user_id,
-                    agent_type="multi_agent",
-                    user_message=message_text,
-                    agent_response=orchestrator_output.response_to_user or "",
-                    outcome="success" if orchestrator_output.function_call.name else "chat",
-                )
-        except Exception as e:
-            logger.error(f"Error recording interaction: {e}", exc_info=True)
-
-        # Log performance
-        duration = (time.time() - start_time) * 1000
-        logger.info(f"Message processing completed in {duration:.2f}ms")
-
-        # 🚨 CRITICAL FIX: Flush all pending context writes (batched for performance)
-        try:
-            flushed_count = await context_manager.flush_pending_writes()
-            if flushed_count > 0:
-                logger.info(f"✅ Flushed {flushed_count} batched context writes")
-        except Exception as flush_error:
-            logger.error(f"Failed to flush context writes: {flush_error}", exc_info=True)
-
-        # 🚨 CRITICAL FIX: Save incident graph ONCE at end (prevents duplicate concurrent saves)
-        try:
-            from ..services.incident_topic_graph import get_incident_graph
-
-            if meta_context.active_incident_id:
-                incident_graph = get_incident_graph(user_id)
-                # Only save if graph has nodes (prevents zero-node overwrites)
-                if len(incident_graph.nodes) > 0:
-                    await asyncio.to_thread(incident_graph.save)
-                    logger.info(f"💾 Saved incident graph ({len(incident_graph.nodes)} nodes)")
-                else:
-                    logger.debug("⏭️ Skipping graph save (no nodes)")
-        except Exception as graph_error:
-            logger.error(f"Failed to save incident graph: {graph_error}", exc_info=True)
-
-        return {
-            "status": "success",
-            "intent": orchestrator_output.intent,
-            "function_executed": orchestrator_output.function_call.name,
-            "duration_ms": duration,
-        }
+        # ============================================================================
+        # OLD DUAL-AGENT FLOW (Deprecated - kept for rollback)
+        # ============================================================================
+        # # Initialize services
+        # bot = get_bot()
+        # context_manager = get_meta_context_manager()
+        # orchestrator = get_orchestrator()
+        #
+        # # Load or create meta-context
+        # logger.debug(f"Loading context for user={user_id} channel={channel_id}")
+        # meta_context = await context_manager.load_context(user_id, channel_id, create_if_missing=True)
+        #
+        # # Detect persona if not set
+        # if not meta_context.persona or meta_context.persona == "tenant":
+        #     persona = metadata.get("persona") or await _detect_persona(channel_id, bot)
+        #     meta_context.persona = persona
+        #     # 🚨 CRITICAL FIX: Defer save to batch writes at end of message processing
+        #     await context_manager.save_context(user_id, channel_id, meta_context, defer=True)
+        #
+        # logger.info(f"Persona: {meta_context.persona}, Stage: {meta_context.stage}")
+        #
+        # 🚀 PHASE OMEGA: Agent Router Integration
+        #         agent_enhanced_context = None
+        #         agent_blocks_orchestrator = False
+        #         try:
+        #             from ..agents.agent_router import get_agent_router
+        # 
+        #             agent_router = get_agent_router()
+        #             agent_response = await agent_router.route(
+        #                 message=message_text,
+        #                 context={
+        #                     "stage": meta_context.stage,
+        #                     "active_incident_id": meta_context.active_incident_id,
+        #                     "persona": meta_context.persona,
+        #                     "metadata": meta_context.metadata,
+        #                 },
+        #             )
+        # 
+        #             if agent_response and agent_response.get("agent_response"):
+        #                 agent_enhanced_context = agent_response.get("agent_response")
+        #                 logger.info(f"🤖 Routed to {agent_response.get('agent_type', 'unknown')} agent")
+        # 
+        #                 # PHASE OMEGA OBJECTIVE #1: STOP SIGNAL ROUTING
+        #                 # If agent blocks orchestrator, return immediately without calling orchestrator
+        #                 if agent_response.get("block_orchestrator"):
+        #                     logger.info(f"🛑 Agent blocked orchestrator - returning agent result directly")
+        #                     agent_blocks_orchestrator = True
+        # 
+        #         except Exception as e:
+        #             logger.error(f"Agent routing error: {e}", exc_info=True)
+        # 
+        #         # 🚀 PHASE OMEGA: Topic Graph Update
+        #         try:
+        #             from ..services.incident_topic_graph import get_incident_graph
+        # 
+        #             if meta_context.active_incident_id:
+        #                 incident_graph = get_incident_graph(user_id)
+        # 
+        #                 # 🚨 CRITICAL FIX: Removed duplicate background saves (caused concurrent write races)
+        #                 # Graph is now saved ONCE at end of message processing
+        # 
+        #                 shift_result = incident_graph.detect_topic_shift(
+        #                     new_message=message_text,
+        #                     current_incident_id=meta_context.active_incident_id,
+        #                 )
+        # 
+        #                 if shift_result.get("is_shift"):
+        #                     logger.info(f"🔀 Topic shift detected: {shift_result.get('reason')}")
+        # 
+        #                     target_incident = shift_result.get("target_incident_id")
+        # 
+        #                     if target_incident:
+        #                         logger.info(f"↪️ Switching to existing incident: {target_incident}")
+        #                         meta_context = await context_manager.update_context(
+        #                             user_id,
+        #                             channel_id,
+        #                             {
+        #                                 "active_incident_id": target_incident,
+        #                                 "stage": shift_result.get("target_stage", "discovery"),
+        #                             },
+        #                         )
+        # 
+        #                         # 🚨 CRITICAL FIX: Graph saved once at end, not here
+        # 
+        #         except Exception as e:
+        #             logger.error(f"Topic graph update error: {e}", exc_info=True)
+        # 
+        #         # 🚀 PHASE OMEGA: Dynamic Incident Cards
+        #         enhanced_metadata = {
+        #             "persona": meta_context.persona,
+        #             "stage": meta_context.stage,
+        #             "active_incident_id": meta_context.active_incident_id,
+        #         }
+        # 
+        #         try:
+        #             from ..services.dynamic_incident_cards import get_card_generator
+        # 
+        #             card_generator = get_card_generator()
+        #             enhanced_metadata["card_generator_available"] = True
+        # 
+        #         except Exception as e:
+        #             logger.error(f"Card generator initialization error: {e}", exc_info=True)
+        #             enhanced_metadata["card_generator_available"] = False
+        # 
+        #         # Append user message to conversation history
+        #         await context_manager.append_message(user_id, channel_id, "user", message_text)
+        # 
+        #         # Reload context after appending message
+        #         meta_context = await context_manager.load_context(user_id, channel_id)
+        # 
+        #         # 🔧 STATE NORMALIZATION: Fix corrupted discovery state
+        #         # Clear discovery state ONLY if stage is incompatible AND discovery is not actively in use
+        #         # For pre-incident discovery: stage="discovery", incident_id=None is VALID
+        #         # For post-incident discovery: stage="discovery", incident_id=set is VALID
+        #         # Only clear if stage is NOT "discovery" but discovery has leftover questions from a completed flow
+        #         if meta_context.stage not in ["discovery", "idle"] and meta_context.discovery and len(meta_context.discovery.questions) > 0:
+        #             # Check if discovery is actually complete (incident was already created)
+        #             if meta_context.active_incident_id and meta_context.stage in ["detected", "diagnosing", "work_order", "completed"]:
+        #                 logger.warning(f"⚠️ Detected stale discovery state: stage={meta_context.stage} but discovery has {len(meta_context.discovery.questions)} leftover questions. Clearing discovery state.")
+        #                 await context_manager.update_context(user_id, channel_id, {
+        #                     "discovery": {
+        #                         "question_index": 0,
+        #                         "questions": [],
+        #                         "answers": {},
+        #                         "is_active": False,
+        #                     }
+        #                 })
+        #                 meta_context = await context_manager.load_context(user_id, channel_id)
+        # 
+        #         # PHASE OMEGA OBJECTIVE #1: If agent blocked orchestrator, return immediately
+        #         if agent_blocks_orchestrator:
+        #             logger.info("Agent blocked orchestrator - skipping orchestration")
+        #             return {
+        #                 "status": "success",
+        #                 "intent": "agent_handled",
+        #                 "agent_response": agent_enhanced_context,
+        #             }
+        # 
+        #         # Get available functions
+        #         available_functions = get_function_definitions()
+        # 
+        #         # Call orchestrator
+        #         logger.info("Calling LLM orchestrator...")
+        #         orchestrator_output = await orchestrator.run(
+        #             user_message=message_text,
+        #             meta_context=meta_context,
+        #             available_functions=available_functions,
+        #         )
+        # 
+        #         logger.info(f"Orchestrator result: intent={orchestrator_output.intent}, function={orchestrator_output.function_call.name or 'none'}")
+        #         logger.debug(f"Reasoning: {orchestrator_output.reasoning}")
+        # 
+        #         # PHASE OMEGA OBJECTIVE #2: CANONICAL STAGE ROUTING - Let orchestrator apply stage updates
+        #         if orchestrator_output.context_updates:
+        #             context_update_dict = orchestrator_output.context_updates.model_dump(exclude_none=True)
+        #             if context_update_dict:
+        #                 logger.debug(f"Applying orchestrator context updates: {list(context_update_dict.keys())}")
+        #                 meta_context = await context_manager.merge_context_updates(
+        #                     user_id,
+        #                     channel_id,
+        #                     context_update_dict,
+        #                 )
+        # 
+        #         # Execute function if requested
+        #         function_sent_user_message = False
+        #         function_result = None
+        #         if orchestrator_output.function_call.name:
+        #             logger.info(f"Executing function: {orchestrator_output.function_call.name}")
+        # 
+        #             # Build context for function execution
+        #             function_context = {
+        #                 "user_id": user_id,
+        #                 "channel_id": channel_id,
+        #                 "persona": meta_context.persona,
+        #             }
+        # 
+        #             # Inject meta-context fields into function arguments
+        #             function_args = {**orchestrator_output.function_call.arguments}
+        # 
+        #             # Special handling for discovery answer recording
+        #             if orchestrator_output.function_call.name == "record_discovery_answer":
+        #                 # Auto-inject question_index from meta_context if not provided
+        #                 if "question_index" not in function_args:
+        #                     function_args["question_index"] = meta_context.discovery.question_index
+        #                     logger.info(f"✅ Auto-injected question_index={meta_context.discovery.question_index} from meta_context")
+        # 
+        #                 # Auto-inject total_questions from meta_context
+        #                 function_args["total_questions"] = len(meta_context.discovery.questions)
+        # 
+        #             # Execute function
+        #             function_result = await execute_function(
+        #                 function_name=orchestrator_output.function_call.name,
+        #                 arguments=function_args,
+        #                 context=function_context,
+        #             )
+        # 
+        #             logger.info(f"Function result: success={function_result.success}, message={function_result.message}")
+        # 
+        #             # PHASE OMEGA OBJECTIVE #8: FUNCTION-CALL OUTPUT GUARD
+        #             # Check if function already sent a user message
+        #             if function_result.data and function_result.data.get("user_message_sent"):
+        #                 function_sent_user_message = True
+        #                 logger.info("Function already sent user message - skipping orchestrator response")
+        # 
+        #             # Update context with function result data
+        #             if function_result.success and function_result.data:
+        #                 context_updates = {}
+        # 
+        #                 # Update active incident/job IDs if function created them
+        #                 if "incident_id" in function_result.data and not meta_context.active_incident_id:
+        #                     context_updates["active_incident_id"] = function_result.data["incident_id"]
+        #                     logger.info(f"✅ Set active_incident_id: {function_result.data['incident_id']}")
+        # 
+        #                 if "job_id" in function_result.data and not meta_context.active_job_id:
+        #                     context_updates["active_job_id"] = function_result.data["job_id"]
+        #                     logger.info(f"✅ Set active_job_id: {function_result.data['job_id']}")
+        # 
+        #                 # 🚨 CRITICAL: Check if discovery was auto-started by create_incident
+        #                 # If discovery_auto_started=True, DO NOT call start_discovery again
+        #                 if function_result.data.get("discovery_auto_started"):
+        #                     logger.info(f"✅ Discovery auto-started by create_incident, updating stage to discovery")
+        #                     context_updates["stage"] = "discovery"
+        #                     # Discovery questions and first question were already sent by create_incident
+        #                     # DO NOT trigger start_discovery again
+        # 
+        #                 # Update discovery state if function returned discovery info
+        #                 if "questions" in function_result.data:
+        #                     context_updates["discovery"] = {
+        #                         "questions": function_result.data["questions"],
+        #                         "question_index": function_result.data.get("question_index", 0),
+        #                         "incident_id": function_result.data.get("incident_id"),
+        #                         "is_active": True,
+        #                         "answers": function_result.data.get("discovery_data", {}).get("answers", {}),
+        #                     }
+        #                     # Mark stage as discovery for pre-incident flow
+        #                     # Check if incident_id is None (pre-incident discovery), not if meta_context has no active_incident_id
+        #                     if function_result.data.get("incident_id") is None:
+        #                         context_updates["stage"] = "discovery"
+        #                         logger.info("✅ Updated stage to 'discovery' for pre-incident flow")
+        #                     logger.info(f"✅ Updated discovery state: Q{function_result.data.get('question_index', 0) + 1}/{len(function_result.data['questions'])}")
+        # 
+        #                 # Update discovery question index and answers if advancing
+        #                 if "next_question_index" in function_result.data:
+        #                     current_discovery = meta_context.discovery.model_dump()
+        #                     current_discovery["question_index"] = function_result.data["next_question_index"]
+        #                     current_discovery["is_active"] = True
+        # 
+        #                     # Update answers if provided (pre-incident flow)
+        #                     if function_result.data.get("discovery_data"):
+        #                         current_discovery["answers"] = function_result.data["discovery_data"].get("answers", {})
+        #                         current_discovery["questions"] = function_result.data["discovery_data"].get("questions", current_discovery.get("questions", []))
+        # 
+        #                     context_updates["discovery"] = current_discovery
+        #                     logger.info(f"✅ Advanced to discovery Q{function_result.data['next_question_index'] + 1}")
+        # 
+        #                 # 🚨 NEW: Check if discovery is complete
+        #                 if function_result.data.get("discovery_complete"):
+        #                     # For pre-incident discovery: call create_incident_from_discovery
+        #                     # Check if incident_id is None (pre-incident discovery), not if meta_context has no active_incident_id
+        #                     # because there might be an OLD incident still "active" in the context
+        #                     if function_result.data.get("incident_id") is None and function_result.data.get("discovery_data"):
+        #                         logger.info("✅ Pre-incident discovery complete - creating incident from Q&A")
+        # 
+        #                         # Get the last user message (initial issue report)
+        #                         initial_message = text if text else "Maintenance issue reported"
+        # 
+        #                         # Build discovery_data with initial message
+        #                         discovery_data = function_result.data["discovery_data"]
+        #                         discovery_data["initial_message"] = initial_message
+        # 
+        #                         # Call create_incident_from_discovery
+        #                         from ..functions.function_registry import create_incident_from_discovery
+        #                         incident_result = await create_incident_from_discovery(
+        #                             channel_id=channel_id,
+        #                             user_id=user_id,
+        #                             discovery_data=discovery_data,
+        #                             property_id=meta_context.metadata.get("property_id"),
+        #                         )
+        # 
+        #                         if incident_result.success:
+        #                             incident_id = incident_result.data.get("incident_id")
+        #                             context_updates["active_incident_id"] = incident_id
+        #                             context_updates["stage"] = "detected"  # Incident created, move to detected
+        #                             context_updates["discovery"] = {
+        #                                 "is_active": False,
+        #                                 "question_index": 0,
+        #                                 "questions": [],
+        #                                 "answers": {},
+        #                                 "incident_id": None,
+        #                             }
+        #                             logger.info(f"✅ Created incident {incident_id} from discovery")
+        #                             function_sent_user_message = True  # create_incident_from_discovery sends message
+        #                         else:
+        #                             logger.error(f"Failed to create incident from discovery: {incident_result.error}")
+        #                     else:
+        #                         # Traditional flow: incident exists, mark as discovery_complete
+        #                         context_updates["stage"] = "discovery_complete"
+        #                         logger.info("✅ Discovery complete, transitioning to discovery_complete stage")
+        # 
+        #                 # Apply all context updates
+        #                 if context_updates:
+        #                     meta_context = await context_manager.update_context(user_id, channel_id, context_updates)
+        #                     logger.info(f"✅ Context updated: {list(context_updates.keys())}")
+        # 
+        #             # Check if we need multi-turn function calling
+        #             next_action = orchestrator_output.context_updates.next_action
+        #             if next_action and function_result.success:
+        #                 logger.info(f"Multi-turn action requested: {next_action}")
+        # 
+        #                 # Call orchestrator again with function result
+        #                 orchestrator_output_2 = await orchestrator.run(
+        #                     user_message=f"Function '{orchestrator_output.function_call.name}' completed successfully. {next_action}",
+        #                     meta_context=meta_context,
+        #                     available_functions=available_functions,
+        #                     function_result=function_result,
+        #                 )
+        # 
+        #                 # Execute second function if requested
+        #                 if orchestrator_output_2.function_call.name:
+        #                     logger.info(f"Executing second function: {orchestrator_output_2.function_call.name}")
+        # 
+        #                     function_args_2 = {**orchestrator_output_2.function_call.arguments}
+        # 
+        #                     # NOTE: DO NOT auto-inject incident_id for start_discovery
+        #                     # If orchestrator omits incident_id, it means pre-incident discovery (collect info before creating incident)
+        #                     # Auto-injecting old incident_id would corrupt the discovery flow
+        # 
+        #                     function_result_2 = await execute_function(
+        #                         function_name=orchestrator_output_2.function_call.name,
+        #                         arguments=function_args_2,
+        #                         context=function_context,
+        #                     )
+        # 
+        #                     logger.info(f"Second function result: success={function_result_2.success}")
+        # 
+        #                     # Update context from second function
+        #                     if function_result_2.success and function_result_2.data:
+        #                         if "questions" in function_result_2.data:
+        #                             await context_manager.update_context(
+        #                                 user_id,
+        #                                 channel_id,
+        #                                 {
+        #                                     "discovery": {
+        #                                         "questions": function_result_2.data["questions"],
+        #                                         "question_index": function_result_2.data.get("question_index", 0),
+        #                                     },
+        #                                     "stage": "discovery",
+        #                                 },
+        #                             )
+        # 
+        #                 # Use second orchestrator's response if available
+        #                 if orchestrator_output_2.response_to_user:
+        #                     orchestrator_output.response_to_user = orchestrator_output_2.response_to_user
+        # 
+        #         # 🚨 Handle special intents (garbage, errors, etc.)
+        #         if orchestrator_output.intent in ["garbage_input", "off_topic"]:
+        #             logger.info(f"🗑️ Garbage/off-topic input detected: {orchestrator_output.intent}")
+        #             # Send friendly fallback message
+        #             fallback_messages = {
+        #                 "garbage_input": "I'm here to help with property maintenance issues. If you're experiencing a problem (leak, broken appliance, etc.), please describe it and I'll help you report it.",
+        #                 "off_topic": "I'm focused on property maintenance. If you have a maintenance issue, I'm here to help report and track it.",
+        #             }
+        #             fallback_text = fallback_messages.get(orchestrator_output.intent, "I'm here to help with maintenance issues.")
+        # 
+        #             bot.send_ai_message(
+        #                 channel_id=channel_id,
+        #                 persona=meta_context.persona,
+        #                 text=fallback_text,
+        #                 metadata={"intent": orchestrator_output.intent},
+        #             )
+        # 
+        #             return {
+        #                 "status": "acknowledged",
+        #                 "intent": orchestrator_output.intent,
+        #                 "reason": "garbage_or_offtopic",
+        #             }
+        # 
+        #         # Handle JSON parse errors
+        #         if orchestrator_output.intent == "json_parse_error":
+        #             logger.error(f"🚨 LLM JSON parse error: {orchestrator_output.reasoning}")
+        #             # Don't send error to user, just log and return
+        #             return {
+        #                 "status": "error",
+        #                 "intent": "json_parse_error",
+        #                 "reason": "LLM output invalid JSON",
+        #             }
+        # 
+        #         # PHASE OMEGA OBJECTIVE #8: FUNCTION-CALL OUTPUT GUARD
+        #         # Send response to user if LLM provided one AND function didn't already send one
+        #         if orchestrator_output.response_to_user and not function_sent_user_message:
+        #             logger.info(f"Sending LLM response to user: {orchestrator_output.response_to_user[:100]}")
+        # 
+        #             response_metadata = {
+        #                 "intent": orchestrator_output.intent,
+        #                 "persona": meta_context.persona,
+        #                 "stage": meta_context.stage,
+        #             }
+        # 
+        #             bot.send_ai_message(
+        #                 channel_id=channel_id,
+        #                 persona=meta_context.persona,
+        #                 text=orchestrator_output.response_to_user,
+        #                 metadata=response_metadata,
+        #             )
+        # 
+        #             # Append to conversation history
+        #             await context_manager.append_message(
+        #                 user_id,
+        #                 channel_id,
+        #                 "assistant",
+        #                 orchestrator_output.response_to_user,
+        #         )
+        #
+        # # 🚀 PHASE OMEGA: Record interaction for auto-evolving skills
+        # try:
+        #     from ..services.orchestrator import record_agent_interaction
+        #
+        #     if agent_enhanced_context:
+        #         await record_agent_interaction(
+        #             user_id=user_id,
+        #             agent_type="multi_agent",
+        #             user_message=message_text,
+        #             agent_response=orchestrator_output.response_to_user or "",
+        #             outcome="success" if orchestrator_output.function_call.name else "chat",
+        #         )
+        # except Exception as e:
+        #     logger.error(f"Error recording interaction: {e}", exc_info=True)
+        #
+        # # Log performance
+        # duration = (time.time() - start_time) * 1000
+        # logger.info(f"Message processing completed in {duration:.2f}ms")
+        #
+        # # 🚨 CRITICAL FIX: Flush all pending context writes (batched for performance)
+        # try:
+        #     flushed_count = await context_manager.flush_pending_writes()
+        #     if flushed_count > 0:
+        #         logger.info(f"✅ Flushed {flushed_count} batched context writes")
+        # except Exception as flush_error:
+        #     logger.error(f"Failed to flush context writes: {flush_error}", exc_info=True)
+        #
+        # # 🚨 CRITICAL FIX: Save incident graph ONCE at end (prevents duplicate concurrent saves)
+        # try:
+        #     from ..services.incident_topic_graph import get_incident_graph
+        #
+        #     if meta_context.active_incident_id:
+        #         incident_graph = get_incident_graph(user_id)
+        #         # Only save if graph has nodes (prevents zero-node overwrites)
+        #         if len(incident_graph.nodes) > 0:
+        #             await asyncio.to_thread(incident_graph.save)
+        #             logger.info(f"💾 Saved incident graph ({len(incident_graph.nodes)} nodes)")
+        #         else:
+        #             logger.debug("⏭️ Skipping graph save (no nodes)")
+        # except Exception as graph_error:
+        #     logger.error(f"Failed to save incident graph: {graph_error}", exc_info=True)
+        #
+        # return {
+        #     "status": "success",
+        #     "intent": orchestrator_output.intent,
+        #     "function_executed": orchestrator_output.function_call.name,
+        #     "duration_ms": duration,
+        # }
+        #
+        # ============================================================================
+        # END OLD FLOW
+        # ============================================================================
 
     except Exception as e:
         logger.error(f"Error handling message: {e}", exc_info=True)
-
-        # 🚨 CRITICAL FIX: Flush pending writes even on error
-        try:
-            context_manager = get_meta_context_manager()
-            await context_manager.flush_pending_writes()
-        except Exception as flush_error:
-            logger.error(f"Failed to flush context writes on error: {flush_error}")
 
         # Send error message to user
         try:
