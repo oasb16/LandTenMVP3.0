@@ -46,12 +46,25 @@ class ResponseHandler:
         # Convert to Responses API format: each tool needs {"type": "function", "function": {...}}
         self.tools = []
         for func in raw_functions:
-            tool = {
-                "type": "function",
-                "function": {
+            # Convert Pydantic model to dict if needed
+            if hasattr(func, 'model_dump'):
+                func_dict = func.model_dump()
+            elif hasattr(func, 'dict'):
+                func_dict = func.dict()
+            else:
+                # Fallback if not a Pydantic model
+                func_dict = {
                     "name": func.name,
                     "description": func.description,
                     "parameters": func.parameters
+                }
+
+            tool = {
+                "type": "function",
+                "function": {
+                    "name": func_dict["name"],
+                    "description": func_dict["description"],
+                    "parameters": func_dict["parameters"]
                 }
             }
             self.tools.append(tool)
@@ -64,6 +77,11 @@ class ResponseHandler:
 
         logger.info(f"ResponseHandler initialized with prompt: {self.prompt_id}")
         logger.info(f"Loaded {len(self.tools)} tools for function calling")
+
+        # DEBUG: Log first tool structure to verify format
+        if self.tools:
+            import json
+            logger.info(f"🔍 DEBUG: First tool structure: {json.dumps(self.tools[0], indent=2)}")
 
     async def process_message(
         self,
