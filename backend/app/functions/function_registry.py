@@ -2029,32 +2029,32 @@ def get_function_definitions() -> List[FunctionDefinition]:
         ),
         FunctionDefinition(
             name="start_discovery",
-            description="Start discovery question flow for an incident",
+            description="🚨 DISCOVERY-FIRST FLOW: Start Q1-Q5 discovery. For NEW issues, call WITHOUT incident_id (pre-incident discovery). For existing incidents, call WITH incident_id.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "incident_id": {"type": "string", "description": "Incident ID"},
+                    "incident_id": {"type": "string", "description": "Incident ID (OPTIONAL - omit for pre-incident discovery of new issues)"},
                     "questions": {
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "List of discovery questions (optional, uses defaults if not provided)",
                     },
                 },
-                "required": ["incident_id"],
+                "required": [],  # 🚨 FIX: incident_id is now OPTIONAL for pre-incident discovery
             },
         ),
         FunctionDefinition(
             name="record_discovery_answer",
-            description="Record answer to a discovery question",
+            description="🚨 DISCOVERY-FIRST FLOW: Record user's answer to current discovery question. Advances to next question automatically. For pre-incident discovery, omit incident_id.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "incident_id": {"type": "string", "description": "Incident ID"},
-                    "question_index": {"type": "integer", "description": "Question index (0-based)"},
-                    "answer": {"type": "string", "description": "User's answer"},
+                    "incident_id": {"type": "string", "description": "Incident ID (OPTIONAL - omit for pre-incident discovery)"},
+                    "question_index": {"type": "integer", "description": "Question index (0-based, optional - can be inferred from context)"},
+                    "answer": {"type": "string", "description": "User's answer to the current question"},
                     "total_questions": {"type": "integer", "description": "Total number of questions (optional, defaults to 5)"},
                 },
-                "required": ["incident_id", "question_index", "answer"],
+                "required": ["answer"],  # 🚨 FIX: Only answer is required; question_index and incident_id are optional
             },
         ),
         FunctionDefinition(
