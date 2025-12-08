@@ -1,0 +1,113 @@
+{
+  "name": "LandTen Maintenance Assistant v1",
+  "version": "1.0.0",
+  "model": "gpt-4o",
+  "temperature": 0.7,
+  "created_at": "2025-12-08",
+  "notes": "Unified prompt replacing TenantAgent + Orchestrator dual-agent architecture",
+  "tools": [
+    {
+      "name": "create_incident",
+      "description": "Create a new maintenance incident",
+      "required_params": ["title", "description", "category", "severity", "urgency"]
+    },
+    {
+      "name": "update_incident",
+      "description": "Update an existing incident's status or details",
+      "required_params": ["incident_id"]
+    },
+    {
+      "name": "get_incident",
+      "description": "Retrieve incident details by ID",
+      "required_params": ["incident_id"]
+    },
+    {
+      "name": "close_incident",
+      "description": "Mark an incident as resolved and closed",
+      "required_params": ["incident_id"]
+    },
+    {
+      "name": "start_discovery",
+      "description": "Start Q1-Q5 discovery. For NEW issues, omit incident_id (pre-incident discovery)",
+      "required_params": []
+    },
+    {
+      "name": "record_discovery_answer",
+      "description": "Record user's answer to current discovery question",
+      "required_params": ["answer"]
+    },
+    {
+      "name": "start_diagnosis",
+      "description": "MANDATORY after discovery_complete: Start diagnosis stage",
+      "required_params": ["incident_id"]
+    },
+    {
+      "name": "record_diagnosis_result",
+      "description": "Record diagnosis findings and recommendations",
+      "required_params": ["incident_id", "diagnosis_notes"]
+    },
+    {
+      "name": "create_work_order",
+      "description": "Create a work order (job) from an incident after diagnosis",
+      "required_params": ["incident_id", "title", "estimated_cost"]
+    },
+    {
+      "name": "update_work_order",
+      "description": "Update a work order status or details",
+      "required_params": ["job_id"]
+    },
+    {
+      "name": "get_work_order",
+      "description": "Retrieve work order details",
+      "required_params": ["job_id"]
+    },
+    {
+      "name": "assign_contractor",
+      "description": "Assign contractor to a job",
+      "required_params": ["job_id", "contractor_id"]
+    },
+    {
+      "name": "generate_bids",
+      "description": "Request bids from multiple contractors",
+      "required_params": ["job_id", "category"]
+    },
+    {
+      "name": "get_bids",
+      "description": "Retrieve contractor bids for a job",
+      "required_params": ["job_id"]
+    },
+    {
+      "name": "accept_bid",
+      "description": "Accept a contractor bid",
+      "required_params": ["bid_id", "job_id"]
+    },
+    {
+      "name": "request_landlord_approval",
+      "description": "Request landlord approval for high-cost work",
+      "required_params": ["job_id", "incident_id"]
+    },
+    {
+      "name": "process_approval_decision",
+      "description": "Process landlord's approval decision",
+      "required_params": ["job_id", "decision"]
+    }
+  ],
+  "architecture": {
+    "replaces": [
+      "TenantAgent (empathy + conversation)",
+      "Orchestrator (function calling + state management)"
+    ],
+    "optimized_for": "OpenAI Responses API",
+    "state_management": "Conversations API (server-side)",
+    "tool_loop": "Explicit (managed by ResponseHandler)"
+  },
+  "key_features": [
+    "Empathetic tenant communication",
+    "Discovery-first incident creation",
+    "Pre-incident discovery support",
+    "Automatic topic switching detection",
+    "Category-specific diagnosis",
+    "Linear Q1-Q5 discovery flow",
+    "State-aware conversation management"
+  ]
+}
