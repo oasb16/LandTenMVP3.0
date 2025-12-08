@@ -170,6 +170,14 @@ async def get_contractor_profile(user_id: str) -> Dict[str, Any]:
     except HTTPException:
         raise
     except ClientError as e:
+        error_code = e.response['Error']['Code']
+        if error_code == 'ResourceNotFoundException':
+            # Table doesn't exist - return 404 for missing contractor profile
+            logger.warning(f"[jobs] Contractors table not found")
+            raise HTTPException(
+                status_code=404,
+                detail=f"Contractor profile not found for user {user_id} (contractors table does not exist)"
+            )
         logger.error(f"[jobs] DynamoDB error fetching contractor: {str(e)}")
         raise HTTPException(
             status_code=500,
@@ -758,7 +766,7 @@ async def get_my_jobs(
     Get all jobs for the current landlord.
 
     Flow:
-    1. Query jobs table with landlord_id
+    1. Scan jobs table with landlord_id filter
     2. Return all jobs sorted by created_at descending
 
     Returns:
@@ -770,10 +778,10 @@ async def get_my_jobs(
         # Get landlord user ID
         landlord_id = get_current_user_from_token(current_user)
 
-        # Query jobs by user_id (partition key for landlord queries)
+        # Use scan with filter instead of query (dev mode - no GSI configured)
         try:
-            response = jobs_table.query(
-                KeyConditionExpression="user_id = :uid",
+            response = jobs_table.scan(
+                FilterExpression="user_id = :uid OR landlord_id = :uid",
                 ExpressionAttributeValues={":uid": landlord_id}
             )
 
@@ -781,8 +789,8 @@ async def get_my_jobs(
 
             # Handle pagination if there are more items
             while 'LastEvaluatedKey' in response:
-                response = jobs_table.query(
-                    KeyConditionExpression="user_id = :uid",
+                response = jobs_table.scan(
+                    FilterExpression="user_id = :uid OR landlord_id = :uid",
                     ExpressionAttributeValues={":uid": landlord_id},
                     ExclusiveStartKey=response['LastEvaluatedKey']
                 )
@@ -803,6 +811,15 @@ async def get_my_jobs(
             }
 
         except ClientError as e:
+            error_code = e.response['Error']['Code']
+            if error_code == 'ResourceNotFoundException':
+                # Table doesn't exist - return empty list for dev mode
+                logger.warning(f"[jobs] Jobs table not found - returning empty list")
+                return {
+                    "success": True,
+                    "count": 0,
+                    "jobs": []
+                }
             logger.error(f"[jobs] DynamoDB query error: {str(e)}")
             raise HTTPException(
                 status_code=500,
@@ -846,9 +863,21 @@ async def get_available_jobs(
         # Get contractor user ID
         user_id = get_current_user_from_token(current_user)
 
-        # Fetch contractor profile
-        contractor = await get_contractor_profile(user_id)
-        contractor_categories = contractor.get('categories', [])
+        # Try to fetch contractor profile
+        try:
+            contractor = await get_contractor_profile(user_id)
+            contractor_categories = contractor.get('categories', [])
+        except HTTPException as e:
+            if e.status_code == 404:
+                # Contractor profile doesn't exist - return empty list
+                logger.warning(f"[jobs] No contractor profile for user {user_id}")
+                return {
+                    "success": True,
+                    "count": 0,
+                    "jobs": [],
+                    "message": "No contractor profile found. Please create a contractor profile first."
+                }
+            raise
 
         if not contractor_categories:
             logger.warning(f"[jobs] Contractor {user_id} has no categories configured")
@@ -906,6 +935,15 @@ async def get_available_jobs(
             }
 
         except ClientError as e:
+            error_code = e.response['Error']['Code']
+            if error_code == 'ResourceNotFoundException':
+                # Table doesn't exist - return empty list for dev mode
+                logger.warning(f"[jobs] Jobs table not found - returning empty list")
+                return {
+                    "success": True,
+                    "count": 0,
+                    "jobs": []
+                }
             logger.error(f"[jobs] DynamoDB scan error: {str(e)}")
             raise HTTPException(
                 status_code=500,
@@ -1138,7 +1176,7 @@ async def get_my_bids(
 
     Flow:
     1. Get contractor_id from user
-    2. Query bids table with contractor_id
+    2. Scan bids table with contractor_id filter
     3. Return all bids
 
     Returns:
@@ -1154,10 +1192,10 @@ async def get_my_bids(
         contractor = await get_contractor_profile(user_id)
         contractor_id = contractor.get('contractor_id')
 
-        # Query bids by user_id (partition key for contractor queries)
+        # Use scan with filter instead of query (dev mode - no GSI configured)
         try:
-            response = bids_table.query(
-                KeyConditionExpression="user_id = :uid",
+            response = bids_table.scan(
+                FilterExpression="user_id = :uid OR contractor_id = :uid",
                 ExpressionAttributeValues={":uid": contractor_id}
             )
 
@@ -1165,8 +1203,8 @@ async def get_my_bids(
 
             # Handle pagination if there are more items
             while 'LastEvaluatedKey' in response:
-                response = bids_table.query(
-                    KeyConditionExpression="user_id = :uid",
+                response = bids_table.scan(
+                    FilterExpression="user_id = :uid OR contractor_id = :uid",
                     ExpressionAttributeValues={":uid": contractor_id},
                     ExclusiveStartKey=response['LastEvaluatedKey']
                 )
@@ -1187,6 +1225,15 @@ async def get_my_bids(
             }
 
         except ClientError as e:
+            error_code = e.response['Error']['Code']
+            if error_code == 'ResourceNotFoundException':
+                # Table doesn't exist - return empty list for dev mode
+                logger.warning(f"[jobs] Bids table not found - returning empty list")
+                return {
+                    "success": True,
+                    "count": 0,
+                    "bids": []
+                }
             logger.error(f"[jobs] DynamoDB query error: {str(e)}")
             raise HTTPException(
                 status_code=500,
@@ -1228,9 +1275,21 @@ async def get_active_jobs(
         # Get contractor user ID
         user_id = get_current_user_from_token(current_user)
 
-        # Fetch contractor profile to get contractor_id
-        contractor = await get_contractor_profile(user_id)
-        contractor_id = contractor.get('contractor_id')
+        # Try to fetch contractor profile to get contractor_id
+        try:
+            contractor = await get_contractor_profile(user_id)
+            contractor_id = contractor.get('contractor_id')
+        except HTTPException as e:
+            if e.status_code == 404:
+                # Contractor profile doesn't exist - return empty list
+                logger.warning(f"[jobs] No contractor profile for user {user_id}")
+                return {
+                    "success": True,
+                    "count": 0,
+                    "jobs": [],
+                    "message": "No contractor profile found. Please create a contractor profile first."
+                }
+            raise
 
         # Scan jobs table for jobs awarded to this contractor
         # TODO: Use GSI on awarded_contractor_id for efficient queries
@@ -1266,6 +1325,15 @@ async def get_active_jobs(
             }
 
         except ClientError as e:
+            error_code = e.response['Error']['Code']
+            if error_code == 'ResourceNotFoundException':
+                # Table doesn't exist - return empty list for dev mode
+                logger.warning(f"[jobs] Jobs table not found - returning empty list")
+                return {
+                    "success": True,
+                    "count": 0,
+                    "jobs": []
+                }
             logger.error(f"[jobs] DynamoDB scan error: {str(e)}")
             raise HTTPException(
                 status_code=500,

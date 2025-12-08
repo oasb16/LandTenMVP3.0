@@ -681,10 +681,8 @@ async def get_incident(
 
             logger.info(f"[incidents] ✅ Retrieved incident: {incident_id}")
 
-            return {
-                "success": True,
-                "incident": incident
-            }
+            # Return incident directly (not wrapped in success object)
+            return incident
 
         except ClientError as e:
             logger.error(f"[incidents] DynamoDB error: {str(e)}")
@@ -697,6 +695,88 @@ async def get_incident(
         raise
     except Exception as e:
         logger.error(f"[incidents] ❌ Failed to fetch incident: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {str(e)}"
+        )
+
+
+# ============================================================================
+# LANDLORD ENDPOINT: GET PENDING INCIDENTS
+# ============================================================================
+
+@router.get("/landlord/pending")
+async def get_pending_incidents(
+    current_user: str = Depends(verify_firebase_token)
+):
+    """
+    Get all pending incidents for a landlord.
+
+    Flow:
+    1. Get landlord ID from token
+    2. Scan incidents table for landlord's incidents
+    3. Filter by status (created, discovery, landlord_review)
+    4. Return pending incidents sorted by created_at descending
+
+    Returns:
+        List of pending incidents for the landlord
+    """
+    logger.info(f"[incidents] Fetching pending incidents for landlord: {current_user}")
+
+    try:
+        # Get landlord user ID
+        landlord_id = get_current_user_from_token(current_user)
+
+        # Scan for landlord's incidents with pending statuses
+        try:
+            response = incidents_table.scan(
+                FilterExpression="landlord_id = :lid",
+                ExpressionAttributeValues={":lid": landlord_id}
+            )
+
+            incidents = response.get('Items', [])
+
+            # Handle pagination
+            while 'LastEvaluatedKey' in response:
+                response = incidents_table.scan(
+                    FilterExpression="landlord_id = :lid",
+                    ExpressionAttributeValues={":lid": landlord_id},
+                    ExclusiveStartKey=response['LastEvaluatedKey']
+                )
+                incidents.extend(response.get('Items', []))
+
+            # Filter for pending statuses (not yet converted to job)
+            pending_statuses = ['created', 'discovery', 'landlord_review']
+            pending_incidents = [
+                inc for inc in incidents
+                if inc.get('status', '').lower() in pending_statuses
+            ]
+
+            # Sort by created_at descending (newest first)
+            pending_incidents.sort(
+                key=lambda x: x.get('created_at', ''),
+                reverse=True
+            )
+
+            logger.info(f"[incidents] ✅ Found {len(pending_incidents)} pending incidents for landlord {landlord_id}")
+
+            return {
+                "success": True,
+                "count": len(pending_incidents),
+                "incidents": pending_incidents
+            }
+
+        except ClientError as e:
+            logger.error(f"[incidents] DynamoDB scan error: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Database error: {e.response['Error']['Message']}"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[incidents] ❌ Failed to fetch pending incidents: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail=f"Internal server error: {str(e)}"
