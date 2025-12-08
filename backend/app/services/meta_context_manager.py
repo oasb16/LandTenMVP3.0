@@ -186,6 +186,9 @@ class MetaContextManager:
                             except Exception as e:
                                 logger.error(f"Error syncing incident to graph: {e}")
 
+                context_data.pop("embedding", None)
+                context_data.pop("embedding_model", None)
+                meta_context.embedding = None
                 logger.info(f"Loaded context for user {user_id}, channel {channel_id}, context_data {context_data}, meta_context {meta_context} ")
                 return meta_context
 
