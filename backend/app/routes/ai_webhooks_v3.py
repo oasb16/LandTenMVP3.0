@@ -410,17 +410,23 @@ async def handle_new_message_background(payload: Dict[str, Any]) -> Dict[str, An
         meta_context = await context_manager.load_context(user_id, channel_id)
 
         # 🔧 STATE NORMALIZATION: Fix corrupted discovery state
-        # If discovery has questions/is_active but stage != "discovery", clear discovery state
-        if meta_context.stage != "discovery" and meta_context.discovery and len(meta_context.discovery.questions) > 0:
-            logger.warning(f"⚠️ Detected corrupted discovery state: stage={meta_context.stage} but discovery has {len(meta_context.discovery.questions)} questions. Clearing discovery state.")
-            await context_manager.update_context(user_id, channel_id, {
-                "discovery": {
-                    "question_index": 0,
-                    "questions": [],
-                    "answers": {},
-                }
-            })
-            meta_context = await context_manager.load_context(user_id, channel_id)
+        # Clear discovery state ONLY if stage is incompatible AND discovery is not actively in use
+        # For pre-incident discovery: stage="discovery", incident_id=None is VALID
+        # For post-incident discovery: stage="discovery", incident_id=set is VALID
+        # Only clear if stage is NOT "discovery" but discovery has leftover questions from a completed flow
+        if meta_context.stage not in ["discovery", "idle"] and meta_context.discovery and len(meta_context.discovery.questions) > 0:
+            # Check if discovery is actually complete (incident was already created)
+            if meta_context.active_incident_id and meta_context.stage in ["detected", "diagnosing", "work_order", "completed"]:
+                logger.warning(f"⚠️ Detected stale discovery state: stage={meta_context.stage} but discovery has {len(meta_context.discovery.questions)} leftover questions. Clearing discovery state.")
+                await context_manager.update_context(user_id, channel_id, {
+                    "discovery": {
+                        "question_index": 0,
+                        "questions": [],
+                        "answers": {},
+                        "is_active": False,
+                    }
+                })
+                meta_context = await context_manager.load_context(user_id, channel_id)
 
         # PHASE OMEGA OBJECTIVE #1: If agent blocked orchestrator, return immediately
         if agent_blocks_orchestrator:
