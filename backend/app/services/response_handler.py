@@ -41,7 +41,20 @@ class ResponseHandler:
         self.prompt_id = os.getenv("LANDTEN_PROMPT_ID")
 
         # Get available tools for function calling
-        self.tools = get_function_definitions()
+        raw_functions = get_function_definitions()
+
+        # Convert to Responses API format: each tool needs {"type": "function", "function": {...}}
+        self.tools = []
+        for func in raw_functions:
+            tool = {
+                "type": "function",
+                "function": {
+                    "name": func.name,
+                    "description": func.description,
+                    "parameters": func.parameters
+                }
+            }
+            self.tools.append(tool)
 
         if not self.prompt_id:
             raise ValueError(
