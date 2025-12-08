@@ -23,7 +23,8 @@ from ..models.incident import (
     IncidentStatus,
     IncidentPhoto,
     IncidentCategory,
-    IncidentUrgency
+    IncidentUrgency,
+    IncidentCreateRequest
 )
 from ..deps.auth import verify_firebase_token
 from ..repos.property_repo import PropertyRepo
@@ -140,12 +141,7 @@ def get_current_user_from_token(token: str) -> str:
 
 @router.post("/")
 async def create_incident(
-    property_id: str = Form(...),
-    unit_id: Optional[str] = Form(None),
-    title: str = Form(...),
-    description: str = Form(...),
-    category: str = Form(...),
-    urgency: str = Form(default="routine"),
+    request: IncidentCreateRequest,
     current_user: str = Depends(verify_firebase_token)
 ):
     """
@@ -153,7 +149,7 @@ async def create_incident(
 
     Flow:
     1. Validate input data
-    2. Fetch property to get landlord_id
+    2. Fetch property to get landlord_id (or use default for dev)
     3. Create incident with status=CREATED
     4. Save to DynamoDB
     5. Send notification to landlord
@@ -163,14 +159,14 @@ async def create_incident(
         Created incident data with incident_id
     """
     logger.info(
-        f"[incidents] Creating incident | tenant={current_user} property={property_id} category={category}"
+        f"[incidents] Creating incident | tenant={current_user} property={request.property_id} category={request.category}"
     )
 
     try:
         # Validate category and urgency
         try:
-            incident_category = IncidentCategory(category)
-            incident_urgency = IncidentUrgency(urgency)
+            incident_category = IncidentCategory(request.category)
+            incident_urgency = IncidentUrgency(request.urgency)
         except ValueError as e:
             raise HTTPException(
                 status_code=400,
@@ -180,15 +176,16 @@ async def create_incident(
         # Get tenant user ID
         tenant_id = get_current_user_from_token(current_user)
 
-        # Fetch property to get landlord_id
-        property_data = await get_property(property_id)
-        landlord_id = property_data.get('landlord_id')
-
-        if not landlord_id:
-            raise HTTPException(
-                status_code=400,
-                detail="Property does not have an assigned landlord"
-            )
+        # Fetch property to get landlord_id (or use default for dev)
+        landlord_id = "default-landlord"
+        if request.property_id and request.property_id != "default-property":
+            try:
+                property_data = await get_property(request.property_id)
+                landlord_id = property_data.get('landlord_id', 'default-landlord')
+            except HTTPException:
+                # Property not found, use default landlord for dev mode
+                logger.warning(f"[incidents] Property {request.property_id} not found, using default landlord")
+                pass
 
         # Generate incident ID
         incident_id = f"inc_{uuid.uuid4().hex[:12]}"
@@ -199,12 +196,12 @@ async def create_incident(
         incident_data = {
             "user_id": tenant_id,  # Partition key
             "incident_id": incident_id,  # Sort key
-            "property_id": property_id,
-            "unit_id": unit_id,
+            "property_id": request.property_id,
+            "unit_id": request.unit_id,
             "tenant_id": tenant_id,
             "landlord_id": landlord_id,
-            "title": title,
-            "description": description,
+            "title": request.title,
+            "description": request.description,
             "category": incident_category.value,
             "urgency": incident_urgency.value,
             "status": IncidentStatus.CREATED.value,
@@ -234,18 +231,15 @@ async def create_incident(
             "new_incident",
             {
                 "incident_id": incident_id,
-                "title": title,
-                "category": category,
-                "urgency": urgency,
-                "property_id": property_id,
+                "title": request.title,
+                "category": request.category,
+                "urgency": request.urgency,
+                "property_id": request.property_id,
                 "tenant_id": tenant_id
             }
         )
 
-        return {
-            "success": True,
-            "incident": incident_data
-        }
+        return incident_data
 
     except HTTPException:
         raise
@@ -588,11 +582,12 @@ async def get_my_incidents(
         # Get tenant user ID
         tenant_id = get_current_user_from_token(current_user)
 
-        # Query incidents by user_id (which is the partition key for tenant incidents)
+        # Query incidents by user_id
+        # Note: Using scan with filter since table may have incident_id as primary key
         try:
-            # Use query on partition key for efficient retrieval
-            response = incidents_table.query(
-                KeyConditionExpression="user_id = :uid",
+            # Use scan with filter expression to find all incidents for this user
+            response = incidents_table.scan(
+                FilterExpression="user_id = :uid OR tenant_id = :uid",
                 ExpressionAttributeValues={":uid": tenant_id}
             )
 
@@ -600,8 +595,8 @@ async def get_my_incidents(
 
             # Handle pagination if there are more items
             while 'LastEvaluatedKey' in response:
-                response = incidents_table.query(
-                    KeyConditionExpression="user_id = :uid",
+                response = incidents_table.scan(
+                    FilterExpression="user_id = :uid OR tenant_id = :uid",
                     ExpressionAttributeValues={":uid": tenant_id},
                     ExclusiveStartKey=response['LastEvaluatedKey']
                 )
@@ -615,11 +610,8 @@ async def get_my_incidents(
 
             logger.info(f"[incidents] ✅ Found {len(incidents)} incidents for {tenant_id}")
 
-            return {
-                "success": True,
-                "count": len(incidents),
-                "incidents": incidents
-            }
+            # Return incidents array directly (frontend expects array, not nested object)
+            return incidents
 
         except ClientError as e:
             logger.error(f"[incidents] DynamoDB query error: {str(e)}")

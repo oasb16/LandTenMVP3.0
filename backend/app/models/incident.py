@@ -38,8 +38,9 @@ class IncidentCategory(str, Enum):
 
 class IncidentUrgency(str, Enum):
     """Urgency levels for incidents."""
-    ROUTINE = "routine"  # Can wait, normal maintenance
-    URGENT = "urgent"  # Should be addressed within days
+    LOW = "low"  # Can wait, normal maintenance
+    MEDIUM = "medium"  # Should be addressed within days
+    HIGH = "high"  # Should be addressed soon
     EMERGENCY = "emergency"  # Requires immediate attention
 
 
@@ -77,7 +78,7 @@ class Incident(BaseModel):
     description: str = Field(..., description="Detailed description of the issue")
     category: IncidentCategory = Field(..., description="Category of the incident")
     urgency: IncidentUrgency = Field(
-        default=IncidentUrgency.ROUTINE,
+        default=IncidentUrgency.MEDIUM,
         description="How urgently this needs attention"
     )
 
@@ -154,7 +155,7 @@ class IncidentCreate(BaseModel):
     title: str = Field(..., max_length=200)
     description: str
     category: IncidentCategory
-    urgency: IncidentUrgency = IncidentUrgency.ROUTINE
+    urgency: IncidentUrgency = IncidentUrgency.MEDIUM
     photos: List[IncidentPhoto] = Field(default_factory=list)
 
 
@@ -170,3 +171,13 @@ class IncidentUpdate(BaseModel):
     estimated_cost: Optional[float] = None
     notes: Optional[str] = None
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class IncidentCreateRequest(BaseModel):
+    """Simplified request model for creating an incident from frontend."""
+    title: str = Field(..., max_length=200, description="Brief title of the incident")
+    description: str = Field(..., description="Detailed description of the issue")
+    category: str = Field(..., description="Category of the incident (plumbing, electrical, etc.)")
+    urgency: str = Field(default="medium", description="Urgency level (low, medium, high, emergency)")
+    property_id: Optional[str] = Field(default="default-property", description="Property ID (optional for dev)")
+    unit_id: Optional[str] = Field(None, description="Unit ID (optional)")

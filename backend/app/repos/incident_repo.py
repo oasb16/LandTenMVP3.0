@@ -42,6 +42,31 @@ class IncidentRepo:
                 # Return empty list if table doesn't exist or other error
                 return []
 
+    def get_incidents_by_tenant(self, tenant_id: str) -> List[Dict[str, Any]]:
+        """Get all incidents for a specific tenant (alias for list_incidents)"""
+        return self.list_incidents(tenant_id)
+
+    def get_incidents_by_landlord(self, landlord_id: str) -> List[Dict[str, Any]]:
+        """Get all incidents for properties owned by a landlord"""
+        try:
+            # Try to query using landlord_id
+            resp = self.table.query(
+                KeyConditionExpression="landlord_id = :lid",
+                ExpressionAttributeValues={":lid": landlord_id}
+            )
+            return resp.get("Items", [])
+        except Exception:
+            # If query fails, do a scan with filter
+            try:
+                resp = self.table.scan(
+                    FilterExpression="landlord_id = :lid",
+                    ExpressionAttributeValues={":lid": landlord_id}
+                )
+                return resp.get("Items", [])
+            except Exception:
+                # Return empty list if table doesn't exist or other error
+                return []
+
 
 def persist_incident(incident_data: Dict[str, Any]) -> Dict[str, Any]:
     """
