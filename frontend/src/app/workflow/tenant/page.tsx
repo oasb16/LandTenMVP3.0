@@ -19,6 +19,22 @@ export default function TenantWorkflowPage() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <ActionCard
+            title="Report New Incident"
+            description="Submit a maintenance request with photos and details"
+            icon="📝"
+            href="/tenant/incidents/new"
+            color="from-orange-600 to-red-600"
+          />
+
+          <ActionCard
+            title="My Incidents"
+            description="View and track all your reported incidents"
+            icon="📋"
+            href="/tenant/incidents"
+            color="from-blue-600 to-indigo-600"
+          />
+
+          <ActionCard
             title="AI Support Experience"
             description="Get intelligent help with incident reporting and tracking"
             icon="🤖"
@@ -36,19 +52,30 @@ export default function TenantWorkflowPage() {
 
           <ActionCard
             title="Dashboard"
-            description="View and manage all your incidents and repairs"
+            description="View all your incidents, repairs, and chat history"
             icon="📊"
             href="/dashboard/tenant"
             color="from-emerald-600 to-teal-600"
           />
 
           <ActionCard
-            title="Report New Incident"
-            description="Submit a maintenance request with photos and details"
-            icon="📝"
-            href="/ai-support"
-            color="from-orange-600 to-red-600"
+            title="Classic Chat"
+            description="Legacy chat interface with AI assistance"
+            icon="💭"
+            href="/legacy-chat"
+            color="from-slate-600 to-slate-700"
           />
+        </div>
+
+        <div className="mt-12 bg-slate-900 rounded-xl p-6 border border-slate-800">
+          <h2 className="text-2xl font-bold text-white mb-4">Tenant Workflow</h2>
+          <div className="space-y-3 text-slate-300">
+            <WorkflowStep number={1} text="Report an incident with photos and details" />
+            <WorkflowStep number={2} text="Track your incident status in real-time" />
+            <WorkflowStep number={3} text="Landlord reviews and creates a maintenance job" />
+            <WorkflowStep number={4} text="Contractor is assigned and completes the work" />
+            <WorkflowStep number={5} text="Receive notification when work is complete" />
+          </div>
         </div>
 
         <div className="mt-8 text-center">
@@ -86,5 +113,16 @@ function ActionCard({
       <h2 className="text-2xl font-bold text-white mb-2">{title}</h2>
       <p className="text-white text-opacity-90">{description}</p>
     </Link>
+  )
+}
+
+function WorkflowStep({ number, text }: { number: number; text: string }) {
+  return (
+    <div className="flex items-center gap-3">
+      <div className="flex-shrink-0 w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold">
+        {number}
+      </div>
+      <div>{text}</div>
+    </div>
   )
 }
