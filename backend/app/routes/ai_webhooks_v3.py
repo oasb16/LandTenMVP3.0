@@ -480,6 +480,12 @@ async def handle_new_message_background(payload: Dict[str, Any]) -> Dict[str, An
 
             # Special handling for discovery answer recording
             if orchestrator_output.function_call.name == "record_discovery_answer":
+                # Auto-inject question_index from meta_context if not provided
+                if "question_index" not in function_args:
+                    function_args["question_index"] = meta_context.discovery.question_index
+                    logger.info(f"✅ Auto-injected question_index={meta_context.discovery.question_index} from meta_context")
+
+                # Auto-inject total_questions from meta_context
                 function_args["total_questions"] = len(meta_context.discovery.questions)
 
             # Execute function
