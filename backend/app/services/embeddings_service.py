@@ -74,7 +74,8 @@ class EmbeddingsService:
                 # Check if cache is still valid
                 if datetime.now() - cached["timestamp"] < self.cache_ttl:
                     logger.debug(f"Cache hit for text: {text[:50]}...")
-                    return cached["embedding"]
+                    return None
+                    #return cached["embedding"]
                 else:
                     # Cache expired
                     del self.cache[cache_key]
@@ -93,7 +94,7 @@ class EmbeddingsService:
             if use_cache:
                 cache_key = self._get_cache_key(text)
                 self.cache[cache_key] = {
-                    "embedding": embedding,
+                    #"embedding": embedding,
                     "timestamp": datetime.now(),
                     "text_length": len(text),
                 }
