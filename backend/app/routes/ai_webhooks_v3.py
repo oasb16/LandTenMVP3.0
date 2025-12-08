@@ -409,6 +409,19 @@ async def handle_new_message_background(payload: Dict[str, Any]) -> Dict[str, An
         # Reload context after appending message
         meta_context = await context_manager.load_context(user_id, channel_id)
 
+        # 🔧 STATE NORMALIZATION: Fix corrupted discovery state
+        # If discovery has questions/is_active but stage != "discovery", clear discovery state
+        if meta_context.stage != "discovery" and meta_context.discovery and len(meta_context.discovery.questions) > 0:
+            logger.warning(f"⚠️ Detected corrupted discovery state: stage={meta_context.stage} but discovery has {len(meta_context.discovery.questions)} questions. Clearing discovery state.")
+            await context_manager.update_context(user_id, channel_id, {
+                "discovery": {
+                    "question_index": 0,
+                    "questions": [],
+                    "answers": {},
+                }
+            })
+            meta_context = await context_manager.load_context(user_id, channel_id)
+
         # PHASE OMEGA OBJECTIVE #1: If agent blocked orchestrator, return immediately
         if agent_blocks_orchestrator:
             logger.info("Agent blocked orchestrator - skipping orchestration")
@@ -595,10 +608,9 @@ async def handle_new_message_background(payload: Dict[str, Any]) -> Dict[str, An
 
                     function_args_2 = {**orchestrator_output_2.function_call.arguments}
 
-                    # Inject special parameters
-                    if orchestrator_output_2.function_call.name == "start_discovery":
-                        if "incident_id" not in function_args_2 and meta_context.active_incident_id:
-                            function_args_2["incident_id"] = meta_context.active_incident_id
+                    # NOTE: DO NOT auto-inject incident_id for start_discovery
+                    # If orchestrator omits incident_id, it means pre-incident discovery (collect info before creating incident)
+                    # Auto-injecting old incident_id would corrupt the discovery flow
 
                     function_result_2 = await execute_function(
                         function_name=orchestrator_output_2.function_call.name,
