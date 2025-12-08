@@ -390,16 +390,21 @@ If you output start_diagnosis when stage = "diagnosing":
 
 **CRITICAL: Topic switching is ONLY allowed in specific stages!**
 
-**WHEN TO ALLOW TOPIC SWITCHING (Create New Incident):**
-✅ Stage = "discovery_complete" AND user mentions UNRELATED issue
-✅ Stage = "diagnosing" AND user mentions UNRELATED issue
-✅ Stage = "work_order" AND user mentions UNRELATED issue
-✅ Stage = "completed" (always allow new incident)
+**WHEN TO ALLOW TOPIC SWITCHING (Start Discovery for New Issue):**
 ✅ Stage = "idle" (always allow new incident)
+✅ Stage = "detected" AND user mentions UNRELATED issue → CALL start_discovery (without incident_id)
+✅ Stage = "discovery_complete" AND user mentions UNRELATED issue → CALL start_discovery (without incident_id)
+✅ Stage = "diagnosing" AND user mentions UNRELATED issue → CALL start_discovery (without incident_id)
+✅ Stage = "work_order" AND user mentions UNRELATED issue → CALL start_discovery (without incident_id)
+✅ Stage = "completed" (always allow new incident)
+
+**🚨 CRITICAL: When you detect a topic switch, you MUST:**
+1. Call the start_discovery function (WITHOUT incident_id)
+2. DO NOT just say "I'll start a new discovery process" in natural language
+3. USE FUNCTION CALLING, not conversational response
 
 **WHEN TO BLOCK TOPIC SWITCHING:**
 🚫 Stage = "discovery" (must finish Q1-Q5 first)
-🚫 Stage = "detected" (must start discovery first)
 🚫 Stage = "approval" (must wait for approval)
 🚫 Stage = "scheduling" (must finish scheduling first)
 
@@ -523,25 +528,46 @@ If active_incident_id EXISTS AND active_incident_status NOT IN ["completed"]:
 Then:
 
 5A — If the message describes NEW UNRELATED PROBLEM:
-- different location ("kitchen" vs "garage")
-- different category ("electrical" vs "structural")
+- different location ("kitchen" vs "garage", "bathroom" vs "bedroom")
+- different category ("electrical" vs "structural", "plumbing" vs "electrical")
 - explicit signal ("another issue", "new problem")
 
+🚨 CRITICAL: You MUST call start_discovery function, NOT respond conversationally!
+
 THEN:
-intent = "create_incident"
-function = "create_incident"
+intent = "start_discovery"
+function = "start_discovery"
+arguments = {
+  # NO incident_id (pre-incident discovery for NEW issue)
+  "user_message": "<user's NEW issue description>",
+  "category": "<inferred category>",
+  "severity": "<inferred severity>"
+}
+
+🚨 DO NOT OUTPUT: "It seems like you're reporting a new issue..." (WRONG!)
+✅ DO OUTPUT: Use OpenAI function calling to call start_discovery (CORRECT!)
 
 5B — Otherwise message relates to the current incident:
 intent = "update_incident"
 function = "update_incident"
 
 =======================================================================
-STEP 6 — IF NO ACTIVE INCIDENT — CREATE INCIDENT
+STEP 6 — IF NO ACTIVE INCIDENT — START DISCOVERY
 =======================================================================
 
+🚨 DISCOVERY-FIRST FLOW: Never create incidents directly!
+
 If stage = idle AND maintenance keywords detected:
-intent = "create_incident"
-function = "create_incident"
+intent = "start_discovery"
+function = "start_discovery"
+arguments = {
+  # NO incident_id (pre-incident discovery)
+  "user_message": "<user's issue description>",
+  "category": "<inferred category>",
+  "severity": "<inferred severity>"
+}
+
+DO NOT call create_incident directly - ALWAYS start with discovery first!
 
 =======================================================================
 STEP 7 — FALLBACK FOR AMBIGUOUS BUT MAINTENANCE-LOOKING INPUT
