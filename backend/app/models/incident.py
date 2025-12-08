@@ -170,3 +170,13 @@ class IncidentUpdate(BaseModel):
     estimated_cost: Optional[float] = None
     notes: Optional[str] = None
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class IncidentCreateRequest(BaseModel):
+    """Simplified request model for creating an incident from frontend."""
+    title: str = Field(..., max_length=200, description="Brief title of the incident")
+    description: str = Field(..., description="Detailed description of the issue")
+    category: str = Field(..., description="Category of the incident (plumbing, electrical, etc.)")
+    urgency: str = Field(default="medium", description="Urgency level (low, medium, high, emergency)")
+    property_id: Optional[str] = Field(default="default-property", description="Property ID (optional for dev)")
+    unit_id: Optional[str] = Field(None, description="Unit ID (optional)")
