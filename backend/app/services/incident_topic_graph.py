@@ -53,7 +53,7 @@ class IncidentNode:
             "title": self.title,
             "description": self.description,
             "keywords": list(self.keywords),
-            "embedding": self.embedding,  # Include embedding in serialization
+            #"embedding": self.embedding,  # Include embedding in serialization
             "created_at": self.created_at,
             "status": self.status,
             "child_incidents": self.child_incidents,
@@ -438,11 +438,6 @@ class IncidentTopicGraph:
             retry_count: Current retry attempt (internal)
             max_retries: Maximum number of retries
         """
-        # 🚨 CRITICAL FIX: Don't save empty graphs (wastes DynamoDB writes)
-        if len(self.nodes) == 0:
-            logger.debug(f"⏭️ Skipping save of empty incident graph for user {self.user_id}")
-            return
-
         try:
             from ..services.dynamo_service import get_dynamodb_resource
 
@@ -459,11 +454,9 @@ class IncidentTopicGraph:
             print("===== user_id: ========", self.user_id)
 
             # Save to DynamoDB with PK/SK pattern
-            # SCHEMA FIX: landten_incidents has PK=user_id, SK=incident_id
             item = {
-                "user_id": self.user_id,  # PK: user_id
-                "incident_id": f"GRAPH#{self.user_id}",  # SK: incident_id with GRAPH# prefix
-                "tenant_id": self.user_id,  # Keep for compatibility
+                "incident_id": f"GRAPH#{self.user_id}",  # Use incident_id as PK
+                "tenant_id": self.user_id,
                 "graph_data": graph_data_serialized,  # Store dict directly, no json.dumps
                 "node_count": len(self.nodes),
                 "edge_count": len(self.edges),
@@ -475,6 +468,7 @@ class IncidentTopicGraph:
                 "category": "system",
                 "severity": "low",
                 "urgency": "routine",
+                "user_id": self.user_id
             }
 
             table.put_item(Item=item)
@@ -540,14 +534,15 @@ class IncidentTopicGraph:
             dynamodb = get_dynamodb_resource()
             table = dynamodb.Table("landten_incidents")
 
-            # Query DynamoDB using composite primary key (PK + SK)
-            # SCHEMA FIX: landten_incidents has PK=user_id, SK=incident_id
-            response = table.get_item(
-                Key={
-                    "user_id": user_id,                  # PK
-                    "incident_id": f"GRAPH#{user_id}",  # SK
-                }
-            )
+            # Query DynamoDB using incident_id as PK
+            try:
+                response = table.get_item(
+                    Key={
+                        "incident_id": f"GRAPH#{user_id}",
+                    }
+                )
+            except:
+                logger.warning(f"⚠️ Failed to retrieve incident grap GRAPH#{user_id} for user {user_id}: {e}")
 
             if "Item" not in response:
                 logger.debug(f"No saved incident graph found for user {user_id}")
@@ -650,7 +645,7 @@ class IncidentTopicGraph:
                 title=node_data["title"],
                 description=node_data["description"],
                 keywords=set(node_data["keywords"]),
-                embedding=node_data.get("embedding"),  # PHASE OMEGA: Restore embeddings
+                #embedding=node_data.get("embedding"),  # PHASE OMEGA: Restore embeddings
             )
             node.status = node_data["status"]
             node.created_at = node_data["created_at"]
