@@ -341,6 +341,14 @@ async def upload_photo(
 
         # Upload to S3
         try:
+            logger.info(f"Putting item in {BUCKET_NAME}")
+            buckets = s3_client.list_buckets()
+            bucket_names = [b['Name'] for b in buckets.get('Buckets', [])]
+            logger.info(f"[contractors] 🪣 Available S3 buckets: {bucket_names}")
+        except ClientError as e:
+            logger.error(f"[contractors] ⚠️ Failed to list buckets: {e}")
+
+        try:
             s3_client.put_object(
                 Bucket=BUCKET_NAME,
                 Key=s3_key,
