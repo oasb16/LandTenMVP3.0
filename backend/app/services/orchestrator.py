@@ -502,28 +502,41 @@ NEVER mix both modes.
 
         # PHASE OMEGA OBJECTIVE #5: DISCOVERY DE-DUPLICATION
         if output.function_call.name == "start_discovery":
-            incident = None
-            try:
-                from ..services.dynamo_service import get_dynamo_service
-                dynamo = get_dynamo_service()
-                incident = dynamo.get_incident(
-                    meta_context.active_incident_id,
-                    meta_context.user_id
-                )
-            except Exception as e:
-                logger.error(f"Error checking incident status: {e}")
+            # Check if this is for the SAME incident or a NEW issue
+            # If incident_id is in arguments and matches active_incident_id, it's a duplicate
+            # If no incident_id in arguments, it's a NEW issue (pre-incident discovery) - allow it
+            requested_incident_id = output.function_call.arguments.get("incident_id")
 
-            if incident:
-                incident_status = incident.get("status")
-                if incident_status in ["discovery", "discovery_complete", "diagnosing", "work_order"]:
-                    logger.warning(f"🛑 GUARDRAIL: Blocked duplicate start_discovery (status={incident_status})")
-                    return OrchestratorOutput(
-                        intent="general.chat",
-                        reasoning=f"Discovery already started/completed for this incident",
-                        context_updates=ContextUpdates(),
-                        function_call=FunctionCall(name=None, arguments={}),
-                        response_to_user="I'm already gathering information about this issue. What else would you like me to know?",
+            # Only block if trying to restart discovery for the SAME incident
+            if requested_incident_id and requested_incident_id == meta_context.active_incident_id:
+                incident = None
+                try:
+                    from ..services.dynamo_service import get_dynamo_service
+                    dynamo = get_dynamo_service()
+                    incident = dynamo.get_incident(
+                        meta_context.active_incident_id,
+                        meta_context.user_id
                     )
+                except Exception as e:
+                    logger.error(f"Error checking incident status: {e}")
+
+                if incident:
+                    incident_status = incident.get("status")
+                    if incident_status in ["discovery", "discovery_complete", "diagnosing", "work_order"]:
+                        logger.warning(f"🛑 GUARDRAIL: Blocked duplicate start_discovery for incident {requested_incident_id} (status={incident_status})")
+                        return OrchestratorOutput(
+                            intent="general.chat",
+                            reasoning=f"Discovery already started/completed for this incident",
+                            context_updates=ContextUpdates(),
+                            function_call=FunctionCall(name=None, arguments={}),
+                            response_to_user="I'm already gathering information about this issue. What else would you like me to know?",
+                        )
+            else:
+                # No incident_id or different incident_id - this is a NEW issue, allow it
+                if not requested_incident_id:
+                    logger.info("✅ Allowing pre-incident discovery for NEW issue")
+                else:
+                    logger.info(f"✅ Allowing discovery for different incident {requested_incident_id}")
 
         # PHASE OMEGA OBJECTIVE #6: DIAGNOSIS DE-DUPLICATION
         if output.function_call.name == "start_diagnosis":
