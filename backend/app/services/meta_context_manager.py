@@ -186,7 +186,7 @@ class MetaContextManager:
                             except Exception as e:
                                 logger.error(f"Error syncing incident to graph: {e}")
 
-                logger.info(f"Loaded context for user {user_id}, channel {channel_id}, context_data {context_data}")
+                logger.info(f"Loaded context for user {user_id}, channel {channel_id}, context_data {context_data}, meta_context {meta_context} ")
                 return meta_context
 
             elif create_if_missing:
