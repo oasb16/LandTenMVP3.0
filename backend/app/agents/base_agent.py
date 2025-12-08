@@ -100,6 +100,8 @@ class BaseAgent(ABC):
 
             response_text = response.choices[0].message.content
 
+            logger.info(f"💬 [{self.agent_name}] Response: {response_text}")
+
             logger.info(f"✅ [{self.agent_name}] Response generated")
 
             return {
