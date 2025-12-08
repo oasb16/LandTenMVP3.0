@@ -389,14 +389,14 @@ class ResponseHandler:
                             content["assistant_message"] = content_item.get("text", "")
                             break
 
-            # Extract tool calls
-            elif item.type == "function_call" or hasattr(item, "function"):
+            # Extract tool calls (Responses API uses flat format: item.name, not item.function.name)
+            elif item.type == "function_call" or hasattr(item, "name"):
                 content["tool_calls"].append({
                     "id": item.id,
                     "type": "function",
                     "function": {
-                        "name": item.function.name,
-                        "arguments": item.function.arguments
+                        "name": item.name,  # Flat format in Responses API
+                        "arguments": item.arguments  # Flat format in Responses API
                     }
                 })
 
