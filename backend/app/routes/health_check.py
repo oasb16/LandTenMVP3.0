@@ -97,23 +97,41 @@ async def detailed_health_check():
         }
         health_status["overall"] = "degraded"
 
-    # Check Orchestrator
+    # Check ResponseHandler (Responses API)
     try:
-        from ..services.orchestrator import get_orchestrator
+        from ..services.response_handler import get_response_handler
 
-        orchestrator = get_orchestrator()
+        response_handler = get_response_handler()
 
-        health_status["components"]["orchestrator"] = {
+        health_status["components"]["response_handler"] = {
             "status": "healthy",
-            "model": orchestrator.model,
+            "prompt_id": response_handler.prompt_id,
         }
     except Exception as e:
-        logger.error(f"Orchestrator health check failed: {e}")
-        health_status["components"]["orchestrator"] = {
+        logger.error(f"ResponseHandler health check failed: {e}")
+        health_status["components"]["response_handler"] = {
             "status": "unhealthy",
             "error": str(e),
         }
         health_status["overall"] = "degraded"
+
+    # DEPRECATED: Orchestrator check (replaced by ResponseHandler)
+    # try:
+    #     from ..services.orchestrator import get_orchestrator
+    #
+    #     orchestrator = get_orchestrator()
+    #
+    #     health_status["components"]["orchestrator"] = {
+    #         "status": "healthy",
+    #         "model": orchestrator.model,
+    #     }
+    # except Exception as e:
+    #     logger.error(f"Orchestrator health check failed: {e}")
+    #     health_status["components"]["orchestrator"] = {
+    #         "status": "unhealthy",
+    #         "error": str(e),
+    #     }
+    #     health_status["overall"] = "degraded"
 
     return health_status
 

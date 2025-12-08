@@ -1,5 +1,19 @@
 """
-🔒 PRIMARY CONTEXT MANAGER for LandTen V3 AI Orchestrator
+⚠️ DEPRECATED: This service is being phased out.
+
+State management is now handled by ConversationManager (Responses API).
+The OpenAI Conversations API provides native state storage, replacing custom meta_context.
+
+MIGRATION STATUS:
+- Still used for: Backward compatibility during Responses API migration
+- Will be removed after: Full migration to Conversations API is complete
+- New code should use: ConversationManager (backend/app/services/conversation_manager.py)
+
+See backend/app/archived/README.md for migration details.
+
+---
+
+🔒 PRIMARY CONTEXT MANAGER for LandTen V3 AI Orchestrator (LEGACY)
 THIS IS THE ONLY CONTEXT MANAGER - DO NOT USE context_manager.py
 
 Manages conversation state, flow stages, and context persistence for the LLM orchestrator.

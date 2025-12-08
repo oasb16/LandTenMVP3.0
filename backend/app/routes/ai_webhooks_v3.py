@@ -17,8 +17,9 @@ from ..services.stream_bot import get_bot
 from ..services.response_handler import get_response_handler
 from ..services.conversation_manager import get_conversation_manager
 from ..services.meta_context_manager import get_meta_context_manager
-from ..services.orchestrator import get_orchestrator
-from ..services.ai_support_orchestrator import get_ai_support_orchestrator
+# DEPRECATED: Orchestrator replaced by ResponseHandler (Responses API)
+# from ..services.orchestrator import get_orchestrator
+# from ..services.ai_support_orchestrator import get_ai_support_orchestrator
 from ..functions.function_registry import (
     get_function_definitions,
     execute_function,
