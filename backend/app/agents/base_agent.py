@@ -91,6 +91,9 @@ class BaseAgent(ABC):
         # Call LLM (via rate-limit-aware wrapper)
         try:
             openai_wrapper = get_openai_wrapper()
+            logger.info(f"💬 [{self.agent_name}] Sending message to LLM"
+                        )
+            logger.info(f"messages being sent : {messages}")
             response = await openai_wrapper.chat_completion(
                 model=self.model,
                 max_tokens=2048,
@@ -99,9 +102,8 @@ class BaseAgent(ABC):
             )
 
             response_text = response.choices[0].message.content
-
+            logger.info(f"💬 [{self.agent_name}] LLM response received")
             logger.info(f"💬 [{self.agent_name}] Response: {response_text}")
-
             logger.info(f"✅ [{self.agent_name}] Response generated")
 
             return {

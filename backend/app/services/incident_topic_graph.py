@@ -53,7 +53,7 @@ class IncidentNode:
             "title": self.title,
             "description": self.description,
             "keywords": list(self.keywords),
-            #"embedding": self.embedding,  # Include embedding in serialization
+            "embedding": self.embedding,  # Include embedding in serialization
             "created_at": self.created_at,
             "status": self.status,
             "child_incidents": self.child_incidents,
@@ -645,7 +645,7 @@ class IncidentTopicGraph:
                 title=node_data["title"],
                 description=node_data["description"],
                 keywords=set(node_data["keywords"]),
-                #embedding=node_data.get("embedding"),  # PHASE OMEGA: Restore embeddings
+                embedding=node_data.get("embedding"),  # PHASE OMEGA: Restore embeddings
             )
             node.status = node_data["status"]
             node.created_at = node_data["created_at"]

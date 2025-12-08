@@ -829,6 +829,7 @@ NEVER mix both modes.
             # Call OpenAI with tool use (via rate-limit-aware wrapper)
             try:
                 openai_wrapper = get_openai_wrapper()
+                logger.info(f"messages being sent to LLM: {messages}")
                 response = await openai_wrapper.chat_completion(
                     model=self.model,
                     max_tokens=self.max_tokens,
@@ -855,6 +856,8 @@ NEVER mix both modes.
 
             # Extract response
             message = response.choices[0].message
+            logger.info("Orchestrator LLM response received")
+            logger.info(f"Response content: {message}")
 
             # Check if response contains tool calls (OpenAI native tool calling)
             if message.tool_calls:
@@ -949,6 +952,8 @@ NEVER mix both modes.
             # Use wrapper for rate-limit awareness
             try:
                 openai_wrapper = get_openai_wrapper()
+                logger.info("Calling simple orchestrator LLM")
+                logger.info(f"messages being sent : {messages}")
                 response = await openai_wrapper.chat_completion(
                     model=self.model,
                     max_tokens=1024,
@@ -957,6 +962,8 @@ NEVER mix both modes.
                 )
 
                 if response.choices and response.choices[0].message.content:
+                    logger.info("Simple orchestrator LLM response received")
+                    logger.info(f"Response content: {response.choices[0].message.content}")
                     return response.choices[0].message.content
 
                 return "I'm not sure how to respond to that."

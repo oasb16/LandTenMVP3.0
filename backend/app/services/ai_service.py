@@ -6,8 +6,8 @@ try:  # pragma: no cover - optional dependency
     from openai import OpenAI
 except ImportError:  # pragma: no cover
     OpenAI = None  # type: ignore
-
-
+import logging
+logger = logging.getLogger(__name__)
 _openai_client: Optional["OpenAI"] = None
 
 
@@ -71,6 +71,8 @@ Chat:
 """
 
         try:
+            logger.info(f"🤖 [AI Service] Step {step+1}/{n_refine} - Sending message to LLM")
+            logger.info(f"messages being sent : {prompt}")
             response = await openai_wrapper.chat_completion(
                 model=model,
                 messages=[
@@ -82,7 +84,8 @@ Chat:
             )
 
             raw_content = response.choices[0].message.content
-
+            logger.info(f"🤖 [AI Service] Step {step+1}/{n_refine} - LLM response received")
+            logger.info(f"🤖 [AI Service] Step {step+1}/{n_refine} - Response: {raw_content}")
             try:
                 data = json.loads(raw_content)
                 reasoning = data.get("reasoning", reasoning)
