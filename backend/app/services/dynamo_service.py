@@ -699,6 +699,92 @@ class DynamoService:
     def get_user(user_id: str) -> Optional[Dict[str, Any]]:
         return UserDB.get_user(user_id)
 
+    # Conversation mapping operations (for Responses API migration)
+    @staticmethod
+    def save_conversation_mapping(
+        channel_id: str,
+        conversation_id: str,
+        user_id: str = "",
+        persona: str = "tenant"
+    ) -> bool:
+        """
+        Store channel_id → conversation_id mapping.
+
+        Used by ConversationManager to map Slack channels to OpenAI Conversations.
+
+        Args:
+            channel_id: Slack channel ID
+            conversation_id: OpenAI Conversation ID
+            user_id: User identifier
+            persona: User role (tenant, landlord, contractor)
+
+        Returns:
+            bool: True if successful
+        """
+        dynamodb = get_dynamodb_resource()
+        table_name = os.getenv("CONVERSATION_MAPPING_TABLE", "landten_conversation_mappings")
+        table = dynamodb.Table(table_name)
+
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            item = {
+                "channel_id": channel_id,
+                "conversation_id": conversation_id,
+                "user_id": user_id,
+                "persona": persona,
+                "created_at": now,
+                "updated_at": now,
+            }
+            table.put_item(Item=item)
+            return True
+        except Exception as e:
+            print(f"[conversation-mapping] Failed to save mapping: {e}")
+            return False
+
+    @staticmethod
+    def get_conversation_mapping(channel_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve conversation_id for a channel.
+
+        Args:
+            channel_id: Slack channel ID
+
+        Returns:
+            dict or None: Mapping data if found, None otherwise
+        """
+        dynamodb = get_dynamodb_resource()
+        table_name = os.getenv("CONVERSATION_MAPPING_TABLE", "landten_conversation_mappings")
+        table = dynamodb.Table(table_name)
+
+        try:
+            response = table.get_item(Key={"channel_id": channel_id})
+            return response.get("Item")
+        except Exception as e:
+            print(f"[conversation-mapping] Failed to get mapping for {channel_id}: {e}")
+            return None
+
+    @staticmethod
+    def delete_conversation_mapping(channel_id: str) -> bool:
+        """
+        Delete channel → conversation mapping.
+
+        Args:
+            channel_id: Slack channel ID
+
+        Returns:
+            bool: True if successful
+        """
+        dynamodb = get_dynamodb_resource()
+        table_name = os.getenv("CONVERSATION_MAPPING_TABLE", "landten_conversation_mappings")
+        table = dynamodb.Table(table_name)
+
+        try:
+            table.delete_item(Key={"channel_id": channel_id})
+            return True
+        except Exception as e:
+            print(f"[conversation-mapping] Failed to delete mapping: {e}")
+            return False
+
 
 _dynamo_service = None
 
