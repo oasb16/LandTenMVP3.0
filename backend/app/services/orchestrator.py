@@ -791,12 +791,27 @@ NEVER mix both modes.
             user_content = "\n".join(user_content_parts)
 
             # 🚨 CRITICAL FIX: Shortened stage hints to reduce token usage (500+ → 100 tokens each)
-            if meta_context.stage == "discovery" and meta_context.active_incident_id:
-                user_content = (
-                    f"🔍 Discovery Q{meta_context.discovery.question_index} for {meta_context.active_incident_id}. "
-                    f"Record answer or create new incident if topic shift.\n"
-                    + user_content
-                )
+            if meta_context.stage == "discovery":
+                # Check if this is pre-incident discovery (discovery.incident_id = None)
+                # vs traditional discovery (discovery.incident_id = set)
+                discovery_incident_id = None
+                if meta_context.discovery and hasattr(meta_context.discovery, "incident_id"):
+                    discovery_incident_id = meta_context.discovery.incident_id
+
+                if discovery_incident_id:
+                    # Traditional discovery: use the discovery's incident_id
+                    user_content = (
+                        f"🔍 Discovery Q{meta_context.discovery.question_index} for {discovery_incident_id}. "
+                        f"Record answer with incident_id={discovery_incident_id}.\n"
+                        + user_content
+                    )
+                else:
+                    # Pre-incident discovery: NEW issue, don't pass any incident_id
+                    user_content = (
+                        f"🔍 Pre-incident Discovery Q{meta_context.discovery.question_index} for NEW issue. "
+                        f"Record answer WITHOUT incident_id parameter.\n"
+                        + user_content
+                    )
 
             if meta_context.stage == "discovery_complete" and meta_context.active_incident_id:
                 user_content = (
