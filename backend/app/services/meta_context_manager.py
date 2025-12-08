@@ -106,6 +106,14 @@ class MetaContextManager:
         context.setdefault("entities", {})
         context.setdefault("metadata", {})
 
+        # 🚨 CRITICAL FIX: Strip incident_graph from metadata to prevent context bloat
+        # Old embedding data may still exist in DynamoDB from before this fix
+        # Embeddings in the graph cause rate limit issues (TPM exceeded)
+        if "metadata" in context and isinstance(context["metadata"], dict):
+            if "incident_graph" in context["metadata"]:
+                logger.info("🗑️ Stripped incident_graph from metadata (prevents context bloat)")
+                context["metadata"].pop("incident_graph", None)
+
         # Normalize discovery structure
         if "discovery" in context and not isinstance(context["discovery"], dict):
             context["discovery"] = {}
