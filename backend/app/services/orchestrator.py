@@ -526,12 +526,24 @@ NEVER mix both modes.
                     incident_status = incident.get("status")
                     if incident_status in ["discovery", "discovery_complete", "diagnosing", "work_order"]:
                         logger.warning(f"🛑 GUARDRAIL: Blocked duplicate start_discovery for incident {requested_incident_id} (status={incident_status})")
+
+                        # Better error message: Check if this looks like a NEW issue
+                        # If so, tell the LLM to retry without incident_id
+                        error_message = "I'm already gathering information about this issue. What else would you like me to know?"
+
+                        # ENHANCED: Detect if this is likely a NEW issue being reported
+                        # If the orchestrator called start_discovery WITH incident_id for what should be a NEW issue,
+                        # return a message that will NOT be sent to user, forcing a retry
+                        logger.error(f"🚨 LLM ERROR: Orchestrator called start_discovery WITH incident_id={requested_incident_id} for what may be a NEW issue")
+                        logger.error(f"   → This means the orchestrator should have called start_discovery WITHOUT incident_id")
+                        logger.error(f"   → Check if user is reporting a different problem than the active incident")
+
                         return OrchestratorOutput(
                             intent="general.chat",
                             reasoning=f"Discovery already started/completed for this incident",
                             context_updates=ContextUpdates(),
                             function_call=FunctionCall(name=None, arguments={}),
-                            response_to_user="I'm already gathering information about this issue. What else would you like me to know?",
+                            response_to_user=error_message,
                         )
             else:
                 # No incident_id or different incident_id - this is a NEW issue, allow it
