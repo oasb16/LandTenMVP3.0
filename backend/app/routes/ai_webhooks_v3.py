@@ -557,7 +557,9 @@ async def handle_new_message_background(payload: Dict[str, Any]) -> Dict[str, An
                 # 🚨 NEW: Check if discovery is complete
                 if function_result.data.get("discovery_complete"):
                     # For pre-incident discovery: call create_incident_from_discovery
-                    if not meta_context.active_incident_id and function_result.data.get("discovery_data"):
+                    # Check if incident_id is None (pre-incident discovery), not if meta_context has no active_incident_id
+                    # because there might be an OLD incident still "active" in the context
+                    if function_result.data.get("incident_id") is None and function_result.data.get("discovery_data"):
                         logger.info("✅ Pre-incident discovery complete - creating incident from Q&A")
 
                         # Get the last user message (initial issue report)
