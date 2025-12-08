@@ -18,9 +18,9 @@ type Incident = {
   incident_id: string;
   title: string;
   description: string;
-  category: string;
-  urgency: string;
-  status: string;
+  category?: string;
+  urgency?: string;
+  status?: string;
   property_id: string;
   unit_id?: string;
   tenant_id: string;
@@ -28,8 +28,8 @@ type Incident = {
   photos?: string[] | any[];
   discovery_data?: any;
   job_id?: string;
-  created_at: string;
-  updated_at: string;
+  created_at?: string;
+  updated_at?: string;
 };
 
 export default function TenantIncidentDetailPage() {
@@ -96,7 +96,8 @@ export default function TenantIncidentDetailPage() {
     }
   };
 
-  const getUrgencyColor = (urgency: string) => {
+  const getUrgencyColor = (urgency?: string) => {
+    if (!urgency) return "bg-slate-800 text-slate-400 border-slate-500";
     switch (urgency.toLowerCase()) {
       case "low":
         return "bg-green-900/30 text-green-400 border-green-500";
@@ -111,7 +112,8 @@ export default function TenantIncidentDetailPage() {
     }
   };
 
-  const getStatusColor = (status: string) => {
+  const getStatusColor = (status?: string) => {
+    if (!status) return "bg-slate-800 text-slate-400 border-slate-500";
     switch (status.toLowerCase()) {
       case "created":
         return "bg-blue-900/30 text-blue-400 border-blue-500";
@@ -130,7 +132,8 @@ export default function TenantIncidentDetailPage() {
     }
   };
 
-  const getStatusLabel = (status: string) => {
+  const getStatusLabel = (status?: string) => {
+    if (!status) return "Unknown";
     return status
       .split("_")
       .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
@@ -207,7 +210,7 @@ export default function TenantIncidentDetailPage() {
                   incident.urgency
                 )}`}
               >
-                {incident.urgency.toUpperCase()}
+                {incident.urgency?.toUpperCase() || "UNKNOWN"}
               </span>
             </div>
           </div>
@@ -241,7 +244,7 @@ export default function TenantIncidentDetailPage() {
             <p className="text-slate-300 whitespace-pre-wrap">{incident.description}</p>
             <div className="mt-4 flex items-center gap-3">
               <span className="px-3 py-1 bg-slate-800 rounded text-sm capitalize">
-                {incident.category}
+                {incident.category || "Uncategorized"}
               </span>
             </div>
           </div>
