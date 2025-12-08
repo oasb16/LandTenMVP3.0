@@ -597,8 +597,8 @@ async def close_incident(
 
 
 async def start_discovery(
-    incident_id: str,
     channel_id: str,
+    incident_id: Optional[str] = None,
     user_id: Optional[str] = None,
     category: Optional[str] = None,
     severity: Optional[str] = None,
@@ -607,20 +607,26 @@ async def start_discovery(
 ) -> FunctionResult:
     """
     ChatGPT-style dynamic discovery - ALWAYS uses LLM-generated questions.
-    No static question banks.
+
+    🚨 NEW: Works with OR without incident_id
+    - WITH incident_id: Traditional flow (incident exists, add discovery)
+    - WITHOUT incident_id: Pre-incident discovery (collect info BEFORE creating incident)
     """
     try:
         bot = get_bot()
         dynamo = get_dynamo_service()
 
-        # Get incident details if category/severity not provided
-        incident = dynamo.get_incident(incident_id, user_id)
+        # Get incident details if incident_id provided
+        incident = None
+        if incident_id:
+            incident = dynamo.get_incident(incident_id, user_id)
 
         if incident:
             category = category or incident.get("category", "general")
             severity = severity or incident.get("severity", "medium")
             user_message = user_message or incident.get("description", "")
         else:
+            # Pre-incident discovery: infer category from user message
             category = category or "general"
             severity = severity or "medium"
             user_message = user_message or ""
@@ -639,15 +645,16 @@ async def start_discovery(
 
             logger.info(f"✨ Generated {len(questions)} ChatGPT-style discovery questions")
 
-            # Store questions in incident for later reference
-            dynamo.update_incident_status(
-                incident_id=incident_id,
-                status="discovery",
-                user_id=user_id or incident.get("user_id"),
-                discovery_responses={"questions": questions},
-            )
+            # Store questions in incident (if incident exists)
+            if incident_id and incident:
+                dynamo.update_incident_status(
+                    incident_id=incident_id,
+                    status="discovery",
+                    user_id=user_id or incident.get("user_id"),
+                    discovery_responses={"questions": questions},
+                )
 
-        # Update incident status to 'discovery' if not already
+        # Update incident status to 'discovery' if incident exists
         if incident and incident.get("status") not in ["discovery", "discovery_complete", "diagnosing", "work_order", "completed"]:
             dynamo.update_incident_status(
                 incident_id=incident_id,
@@ -678,9 +685,9 @@ async def start_discovery(
         bot.send_ai_message(
             channel_id=channel_id,
             persona="tenant",
-            text=expandable_text,
+            text=full_message,  # Send plain text, not expandable
             metadata={
-                "incident_id": incident_id,
+                "incident_id": incident_id,  # None for pre-incident discovery
                 "question_index": 0,
                 "total_questions": total,
                 "actionable": True,
@@ -688,12 +695,15 @@ async def start_discovery(
         )
 
         user_message_sent = True
-        logger.info(f"Started ChatGPT-style discovery for incident {incident_id} with {len(questions)} questions")
+        if incident_id:
+            logger.info(f"Started ChatGPT-style discovery for incident {incident_id} with {len(questions)} questions")
+        else:
+            logger.info(f"Started pre-incident discovery with {len(questions)} questions (incident will be created after Q5)")
 
         return FunctionResult(
             success=True,
             data={
-                "incident_id": incident_id,
+                "incident_id": incident_id,  # None for pre-incident discovery
                 "questions": questions,
                 "current_question": questions[0],
                 "question_index": 0,
@@ -709,6 +719,107 @@ async def start_discovery(
             success=False,
             error=str(e),
             message="Failed to start discovery",
+        )
+
+
+async def create_incident_from_discovery(
+    channel_id: str,
+    user_id: str,
+    discovery_data: dict,
+    property_id: Optional[str] = None,
+) -> FunctionResult:
+    """
+    Create incident from completed discovery Q&A.
+    Called after all 5 discovery questions are answered.
+
+    Args:
+        discovery_data: Should contain:
+            - initial_message: user's original report
+            - questions: list of 5 questions
+            - answers: dict of {question_idx: answer_text}
+    """
+    try:
+        from ..services.ai_service import get_ai_response_async
+
+        # Extract discovery data
+        initial_message = discovery_data.get("initial_message", "")
+        questions = discovery_data.get("questions", [])
+        answers = discovery_data.get("answers", {})
+
+        # Build Q&A summary
+        qa_summary = f"Initial report: {initial_message}\n\n"
+        for i, question in enumerate(questions):
+            answer = answers.get(str(i), answers.get(i, "No answer"))
+            qa_summary += f"Q{i+1}: {question}\nA{i+1}: {answer}\n\n"
+
+        # Use AI to synthesize incident details from Q&A
+        synthesis_prompt = f"""Analyze this maintenance issue report and discovery Q&A, then extract structured incident details.
+
+{qa_summary}
+
+Return ONLY a JSON object with these exact fields:
+{{
+  "title": "Short descriptive title (3-8 words)",
+  "description": "Detailed description combining all Q&A (2-3 sentences)",
+  "category": "electrical|plumbing|hvac|appliance|structural|pest|safety|other",
+  "severity": "low|medium|high|emergency",
+  "urgency": "routine|urgent|immediate"
+}}"""
+
+        # Get AI synthesis
+        response = await get_ai_response_async(
+            message=synthesis_prompt,
+            persona="assistant",
+            context="You are a maintenance triage expert.",
+        )
+
+        # Parse JSON from response
+        import json
+        import re
+
+        # Strip markdown code blocks
+        cleaned_response = response.strip()
+        cleaned_response = re.sub(r'^```(?:json)?\s*\n', '', cleaned_response)
+        cleaned_response = re.sub(r'\n```\s*$', '', cleaned_response)
+
+        incident_details = json.loads(cleaned_response)
+
+        # Create incident with synthesized details
+        result = await create_incident(
+            title=incident_details.get("title", initial_message[:50]),
+            description=incident_details.get("description", qa_summary),
+            category=incident_details.get("category", "general"),
+            severity=incident_details.get("severity", "medium"),
+            urgency=incident_details.get("urgency", "routine"),
+            user_id=user_id,
+            channel_id=channel_id,
+            property_id=property_id,
+        )
+
+        if result.success:
+            incident_id = result.data.get("incident_id")
+            logger.info(f"✅ Created incident {incident_id} from discovery Q&A")
+
+            # Send confirmation to user
+            bot = get_bot()
+            bot.send_ai_message(
+                channel_id=channel_id,
+                persona="tenant",
+                text=f"Thanks for all those details! I've created incident **{incident_id}** and we'll get this resolved for you.",
+                metadata={"incident_id": incident_id},
+            )
+
+            return result
+        else:
+            logger.error(f"Failed to create incident from discovery: {result.error}")
+            return result
+
+    except Exception as e:
+        logger.error(f"Error creating incident from discovery: {e}", exc_info=True)
+        return FunctionResult(
+            success=False,
+            error=str(e),
+            message="Failed to create incident from discovery",
         )
 
 
