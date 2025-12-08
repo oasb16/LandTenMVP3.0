@@ -12,7 +12,7 @@ from typing import Dict, Any, List, Optional
 import openai
 
 from .conversation_manager import get_conversation_manager
-from ..functions.function_registry import execute_function
+from ..functions.function_registry import execute_function, get_function_definitions
 from .stream_bot import get_bot
 
 logger = logging.getLogger(__name__)
@@ -40,6 +40,9 @@ class ResponseHandler:
         self.bot = get_bot()
         self.prompt_id = os.getenv("LANDTEN_PROMPT_ID")
 
+        # Get available tools for function calling
+        self.tools = get_function_definitions()
+
         if not self.prompt_id:
             raise ValueError(
                 "LANDTEN_PROMPT_ID environment variable not set. "
@@ -47,6 +50,7 @@ class ResponseHandler:
             )
 
         logger.info(f"ResponseHandler initialized with prompt: {self.prompt_id}")
+        logger.info(f"Loaded {len(self.tools)} tools for function calling")
 
     async def process_message(
         self,
@@ -169,12 +173,13 @@ class ResponseHandler:
             iteration += 1
             logger.info(f"Tool loop iteration {iteration}/{max_iterations}")
 
-            # Call Responses API
+            # Call Responses API with tools enabled
             try:
                 response = self.openai_client.responses.create(
                     prompt={"id": prompt_id},
                     conversation=conversation_id,
-                    input=current_input
+                    input=current_input,
+                    tools=self.tools  # ✅ CRITICAL: Enable function calling
                 )
 
                 logger.info(f"Response received: {response.id}")
