@@ -508,9 +508,11 @@ async def handle_new_message_background(payload: Dict[str, Any]) -> Dict[str, An
                         "is_active": True,
                         "answers": function_result.data.get("discovery_data", {}).get("answers", {}),
                     }
-                    # Mark stage as discovery (for pre-incident flow)
-                    if not meta_context.active_incident_id:
+                    # Mark stage as discovery for pre-incident flow
+                    # Check if incident_id is None (pre-incident discovery), not if meta_context has no active_incident_id
+                    if function_result.data.get("incident_id") is None:
                         context_updates["stage"] = "discovery"
+                        logger.info("✅ Updated stage to 'discovery' for pre-incident flow")
                     logger.info(f"✅ Updated discovery state: Q{function_result.data.get('question_index', 0) + 1}/{len(function_result.data['questions'])}")
 
                 # Update discovery question index and answers if advancing

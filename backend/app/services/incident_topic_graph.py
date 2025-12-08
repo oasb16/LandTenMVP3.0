@@ -541,8 +541,9 @@ class IncidentTopicGraph:
                         "incident_id": f"GRAPH#{user_id}",
                     }
                 )
-            except:
-                logger.warning(f"⚠️ Failed to retrieve incident grap GRAPH#{user_id} for user {user_id}: {e}")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to retrieve incident graph GRAPH#{user_id} for user {user_id}: {e}")
+                return None
 
             if "Item" not in response:
                 logger.debug(f"No saved incident graph found for user {user_id}")
