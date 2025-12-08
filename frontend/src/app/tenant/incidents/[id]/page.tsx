@@ -25,7 +25,7 @@ type Incident = {
   unit_id?: string;
   tenant_id: string;
   landlord_id: string;
-  photos: string[];
+  photos?: string[] | any[];
   discovery_data?: any;
   job_id?: string;
   created_at: string;
@@ -36,7 +36,7 @@ export default function TenantIncidentDetailPage() {
   const router = useRouter();
   const params = useParams();
   const { data: session } = useSession();
-  const incidentId = params.id as string;
+  const incidentId = params?.id as string;
 
   const [incident, setIncident] = useState<Incident | null>(null);
   const [loading, setLoading] = useState(true);
@@ -47,37 +47,54 @@ export default function TenantIncidentDetailPage() {
   };
 
   useEffect(() => {
+    if (!incidentId) return;
+
+    const fetchIncident = async () => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        const res = await fetch(`/api/v1/incidents/${incidentId}`, {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${getToken()}`,
+          },
+        });
+
+        if (!res.ok) {
+          throw new Error("Failed to fetch incident details");
+        }
+
+        const data = await res.json();
+        console.log("Incident data:", data); // Debug log
+        setIncident(data);
+      } catch (err: any) {
+        console.error("Error fetching incident:", err);
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+
     fetchIncident();
   }, [incidentId]);
 
-  const fetchIncident = async () => {
-    setLoading(true);
-    setError(null);
-
+  const formatDate = (dateString?: string) => {
+    if (!dateString) return "N/A";
     try {
-      const res = await fetch(`/api/v1/incidents/${incidentId}`, {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${getToken()}`,
-        },
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) return "Invalid date";
+      return date.toLocaleDateString("en-US", {
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
       });
-
-      if (!res.ok) {
-        throw new Error("Failed to fetch incident details");
-      }
-
-      const data = await res.json();
-      setIncident(data);
-    } catch (err: any) {
-      console.error("Error fetching incident:", err);
-      setError(err.message);
-    } finally {
-      setLoading(false);
+    } catch (err) {
+      return "Invalid date";
     }
   };
-
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
     return date.toLocaleDateString("en-US", {
       month: "long",
       day: "numeric",
@@ -238,22 +255,25 @@ export default function TenantIncidentDetailPage() {
           </div>
 
           {/* Photos */}
-          {incident.photos && incident.photos.length > 0 && (
+          {incident.photos && Array.isArray(incident.photos) && incident.photos.length > 0 && (
             <div className="bg-slate-900 rounded-lg p-6 border border-slate-800">
               <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
                 <Camera className="w-5 h-5" />
                 Photos ({incident.photos.length})
               </h2>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                {incident.photos.map((photo, index) => (
+                {incident.photos.map((photo: any, index: number) => (
                   <div
                     key={index}
                     className="aspect-square rounded-lg overflow-hidden bg-slate-800"
                   >
                     <img
-                      src={photo}
+                      src={typeof photo === 'string' ? photo : photo.s3_url || photo.url}
                       alt={`Incident photo ${index + 1}`}
                       className="w-full h-full object-cover"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg"/>';
+                      }}
                     />
                   </div>
                 ))}
