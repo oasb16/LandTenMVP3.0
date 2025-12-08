@@ -173,12 +173,13 @@ class ResponseHandler:
             iteration += 1
             logger.info(f"Tool loop iteration {iteration}/{max_iterations}")
 
-            # Call Responses API
+            # Call Responses API with tools enabled
             try:
                 response = self.openai_client.responses.create(
                     prompt={"id": prompt_id},
                     conversation=conversation_id,
-                    input=current_input
+                    input=current_input,
+                    tools=self.tools  # ✅ CRITICAL: Enable function calling
                 )
 
                 logger.info(f"Response received: {response.id}")
