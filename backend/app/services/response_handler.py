@@ -43,7 +43,7 @@ class ResponseHandler:
         # Get available tools for function calling
         raw_functions = get_function_definitions()
 
-        # Convert to Responses API format: each tool needs {"type": "function", "function": {...}}
+        # Convert to Responses API format (flat structure, not nested like Chat Completions)
         self.tools = []
         for func in raw_functions:
             # Convert Pydantic model to dict if needed
@@ -59,13 +59,13 @@ class ResponseHandler:
                     "parameters": func.parameters
                 }
 
+            # Responses API uses flat format: {type, name, description, parameters}
+            # NOT nested like Chat API: {type, function: {name, description, parameters}}
             tool = {
                 "type": "function",
-                "function": {
-                    "name": func_dict["name"],
-                    "description": func_dict["description"],
-                    "parameters": func_dict["parameters"]
-                }
+                "name": func_dict["name"],
+                "description": func_dict["description"],
+                "parameters": func_dict["parameters"]
             }
             self.tools.append(tool)
 
