@@ -2,6 +2,13 @@
 LandTen Services Module
 
 Exports all service classes for easy importing.
+
+MIGRATION NOTE:
+- Orchestrator (deprecated): Replaced by ResponseHandler (Responses API)
+- TenantAgent (deprecated): Merged into unified prompt
+- MetaContextManager (deprecated): Will be replaced by ConversationManager
+
+See backend/app/archived/README.md for details on deprecated services.
 """
 
 from .dynamo_service import DynamoService, get_dynamo_service

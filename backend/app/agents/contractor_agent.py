@@ -1,8 +1,11 @@
 """
 Contractor Agent - Specialized for work order scheduling and contractor coordination.
 Manages job logistics, timelines, and contractor selection.
+
+DEPRECATED: This agent is being phased out in favor of ResponseHandler with unified prompt.
+See backend/app/archived/README.md for migration details.
 """
-from .base_agent import BaseAgent
+from ..archived.base_agent import BaseAgent
 
 
 class ContractorAgent(BaseAgent):

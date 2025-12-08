@@ -62,6 +62,20 @@ class Settings:
             "You are LandTen's domain assistant. Infer issues, incidents, and actions intelligently."
         )
 
+        # OpenAI Responses API (Migration to new architecture)
+        self.LANDTEN_PROMPT_ID: Optional[str] = os.getenv("LANDTEN_PROMPT_ID")
+
+        # Validate LANDTEN_PROMPT_ID for Responses API
+        # Note: This validation is disabled by default to allow gradual migration
+        # Enable by setting REQUIRE_PROMPT_ID=true in environment
+        if os.getenv("REQUIRE_PROMPT_ID", "false").lower() == "true":
+            if not self.LANDTEN_PROMPT_ID:
+                raise ValueError(
+                    "LANDTEN_PROMPT_ID environment variable not set. "
+                    "Please create a unified prompt in OpenAI dashboard "
+                    "(https://platform.openai.com/prompts) and set the prompt ID."
+                )
+
         # Stream Chat
         self.STREAM_CHAT_API_KEY: Optional[str] = os.getenv("STREAM_CHAT_API_KEY")
         self.STREAM_CHAT_API_SECRET: Optional[str] = os.getenv("STREAM_CHAT_API_SECRET")
