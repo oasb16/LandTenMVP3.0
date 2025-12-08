@@ -46,12 +46,25 @@ class ResponseHandler:
         # Convert to Responses API format: each tool needs {"type": "function", "function": {...}}
         self.tools = []
         for func in raw_functions:
-            tool = {
-                "type": "function",
-                "function": {
+            # Convert Pydantic model to dict if needed
+            if hasattr(func, 'model_dump'):
+                func_dict = func.model_dump()
+            elif hasattr(func, 'dict'):
+                func_dict = func.dict()
+            else:
+                # Fallback if not a Pydantic model
+                func_dict = {
                     "name": func.name,
                     "description": func.description,
                     "parameters": func.parameters
+                }
+
+            tool = {
+                "type": "function",
+                "function": {
+                    "name": func_dict["name"],
+                    "description": func_dict["description"],
+                    "parameters": func_dict["parameters"]
                 }
             }
             self.tools.append(tool)
