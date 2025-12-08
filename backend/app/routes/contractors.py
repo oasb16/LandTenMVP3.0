@@ -764,6 +764,7 @@ async def upload_completion_photo(
         # Upload to S3
         # Debug: List all available S3 buckets
         try:
+            logger.info(f"Putting item in {BUCKET_NAME}")
             buckets = s3_client.list_buckets()
             bucket_names = [b['Name'] for b in buckets.get('Buckets', [])]
             logger.info(f"[contractors] 🪣 Available S3 buckets: {bucket_names}")
