@@ -1,177 +1,102 @@
-# Deployment Guide
+# Deployment Checklist - Responses API Migration
 
-This guide explains how to deploy the LandTen MVP 3.0 application to Heroku using GitHub Actions.
+This document outlines the deployment process for the Responses API migration.
 
-## Prerequisites
+## Overview
 
-1. A Heroku account (sign up at https://signup.heroku.com/)
-2. A Heroku app created for this project
-3. Access to your GitHub repository settings
+**Migration**: Dual-Agent Architecture → OpenAI Responses API
+**Date**: December 8, 2025
+**Branch**: `claude/assistants-to-responses-migration-01AiwKigtzutWutk9zbHpHpQ`
+**Estimated Downtime**: < 5 minutes (service restart only)
 
-## Setup Instructions
+---
 
-### Step 1: Get Your Heroku Credentials
+## Pre-Deployment Checklist
 
-1. **Heroku API Key:**
-   - Go to https://dashboard.heroku.com/account
-   - Scroll down to "API Key" section
-   - Click "Reveal" to see your API key
-   - Copy this key (it looks like: `a1b2c3d4-e5f6-7890-abcd-ef1234567890`)
+### ✅ 1. OpenAI Dashboard Setup
 
-2. **Heroku App Name:**
-   - Go to https://dashboard.heroku.com/apps
-   - Find your app name (e.g., `my-landten-app`)
-   - If you don't have an app yet, create one by clicking "New" → "Create new app"
+- [ ] **Create Unified Prompt in OpenAI Dashboard**
+  - Go to [https://platform.openai.com/prompts](https://platform.openai.com/prompts)
+  - Click "Create prompt"
+  - Copy content from `prompts/landten-unified-prompt-v1.md`
+  - Paste into prompt editor
+  - Save the prompt
 
-3. **Heroku Email:**
-   - The email address associated with your Heroku account
+- [ ] **Get Prompt ID**
+  - Copy the prompt ID (starts with `prompt_`)
+  - Format: `prompt_xxxxxxxxxxxxxxxxxxxxx`
+  - Keep this handy for environment configuration
 
-### Step 2: Add GitHub Secrets
+- [ ] **Verify OpenAI API Access**
+  - Confirm OpenAI API key is valid
+  - Check you have access to Responses API (currently in beta)
+  - Verify billing is set up
 
-1. Go to your GitHub repository
-2. Click **Settings** → **Secrets and variables** → **Actions**
-3. Click **New repository secret** and add the following three secrets:
+### ✅ 2. Environment Configuration
 
-   | Secret Name | Value | Example |
-   |-------------|-------|---------|
-   | `HEROKU_API_KEY` | Your Heroku API key | `a1b2c3d4-e5f6-7890-abcd-ef1234567890` |
-   | `HEROKU_APP_NAME` | Your Heroku app name | `my-landten-app` |
-   | `HEROKU_EMAIL` | Your Heroku email | `you@example.com` |
+- [ ] **Set Required Environment Variables**
+  ```bash
+  # OpenAI Responses API
+  export LANDTEN_PROMPT_ID=prompt_xxxxx  # Replace with your prompt ID
 
-### Step 3: Deploy
+  # DynamoDB Table (optional custom name)
+  export CONVERSATION_MAPPING_TABLE=landten_conversation_mappings
 
-The deployment happens automatically when you:
-- Push to the `main` or `master` branch
-- Manually trigger the workflow from GitHub Actions tab
+  # Verify existing OpenAI configuration
+  export OPENAI_API_KEY=sk-...  # Should already be set
+  ```
 
-#### Automatic Deployment (Recommended)
-```bash
-git push origin main
-```
+- [ ] **Verify `.env` File**
+  - Check `backend/.env` has all required variables
+  - Compare against `backend/.env.example`
 
-#### Manual Deployment
-1. Go to your GitHub repository
-2. Click **Actions** tab
-3. Select **Deploy to Heroku** workflow
-4. Click **Run workflow** → **Run workflow**
+### ✅ 3. Database Setup
 
-### Step 4: Verify Deployment
+- [ ] **Create DynamoDB Table**
+  ```bash
+  aws dynamodb create-table \
+    --table-name landten_conversation_mappings \
+    --attribute-definitions AttributeName=channel_id,AttributeType=S \
+    --key-schema AttributeName=channel_id,KeyType=HASH \
+    --billing-mode PAY_PER_REQUEST
+  ```
 
-After the workflow completes:
-1. Check the Actions tab for success ✅
-2. Visit your app: `https://YOUR_APP_NAME.herokuapp.com`
-3. Check Heroku logs if needed:
-   ```bash
-   heroku logs --tail --app YOUR_APP_NAME
-   ```
+---
 
-## Deployment Architecture
+## Deployment Steps
 
-This application is deployed as a monorepo to Heroku:
+### 🚀 1. Deploy Code
 
-- **Frontend (Next.js):** Runs on port specified by Heroku's `$PORT` variable
-- **Backend (FastAPI):** Runs on port 8080
-- **Build Process:** Uses the Procfile and heroku-postbuild script in package.json
+- [ ] **Merge to Master and Deploy**
+  ```bash
+  git checkout master
+  git merge claude/assistants-to-responses-migration-01AiwKigtzutWutk9zbHpHpQ
+  git push origin master
+  ```
 
-### Environment Variables
+### 🚀 2. Restart Services
 
-Make sure to configure the following environment variables in Heroku:
+- [ ] **Restart Backend**
+  ```bash
+  sudo systemctl restart landten-backend
+  ```
 
-#### Required Variables
-```bash
-# Stream Chat
-STREAM_CHAT_API_KEY=your_stream_api_key
-STREAM_CHAT_API_SECRET=your_stream_api_secret
-STREAM_WEBHOOK_SECRET=your_webhook_secret
+---
 
-# AWS
-AWS_REGION=us-east-1
-AWS_ACCESS_KEY_ID=your_aws_access_key
-AWS_SECRET_ACCESS_KEY=your_aws_secret_key
+## Post-Deployment Validation
 
-# OpenAI
-OPENAI_API_KEY=sk-your_openai_key
+- [ ] **Send test message** → verify empathetic response
+- [ ] **Report maintenance issue** → verify discovery starts
+- [ ] **Answer all questions** → verify incident created
+- [ ] **Report second issue** → verify topic switching works
+- [ ] **Check conversation state** persists across messages
 
-# Google OAuth
-GOOGLE_CLIENT_ID=your_google_client_id
-GOOGLE_CLIENT_SECRET=your_google_client_secret
+---
 
-# NextAuth
-NEXTAUTH_URL=https://YOUR_APP_NAME.herokuapp.com
-NEXTAUTH_SECRET=your_nextauth_secret
+## Rollback Plan
 
-# Stripe
-STRIPE_SECRET_KEY=sk_test_your_stripe_key
-NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_your_stripe_key
-```
-
-#### Optional Variables
-```bash
-# Backend URL (if separate)
-BACKEND_INTERNAL_URL=http://localhost:8080
-NEXT_PUBLIC_BACKEND_URL=https://YOUR_APP_NAME.herokuapp.com
-
-# OpenAI Configuration
-OPENAI_MODEL=gpt-4o-mini
-OPENAI_TEMPERATURE=0.3
-
-# DynamoDB
-DYNAMODB_TABLE_PREFIX=landten_
-
-# Auth (Development Only)
-AUTH_DISABLED=false
-```
-
-### Setting Environment Variables
-
-You can set environment variables using:
-
-1. **Heroku Dashboard:**
-   - Go to https://dashboard.heroku.com/apps/YOUR_APP_NAME/settings
-   - Click "Reveal Config Vars"
-   - Add each variable
-
-2. **Heroku CLI:**
-   ```bash
-   heroku config:set VARIABLE_NAME=value --app YOUR_APP_NAME
-   ```
-
-3. **Automated Script:**
-   ```bash
-   ./scripts/push_env_to_heroku.sh YOUR_APP_NAME
-   ```
-
-## Troubleshooting
-
-### Deployment Fails
-1. Check GitHub Actions logs for errors
-2. Verify all three secrets are set correctly
-3. Ensure your Heroku app exists
-4. Check that your API key is valid
-
-### App Crashes After Deployment
-1. Check Heroku logs:
-   ```bash
-   heroku logs --tail --app YOUR_APP_NAME
-   ```
-2. Verify all environment variables are set
-3. Check that dependencies are correctly specified in package.json and requirements.txt
-
-### Build Fails
-1. Ensure frontend builds locally: `cd frontend && npm run build`
-2. Ensure backend dependencies install: `cd backend && pip install -r requirements.txt`
-3. Check Node.js and Python versions match Heroku requirements
-
-## Additional Resources
-
-- [Heroku Documentation](https://devcenter.heroku.com/)
-- [GitHub Actions Documentation](https://docs.github.com/en/actions)
-- [Next.js Deployment](https://nextjs.org/docs/deployment)
-- [FastAPI Deployment](https://fastapi.tiangolo.com/deployment/)
-
-## Support
-
-For issues related to:
-- **Deployment:** Check GitHub Actions logs and Heroku logs
-- **Application:** See [README.md](./README.md) and documentation in `/docs`
-- **Environment Setup:** See [backend/.env.example](./backend/.env.example) and [frontend/.env.example](./frontend/.env.example)
+If issues occur:
+1. Uncomment old dual-agent code in `ai_webhooks_v3.py` (lines 378-842)
+2. Comment out ResponseHandler code (lines 307-377)
+3. Restart services
+4. Report issues in GitHub
