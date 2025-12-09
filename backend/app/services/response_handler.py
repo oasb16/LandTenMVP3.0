@@ -250,6 +250,10 @@ class ResponseHandler:
 
             logger.info(f"Found {len(tool_calls)} tool calls to execute")
 
+            # DEBUG: Log tool calls to verify IDs
+            for tc in tool_calls:
+                logger.info(f"  - Tool call ID: {tc.get('id')}, function: {tc.get('function', {}).get('name')}")
+
             # Execute tool calls
             tool_outputs = await self.execute_tool_calls(
                 tool_calls=tool_calls,
@@ -264,6 +268,11 @@ class ResponseHandler:
 
             # Prepare next iteration input (tool outputs)
             current_input = tool_outputs
+
+            # DEBUG: Log tool outputs to verify format
+            logger.info(f"🔍 DEBUG: Sending {len(tool_outputs)} tool outputs:")
+            for output in tool_outputs:
+                logger.info(f"  - call_id: {output.get('call_id')}, type: {output.get('type')}")
 
         if iteration >= max_iterations:
             logger.warning(f"Tool loop reached max iterations ({max_iterations})")
