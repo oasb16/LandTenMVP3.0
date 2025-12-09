@@ -35,6 +35,8 @@ import BidForm from "../panels/BidForm";
 // Phase 5: Job Execution
 import StatusTrackerPanel from "../panels/StatusTrackerPanel";
 import AcceptancePanel from "../panels/AcceptancePanel";
+import SchedulingPanel from "../panels/SchedulingPanel";
+import ScheduleApprovalPanel from "../panels/ScheduleApprovalPanel";
 import CompletionForm from "../panels/CompletionForm";
 
 interface AIDynamicPanelProps {
@@ -270,6 +272,39 @@ export default function AIDynamicPanel({
           }}
           onBack={async () => {
             await sendIntent("ai_continue", {});
+          }}
+        />
+      )}
+
+      {uiMode === "scheduling_panel" && (
+        <SchedulingPanel
+          key="scheduling_panel"
+          jobId={getPayload<any>({ job_id: "" }).job_id}
+          jobTitle={getPayload<any>({ job_title: "" }).job_title}
+          propertyAddress={getPayload<any>({ property_address: undefined }).property_address}
+          onSubmit={async (intent, data) => {
+            await sendIntent(intent as IntentType, data);
+          }}
+          onCancel={async () => {
+            await sendIntent("ai_continue", {});
+          }}
+        />
+      )}
+
+      {uiMode === "schedule_approval_panel" && (
+        <ScheduleApprovalPanel
+          key="schedule_approval_panel"
+          jobId={getPayload<any>({ job_id: "" }).job_id}
+          jobTitle={getPayload<any>({ job_title: "" }).job_title}
+          propertyAddress={getPayload<any>({ property_address: undefined }).property_address}
+          contractorName={getPayload<any>({ contractor_name: "" }).contractor_name}
+          contractorAvatar={getPayload<any>({ contractor_avatar: undefined }).contractor_avatar}
+          proposedSlots={getPayload<any>({ proposed_slots: [] }).proposed_slots}
+          onSubmit={async (intent, data) => {
+            await sendIntent(intent as IntentType, data);
+          }}
+          onRequestChange={async () => {
+            await sendIntent("request_reschedule", { job_id: getPayload<any>({ job_id: "" }).job_id });
           }}
         />
       )}

@@ -43,6 +43,8 @@ export type Stage =
   | "job_detail"           // View job details
   | "bid_submission"       // Submit bid for job
   | "job_acceptance"       // Accept approved job
+  | "job_scheduling"       // Propose visit schedule
+  | "schedule_approval"    // Approve contractor schedule
   | "job_execution"        // Track job progress
   | "job_completion"       // Mark job complete
 
@@ -75,6 +77,8 @@ export type UIMode =
   | "job_detail"            // Full job details view
   | "bid_form"              // Bid submission form
   | "job_acceptance"        // Job acceptance confirmation
+  | "scheduling_panel"      // Contractor propose visit schedule
+  | "schedule_approval_panel" // Tenant/landlord approve schedule
   | "completion_form"       // Job completion form
 
   // Shared UI modes
@@ -112,6 +116,9 @@ export type IntentType =
   | "submit_bid"            // Submitted bid for job
   | "accept_job"            // Accepted approved job
   | "decline_job"           // Declined job
+  | "propose_schedule"      // Propose visit schedule options
+  | "approve_schedule"      // Approve selected schedule
+  | "request_reschedule"    // Request different schedule times
   | "start_work"            // Started work on job
   | "update_progress"       // Updated job progress
   | "mark_complete"         // Marked job as complete
@@ -345,6 +352,37 @@ export interface CompletionFormPayload {
   job_title: string;
   work_summary_required: boolean;
   photos_required: boolean;
+}
+
+/**
+ * Scheduling Panel (Stage: job_scheduling, UI Mode: scheduling_panel)
+ */
+export interface SchedulingPanelPayload {
+  job_id: string;
+  job_title: string;
+  property_address?: string;
+  min_slots?: number;
+  max_slots?: number;
+}
+
+export interface ProposedTimeSlot {
+  id: string;
+  date: string;
+  start_time: string;
+  end_time: string;
+  notes?: string;
+}
+
+/**
+ * Schedule Approval Panel (Stage: schedule_approval, UI Mode: schedule_approval_panel)
+ */
+export interface ScheduleApprovalPanelPayload {
+  job_id: string;
+  job_title: string;
+  property_address?: string;
+  contractor_name: string;
+  contractor_avatar?: string;
+  proposed_slots: ProposedTimeSlot[];
 }
 
 // ============================================================================
