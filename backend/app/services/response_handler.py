@@ -332,7 +332,7 @@ class ResponseHandler:
 
                 tool_outputs.append({
                     "type": "function_call_output",  # Responses API format
-                    "tool_call_id": tool_call_id,
+                    "call_id": tool_call_id,  # Responses API uses 'call_id' not 'tool_call_id'
                     "output": json.dumps(output_data)
                 })
 
@@ -344,7 +344,7 @@ class ResponseHandler:
                 # Add error output
                 tool_outputs.append({
                     "type": "function_call_output",  # Responses API format
-                    "tool_call_id": tool_call.get("id"),
+                    "call_id": tool_call.get("id"),  # Responses API uses 'call_id' not 'tool_call_id'
                     "output": json.dumps({
                         "success": False,
                         "error": str(e),
