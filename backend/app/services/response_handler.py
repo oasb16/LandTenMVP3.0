@@ -400,6 +400,12 @@ class ResponseHandler:
 
             # Extract tool calls (Responses API uses flat format: item.name, not item.function.name)
             elif item.type == "function_call" or hasattr(item, "name"):
+                # DEBUG: Log available fields on the item
+                logger.info(f"🔍 DEBUG: Function call item fields: {dir(item)}")
+                logger.info(f"🔍 DEBUG: item.id = {item.id}")
+                if hasattr(item, 'call_id'):
+                    logger.info(f"🔍 DEBUG: item.call_id = {item.call_id}")
+
                 content["tool_calls"].append({
                     "id": item.id,
                     "type": "function",
