@@ -322,7 +322,7 @@ class ResponseHandler:
                     context=context
                 )
 
-                # Convert FunctionResult to tool_output format
+                # Convert FunctionResult to function_call_output format (Responses API)
                 output_data = {
                     "success": result.success,
                     "data": result.data,
@@ -331,7 +331,7 @@ class ResponseHandler:
                 }
 
                 tool_outputs.append({
-                    "type": "tool_output",
+                    "type": "function_call_output",  # Responses API format
                     "tool_call_id": tool_call_id,
                     "output": json.dumps(output_data)
                 })
@@ -343,7 +343,7 @@ class ResponseHandler:
 
                 # Add error output
                 tool_outputs.append({
-                    "type": "tool_output",
+                    "type": "function_call_output",  # Responses API format
                     "tool_call_id": tool_call.get("id"),
                     "output": json.dumps({
                         "success": False,
