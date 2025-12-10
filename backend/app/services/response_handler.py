@@ -407,7 +407,7 @@ class ResponseHandler:
                     logger.info(f"🔍 DEBUG: item.call_id = {item.call_id}")
 
                 content["tool_calls"].append({
-                    "id": item.id,
+                    "id": item.call_id,  # Responses API uses call_id (not id)
                     "type": "function",
                     "function": {
                         "name": item.name,  # Flat format in Responses API
