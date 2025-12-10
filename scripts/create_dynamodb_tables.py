@@ -2,12 +2,13 @@
 """
 Create DynamoDB tables for property management workflow system.
 
-Creates 5 tables:
+Creates 6 tables:
 1. incidents - Tenant-reported incidents
 2. jobs - Contractor job postings
 3. bids - Contractor bids on jobs
 4. contractors - Contractor profiles
 5. payments - Payment transactions
+6. conversation_mappings - Slack channel to OpenAI Conversation ID mappings
 
 All tables use PAY_PER_REQUEST billing for cost efficiency.
 Script is idempotent - safe to run multiple times.
@@ -415,6 +416,44 @@ def create_payments_table(client, table_name: str) -> None:
             raise
 
 
+def create_conversation_mappings_table(client, table_name: str) -> None:
+    """
+    Create conversation_mappings table.
+
+    Maps Slack channels to OpenAI Conversation IDs for context persistence.
+    Used by ResponseHandler/ConversationManager for Responses API integration.
+
+    Primary Key: channel_id (HASH)
+    No GSIs needed - simple key-value mapping
+    """
+    print(f"Creating table: {table_name}")
+
+    try:
+        client.create_table(
+            TableName=table_name,
+            KeySchema=[
+                {"AttributeName": "channel_id", "KeyType": "HASH"}
+            ],
+            AttributeDefinitions=[
+                {"AttributeName": "channel_id", "AttributeType": "S"}
+            ],
+            BillingMode="PAY_PER_REQUEST",
+            Tags=[
+                {"Key": "Environment", "Value": os.getenv("STAGE", "dev")},
+                {"Key": "Application", "Value": "LandTenMVP"},
+                {"Key": "Purpose", "Value": "ConversationPersistence"}
+            ]
+        )
+
+        print(f"✓ Table {table_name} created successfully")
+
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "ResourceInUseException":
+            print(f"⚠ Table {table_name} already exists")
+        else:
+            raise
+
+
 def wait_for_table(client, table_name: str, max_attempts: int = 30) -> bool:
     """Wait for table to become active."""
     print(f"Waiting for {table_name} to become active...")
@@ -508,7 +547,8 @@ def main():
         ("jobs", create_jobs_table),
         ("bids", create_bids_table),
         ("contractors", create_contractors_table),
-        ("payments", create_payments_table)
+        ("payments", create_payments_table),
+        ("conversation_mappings", create_conversation_mappings_table)
     ]
 
     # Create tables

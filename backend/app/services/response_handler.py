@@ -14,6 +14,7 @@ import openai
 from .conversation_manager import get_conversation_manager
 from ..functions.function_registry import execute_function, get_function_definitions
 from .stream_bot import get_bot
+from .dynamo_service import get_dynamo_service
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,8 @@ class ResponseHandler:
     def __init__(self):
         """Initialize ResponseHandler"""
         self.openai_client = openai.Client(api_key=os.getenv("OPENAI_API_KEY"))
-        self.conversation_manager = get_conversation_manager()
+        self.dynamo_service = get_dynamo_service()
+        self.conversation_manager = get_conversation_manager(dynamo_service=self.dynamo_service)
         self.bot = get_bot()
         self.prompt_id = os.getenv("LANDTEN_PROMPT_ID")
 
