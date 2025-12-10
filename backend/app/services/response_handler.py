@@ -219,11 +219,24 @@ class ResponseHandler:
 
             except Exception as e:
                 logger.error(f"Responses API error: {e}", exc_info=True)
+
+                # Provide user-friendly error messages based on error type
+                error_message = "I encountered an error processing your request. Please try again."
+
+                # Check for OpenAI quota/billing errors
+                if "insufficient_quota" in str(e).lower() or "429" in str(e):
+                    error_message = (
+                        "I'm currently unable to process requests due to API quota limits. "
+                        "This is a temporary issue with the OpenAI service. "
+                        "Please try again in a few minutes or contact support if this persists."
+                    )
+                    logger.error("⚠️ OpenAI quota exceeded - check billing at platform.openai.com")
+
                 # Send error message to user
                 self.bot.send_ai_message(
                     channel_id=channel_id,
                     persona="tenant",
-                    text="I encountered an error processing your request. Please try again.",
+                    text=error_message,
                     metadata={"error": str(e)}
                 )
                 break
