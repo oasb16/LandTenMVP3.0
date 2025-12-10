@@ -14,6 +14,7 @@ import openai
 from .conversation_manager import get_conversation_manager
 from ..functions.function_registry import execute_function, get_function_definitions
 from .stream_bot import get_bot
+from .dynamo_service import get_dynamo_service
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,8 @@ class ResponseHandler:
     def __init__(self):
         """Initialize ResponseHandler"""
         self.openai_client = openai.Client(api_key=os.getenv("OPENAI_API_KEY"))
-        self.conversation_manager = get_conversation_manager()
+        self.dynamo_service = get_dynamo_service()
+        self.conversation_manager = get_conversation_manager(dynamo_service=self.dynamo_service)
         self.bot = get_bot()
         self.prompt_id = os.getenv("LANDTEN_PROMPT_ID")
 
@@ -217,11 +219,24 @@ class ResponseHandler:
 
             except Exception as e:
                 logger.error(f"Responses API error: {e}", exc_info=True)
+
+                # Provide user-friendly error messages based on error type
+                error_message = "I encountered an error processing your request. Please try again."
+
+                # Check for OpenAI quota/billing errors
+                if "insufficient_quota" in str(e).lower() or "429" in str(e):
+                    error_message = (
+                        "I'm currently unable to process requests due to API quota limits. "
+                        "This is a temporary issue with the OpenAI service. "
+                        "Please try again in a few minutes or contact support if this persists."
+                    )
+                    logger.error("⚠️ OpenAI quota exceeded - check billing at platform.openai.com")
+
                 # Send error message to user
                 self.bot.send_ai_message(
                     channel_id=channel_id,
                     persona="tenant",
-                    text="I encountered an error processing your request. Please try again.",
+                    text=error_message,
                     metadata={"error": str(e)}
                 )
                 break
