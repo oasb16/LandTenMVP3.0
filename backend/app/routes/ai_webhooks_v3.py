@@ -216,16 +216,26 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
             logger.debug("Agent disabled via metadata for this message")
             return {"status": "ignored", "reason": "agent_disabled"}
 
-        # IMMEDIATE: Send "processing" message to user
-        from ..utils.creative_messages import get_processing_message
+        # Send typing indicator (native GetStream feature - replaces processing messages)
+        try:
+            from stream_chat import StreamChat
+            api_key = os.getenv("STREAM_CHAT_API_KEY")
+            api_secret = os.getenv("STREAM_CHAT_API_SECRET")
 
-        bot = get_bot()
-        bot.send_ai_message(
-            channel_id=channel_id,
-            persona="tenant",
-            text=get_processing_message("tenant"),
-            metadata={"type": "processing", "actionable": False},
-        )
+            if api_key and api_secret:
+                client = StreamChat(api_key, api_secret)
+                channel = client.channel(channel_type, channel_id)
+
+                # Get the bot user ID based on channel persona
+                bot = get_bot()
+                persona = bot.get_channel_persona(f"{channel_type}:{channel_id}") or "tenant"
+                bot_user_id = bot.get_bot_id(persona)
+
+                # Send typing.start event from bot user
+                channel.send_event({"type": "typing.start"}, bot_user_id)
+                logger.debug(f"✅ Sent typing indicator for {persona} bot ({bot_user_id})")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to send typing indicator: {e}")
 
         # Queue task for background processing
         task_queue = get_task_queue()
