@@ -229,8 +229,16 @@ class ResponseHandler:
             # Extract response content
             content = await self.extract_response_content(response)
 
-            # Send assistant message to user FIRST (preserve empathy!)
-            if content.get("assistant_message"):
+            # Check if current input is from tool outputs (not initial user message)
+            is_tool_output_response = (
+                current_input
+                and len(current_input) > 0
+                and current_input[0].get("type") == "function_call_output"
+            )
+
+            # Send assistant message to user ONLY if this is NOT a response to tool outputs
+            # This prevents duplicate messages (tool functions send their own messages)
+            if content.get("assistant_message") and not is_tool_output_response:
                 final_message = content["assistant_message"]
                 self.bot.send_ai_message(
                     channel_id=channel_id,
@@ -239,6 +247,8 @@ class ResponseHandler:
                     metadata={"response_id": response.id}
                 )
                 logger.info(f"Sent assistant message to user")
+            elif is_tool_output_response:
+                logger.info(f"Skipping assistant message (response to tool outputs)")
 
             # Check for tool calls
             tool_calls = content.get("tool_calls", [])
