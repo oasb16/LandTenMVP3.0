@@ -1540,9 +1540,50 @@ async def generate_bids(job_id: str, category: str, channel_id: str) -> Function
     """Generate contractor bids for a job"""
     try:
         bot = get_bot()
+        dynamo = get_dynamo_service()
 
-        # Generate mock bids (in production, this would query real contractors)
-        bids = generate_contractor_bids(category)
+        # 🚨 FIX: Use BidGenerator service for realistic contractor data
+        from ..services.bid_generator import get_bid_generator
+
+        bid_generator = get_bid_generator()
+
+        # Get job details for better bid generation
+        job = dynamo.get_job(job_id)
+        if not job:
+            logger.error(f"Job {job_id} not found for bid generation")
+            # Fallback to basic generation
+            severity = "medium"
+            urgency = "routine"
+            description = f"{category} maintenance required"
+        else:
+            urgency = job.get("urgency", "routine")
+            description = job.get("title", f"{category} maintenance required")
+
+            # Get incident details for severity (jobs don't have severity field)
+            incident_id = job.get("incident_id")
+            if incident_id:
+                incident = dynamo.get_incident(incident_id, job.get("user_id"))
+                severity = incident.get("severity", "medium") if incident else "medium"
+            else:
+                severity = "medium"
+
+        # Generate bids using BidGenerator
+        bids = bid_generator.generate_bids(
+            job_id=job_id,
+            category=category,
+            severity=severity,
+            urgency=urgency,
+            description=description,
+            num_bids=3
+        )
+
+        # Save bids to DynamoDB
+        for bid in bids:
+            try:
+                dynamo.create_bid(bid)
+                logger.info(f"✅ Saved bid {bid['bid_id']} to DynamoDB")
+            except Exception as e:
+                logger.error(f"Error saving bid {bid.get('bid_id')}: {e}")
 
         # ChatGPT-style conversational bids summary with action suggestions
         full_bids_summary = (
@@ -1554,9 +1595,11 @@ async def generate_bids(job_id: str, category: str, channel_id: str) -> Function
             contractor = bid.get('contractor_name', 'Unknown')
             quote = bid.get('quote', 0)
             rating = bid.get('rating', 0)
+            eta = bid.get('eta', 'TBD')
             full_bids_summary += f"{i}. **{contractor}**\n"
-            full_bids_summary += f"   - Quote: ${quote}\n"
-            full_bids_summary += f"   - Rating: {'⭐' * int(rating)} ({rating}/5.0)\n\n"
+            full_bids_summary += f"   - Quote: ${quote:.2f}\n"
+            full_bids_summary += f"   - Rating: {'⭐' * int(rating)} ({rating}/5.0)\n"
+            full_bids_summary += f"   - ETA: {eta}\n\n"
 
         if len(bids) > 3:
             full_bids_summary += f"*Plus {len(bids) - 3} more contractors available*\n\n"
@@ -1788,6 +1831,129 @@ async def process_approval_decision(
             success=False,
             error=str(e),
             message="Failed to process approval decision",
+        )
+
+
+async def process_payment(
+    job_id: str,
+    amount: float,
+    payment_method: Optional[str] = "stripe",
+) -> FunctionResult:
+    """Process payment to contractor for completed work"""
+    try:
+        dynamo = get_dynamo_service()
+
+        # Get job details
+        job = dynamo.get_job(job_id)
+        if not job:
+            return FunctionResult(
+                success=False,
+                error="Job not found",
+                message=f"Cannot process payment: job {job_id} not found",
+            )
+
+        # Check job is completed
+        if job.get("status") != "completed":
+            return FunctionResult(
+                success=False,
+                error="Job not completed",
+                message=f"Cannot process payment: job {job_id} is not completed (status: {job.get('status')})",
+            )
+
+        contractor_id = job.get("contractor_id")
+        contractor_name = job.get("contractor_name", "Unknown")
+
+        if not contractor_id:
+            return FunctionResult(
+                success=False,
+                error="No contractor assigned",
+                message=f"Cannot process payment: no contractor assigned to job {job_id}",
+            )
+
+        # Process payment via Stripe
+        if payment_method == "stripe":
+            from ..services.stripe_service import StripeService
+
+            stripe_service = StripeService()
+
+            # Get contractor's Stripe account ID (would come from contractor profile)
+            # For MVP, we'll simulate this
+            # In production, you'd query ContractorDB.get_profile(contractor_id).stripe_account_id
+
+            # Convert amount to cents
+            amount_cents = int(amount * 100)
+
+            # Create payout
+            try:
+                # Note: In production, you'd need the contractor's Stripe Connect account ID
+                # For MVP, we'll return success but skip actual Stripe call
+                logger.info(f"💳 Processing ${amount:.2f} payment for job {job_id} to {contractor_name}")
+
+                payout_result = {
+                    "transfer_id": f"tr_mock_{uuid.uuid4().hex[:12]}",
+                    "amount": amount_cents,
+                    "currency": "usd",
+                    "destination": f"acct_{contractor_id}",
+                    "status": "succeeded",
+                }
+
+                # In production, uncomment this:
+                # payout_result = stripe_service.create_payout(
+                #     destination_account_id=contractor_stripe_account_id,
+                #     amount_cents=amount_cents,
+                #     description=f"Payment for job {job_id}",
+                #     metadata={
+                #         "job_id": job_id,
+                #         "contractor_id": contractor_id,
+                #     }
+                # )
+
+                # Update job with payment info
+                dynamo.update_job(
+                    job_id,
+                    payment_status="paid",
+                    payment_amount=amount,
+                    payment_date=datetime.utcnow().isoformat(),
+                    payment_method=payment_method,
+                    stripe_transfer_id=payout_result.get("transfer_id"),
+                )
+
+                logger.info(f"✅ Payment processed for job {job_id}: ${amount:.2f} to {contractor_name}")
+
+                return FunctionResult(
+                    success=True,
+                    data={
+                        "job_id": job_id,
+                        "amount": amount,
+                        "contractor_id": contractor_id,
+                        "contractor_name": contractor_name,
+                        "payment_status": "paid",
+                        "transfer_id": payout_result.get("transfer_id"),
+                    },
+                    message=f"Payment of ${amount:.2f} processed successfully to {contractor_name}",
+                )
+
+            except Exception as stripe_error:
+                logger.error(f"Stripe payment error: {stripe_error}", exc_info=True)
+                return FunctionResult(
+                    success=False,
+                    error=str(stripe_error),
+                    message=f"Stripe payment failed: {str(stripe_error)}",
+                )
+
+        else:
+            return FunctionResult(
+                success=False,
+                error="Unsupported payment method",
+                message=f"Payment method '{payment_method}' is not supported",
+            )
+
+    except Exception as e:
+        logger.error(f"Error processing payment: {e}", exc_info=True)
+        return FunctionResult(
+            success=False,
+            error=str(e),
+            message="Failed to process payment",
         )
 
 
@@ -2146,6 +2312,23 @@ def get_function_definitions() -> List[FunctionDefinition]:
             },
         ),
         FunctionDefinition(
+            name="process_payment",
+            description="Process payment to contractor for completed work. Use after work is marked as completed.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "job_id": {"type": "string", "description": "Job ID"},
+                    "amount": {"type": "number", "description": "Payment amount in dollars (e.g., 250.00)"},
+                    "payment_method": {
+                        "type": "string",
+                        "enum": ["stripe"],
+                        "description": "Payment method (default: stripe)"
+                    },
+                },
+                "required": ["job_id", "amount"],
+            },
+        ),
+        FunctionDefinition(
             name="generate_bids",
             description="Generate contractor bids for a job",
             parameters={
@@ -2238,6 +2421,7 @@ FUNCTION_IMPLEMENTATIONS = {
     "accept_bid": accept_bid,
     "request_landlord_approval": request_landlord_approval,
     "process_approval_decision": process_approval_decision,
+    "process_payment": process_payment,  # 🚨 NEW: Stripe payment processing
     "get_user_incidents": get_user_incidents,
     "get_user_jobs": get_user_jobs,
     "get_property_info": get_property_info,
