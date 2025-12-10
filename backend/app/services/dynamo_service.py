@@ -358,7 +358,11 @@ class JobDB:
         update_expr = "SET updated_at = :updated_at"
         expr_values = {":updated_at": datetime.now(timezone.utc).isoformat()}
 
+        # CRITICAL FIX: Skip updated_at in loop to avoid duplicate paths
+        # updated_at is already added above, so filter it out from updates
         for key, value in updates.items():
+            if key == "updated_at":
+                continue  # Skip to avoid "Two document paths overlap" error
             update_expr += f", {key} = :{key}"
             expr_values[f":{key}"] = value
 
