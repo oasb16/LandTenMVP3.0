@@ -453,10 +453,14 @@ class IncidentTopicGraph:
 
             print("===== user_id: ========", self.user_id)
 
-            # Save to DynamoDB with PK/SK pattern
+            # Save to DynamoDB with composite key (PK: user_id, SK: incident_id)
+            # CRITICAL FIX: Table schema uses (user_id, incident_id) as composite key
             item = {
-                "incident_id": f"GRAPH#{self.user_id}",  # Use incident_id as PK
-                "tenant_id": self.user_id,
+                "user_id": self.user_id,  # Partition key (MUST be first for DynamoDB)
+                "incident_id": f"GRAPH#{self.user_id}",  # Sort key
+                "tenant_id": self.user_id,  # For compatibility
+                "property_id": "system",  # Required field
+                "channel_id": "",  # Required field
                 "graph_data": graph_data_serialized,  # Store dict directly, no json.dumps
                 "node_count": len(self.nodes),
                 "edge_count": len(self.edges),
@@ -467,8 +471,7 @@ class IncidentTopicGraph:
                 "description": "Incident topic graph storage",
                 "category": "system",
                 "severity": "low",
-                "urgency": "routine",
-                "user_id": self.user_id
+                "urgency": "routine"
             }
 
             table.put_item(Item=item)
@@ -534,11 +537,13 @@ class IncidentTopicGraph:
             dynamodb = get_dynamodb_resource()
             table = dynamodb.Table("landten_incidents")
 
-            # Query DynamoDB using incident_id as PK
+            # Query DynamoDB using composite key (PK: user_id, SK: incident_id)
+            # CRITICAL FIX: Must provide both partition key and sort key
             try:
                 response = table.get_item(
                     Key={
-                        "incident_id": f"GRAPH#{user_id}",
+                        "user_id": user_id,  # Partition key
+                        "incident_id": f"GRAPH#{user_id}",  # Sort key
                     }
                 )
             except Exception as e:
