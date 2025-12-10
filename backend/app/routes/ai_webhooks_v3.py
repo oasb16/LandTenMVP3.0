@@ -223,12 +223,17 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
             api_secret = os.getenv("STREAM_CHAT_API_SECRET")
 
             if api_key and api_secret:
+                # Parse channel type from channel_id (format: "messaging:landtenmvp3")
+                channel_type, channel_name = (
+                    tuple(channel_id.split(":", 1)) if ":" in channel_id else ("messaging", channel_id)
+                )
+
                 client = StreamChat(api_key, api_secret)
-                channel = client.channel(channel_type, channel_id)
+                channel = client.channel(channel_type, channel_name)
 
                 # Get the bot user ID based on channel persona
                 bot = get_bot()
-                persona = bot.get_channel_persona(f"{channel_type}:{channel_id}") or "tenant"
+                persona = bot.get_channel_persona(channel_id) or "tenant"
                 bot_user_id = bot.get_bot_id(persona)
 
                 # Send typing.start event from bot user
