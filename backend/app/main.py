@@ -128,7 +128,27 @@ async def startup_tasks():
     except Exception as e:
         logging.error(f"[STARTUP] ❌ Failed to start task queue: {e}", exc_info=True)
 
-    logging.info("[STARTUP] ✅ Backend Ready (V2 + V3 + Async Queue)")
+    # ✅ Task 5: Auto-Seed Dynamic Tools (if not already loaded)
+    logging.info("[STARTUP] Auto-seeding dynamic tools...")
+    try:
+        from .dynamic_tools.tool_runtime import get_dynamic_tool_runtime
+        runtime = get_dynamic_tool_runtime()
+
+        # If no tools are loaded, seed the 3 starter tools
+        if len(runtime.tools) == 0:
+            logging.info("[STARTUP] No tools found, seeding 3 starter tools...")
+            from .dynamic_tools.seed_starter_tools import seed_tools
+            result = seed_tools()
+            if result.get("success"):
+                logging.info(f"[STARTUP] ✅ Seeded {result.get('tools_registered', 0)} diagnostic tools")
+            else:
+                logging.warning(f"[STARTUP] ⚠️ Tool seeding failed: {result}")
+        else:
+            logging.info(f"[STARTUP] ✅ {len(runtime.tools)} tools already loaded")
+    except Exception as e:
+        logging.warning(f"[STARTUP] ⚠️ Failed to seed dynamic tools: {e}", exc_info=True)
+
+    logging.info("[STARTUP] ✅ Backend Ready (V2 + V3 + Async Queue + Dynamic Tools)")
 
 
 @app.on_event("shutdown")
