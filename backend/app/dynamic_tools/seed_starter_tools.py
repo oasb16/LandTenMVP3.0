@@ -349,21 +349,28 @@ def schedule_preventive_maintenance(
         dict with maintenance schedule, priorities, and estimated annual cost
     '''
 
-    from datetime import datetime
-    import re
-
     tasks = []
     total_annual_cost = 0
 
-    # Helper function to parse "X months ago" or dates
+    # Helper function to parse "X months ago" or dates (no imports needed)
     def months_since(date_str):
         if "never" in date_str.lower():
             return 999
-        match = re.search(r'(\d+)\s*(month|year)', date_str.lower())
-        if match:
-            num = int(match.group(1))
-            unit = match.group(2)
-            return num if unit == "month" else num * 12
+
+        # Parse "X months ago" or "X years ago"
+        date_lower = date_str.lower()
+        words = date_lower.split()
+
+        for i, word in enumerate(words):
+            if word.isdigit() or word.replace('.', '').isdigit():
+                num = int(float(word))
+                # Check next word for unit
+                if i + 1 < len(words):
+                    unit = words[i + 1]
+                    if "year" in unit:
+                        return num * 12
+                    elif "month" in unit:
+                        return num
         return 0
 
     # 🌡️ HVAC MAINTENANCE
