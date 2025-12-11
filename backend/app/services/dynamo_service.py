@@ -506,6 +506,160 @@ class PropertyDB:
             return []
 
 
+class DynamicToolDB:
+    """Manage landten_dynamic_tools table for AI-generated diagnostic tools"""
+
+    TABLE_NAME = "landten_dynamic_tools"
+
+    @staticmethod
+    def create_tool(tool_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Create a new dynamic tool in DynamoDB
+
+        Schema:
+        - tool_id (PK): string
+        - tool_name: string (unique identifier)
+        - code: string (Python source code)
+        - description: string
+        - category: string (plumbing, electrical, hvac, etc.)
+        - created_by: string (llm, user_id, etc.)
+        - created_at: string (ISO timestamp)
+        - updated_at: string (ISO timestamp)
+        - metadata: map (function signature, docstring, parameters)
+        - usage_count: number
+        - last_used_at: string (ISO timestamp, nullable)
+        - version: number
+        """
+        dynamodb = get_dynamodb_resource()
+        table = dynamodb.Table(DynamicToolDB.TABLE_NAME)
+
+        now = datetime.now(timezone.utc).isoformat()
+
+        item = {
+            "tool_id": tool_data.get("tool_id"),
+            "tool_name": tool_data.get("tool_name"),
+            "code": tool_data.get("code"),
+            "description": tool_data.get("description", "No description"),
+            "category": tool_data.get("category", "general"),
+            "created_by": tool_data.get("created_by", "llm"),
+            "created_at": tool_data.get("created_at", now),
+            "updated_at": now,
+            "metadata": tool_data.get("metadata", {}),
+            "usage_count": tool_data.get("usage_count", 0),
+            "version": tool_data.get("version", 1),
+        }
+
+        # Optional fields
+        if "last_used_at" in tool_data and tool_data["last_used_at"]:
+            item["last_used_at"] = tool_data["last_used_at"]
+
+        try:
+            table.put_item(Item=item)
+            print(f"[DynamicToolDB] ✅ Created tool: {item['tool_name']} ({item['tool_id']})")
+            return decimal_to_float(item)
+        except Exception as e:
+            print(f"[DynamicToolDB] ❌ Error creating tool: {e}")
+            raise
+
+    @staticmethod
+    def get_tool(tool_id: str) -> Optional[Dict[str, Any]]:
+        """Get tool by ID"""
+        dynamodb = get_dynamodb_resource()
+        table = dynamodb.Table(DynamicToolDB.TABLE_NAME)
+
+        try:
+            response = table.get_item(Key={"tool_id": tool_id})
+            item = response.get("Item")
+            return decimal_to_float(item) if item else None
+        except Exception as e:
+            print(f"[DynamicToolDB] ❌ Error getting tool: {e}")
+            return None
+
+    @staticmethod
+    def get_tool_by_name(tool_name: str) -> Optional[Dict[str, Any]]:
+        """Get tool by name (scan operation)"""
+        dynamodb = get_dynamodb_resource()
+        table = dynamodb.Table(DynamicToolDB.TABLE_NAME)
+
+        try:
+            response = table.scan(
+                FilterExpression="tool_name = :tname",
+                ExpressionAttributeValues={":tname": tool_name},
+                Limit=1
+            )
+            items = response.get("Items", [])
+            return decimal_to_float(items[0]) if items else None
+        except Exception as e:
+            print(f"[DynamicToolDB] ❌ Error getting tool by name: {e}")
+            return None
+
+    @staticmethod
+    def list_all_tools() -> List[Dict[str, Any]]:
+        """List all dynamic tools"""
+        dynamodb = get_dynamodb_resource()
+        table = dynamodb.Table(DynamicToolDB.TABLE_NAME)
+
+        try:
+            response = table.scan()
+            items = response.get("Items", [])
+            print(f"[DynamicToolDB] 📦 Loaded {len(items)} tools from DynamoDB")
+            return [decimal_to_float(item) for item in items]
+        except Exception as e:
+            print(f"[DynamicToolDB] ❌ Error listing tools: {e}")
+            return []
+
+    @staticmethod
+    def list_tools_by_category(category: str) -> List[Dict[str, Any]]:
+        """List all tools in a category"""
+        dynamodb = get_dynamodb_resource()
+        table = dynamodb.Table(DynamicToolDB.TABLE_NAME)
+
+        try:
+            response = table.scan(
+                FilterExpression="category = :cat",
+                ExpressionAttributeValues={":cat": category}
+            )
+            items = response.get("Items", [])
+            return [decimal_to_float(item) for item in items]
+        except Exception as e:
+            print(f"[DynamicToolDB] ❌ Error listing tools by category: {e}")
+            return []
+
+    @staticmethod
+    def update_tool_usage(tool_id: str) -> bool:
+        """Update usage stats when tool is executed"""
+        dynamodb = get_dynamodb_resource()
+        table = dynamodb.Table(DynamicToolDB.TABLE_NAME)
+
+        try:
+            table.update_item(
+                Key={"tool_id": tool_id},
+                UpdateExpression="SET usage_count = usage_count + :inc, last_used_at = :now, updated_at = :now",
+                ExpressionAttributeValues={
+                    ":inc": 1,
+                    ":now": datetime.now(timezone.utc).isoformat()
+                }
+            )
+            return True
+        except Exception as e:
+            print(f"[DynamicToolDB] ❌ Error updating tool usage: {e}")
+            return False
+
+    @staticmethod
+    def delete_tool(tool_id: str) -> bool:
+        """Delete a tool from DynamoDB"""
+        dynamodb = get_dynamodb_resource()
+        table = dynamodb.Table(DynamicToolDB.TABLE_NAME)
+
+        try:
+            table.delete_item(Key={"tool_id": tool_id})
+            print(f"[DynamicToolDB] 🗑️ Deleted tool: {tool_id}")
+            return True
+        except Exception as e:
+            print(f"[DynamicToolDB] ❌ Error deleting tool: {e}")
+            return False
+
+
 class UserDB:
     """Manage landten_users table"""
 
@@ -702,6 +856,35 @@ class DynamoService:
     @staticmethod
     def get_user(user_id: str) -> Optional[Dict[str, Any]]:
         return UserDB.get_user(user_id)
+
+    # Dynamic tool operations
+    @staticmethod
+    def create_dynamic_tool(tool_data: Dict[str, Any]) -> Dict[str, Any]:
+        return DynamicToolDB.create_tool(tool_data)
+
+    @staticmethod
+    def get_dynamic_tool(tool_id: str) -> Optional[Dict[str, Any]]:
+        return DynamicToolDB.get_tool(tool_id)
+
+    @staticmethod
+    def get_dynamic_tool_by_name(tool_name: str) -> Optional[Dict[str, Any]]:
+        return DynamicToolDB.get_tool_by_name(tool_name)
+
+    @staticmethod
+    def list_all_dynamic_tools() -> List[Dict[str, Any]]:
+        return DynamicToolDB.list_all_tools()
+
+    @staticmethod
+    def list_dynamic_tools_by_category(category: str) -> List[Dict[str, Any]]:
+        return DynamicToolDB.list_tools_by_category(category)
+
+    @staticmethod
+    def update_dynamic_tool_usage(tool_id: str) -> bool:
+        return DynamicToolDB.update_tool_usage(tool_id)
+
+    @staticmethod
+    def delete_dynamic_tool(tool_id: str) -> bool:
+        return DynamicToolDB.delete_tool(tool_id)
 
     # Conversation mapping operations (for Responses API migration)
     @staticmethod
