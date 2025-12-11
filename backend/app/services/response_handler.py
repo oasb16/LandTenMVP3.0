@@ -234,8 +234,12 @@ REMEMBER: Use diagnostic tools proactively. Check if diagnose_* tools exist, or 
                 if "No tool output found for function call" in str(e):
                     logger.warning(f"⚠️ Conversation corrupted (missing tool output), creating new conversation...")
 
-                    # Create a new conversation to recover
-                    conversation_id = await self.conversation_manager.create_conversation(
+                    # Delete the corrupted conversation
+                    await self.conversation_manager.delete_conversation(channel_id=channel_id)
+                    logger.info(f"✅ Deleted corrupted conversation")
+
+                    # Create a fresh conversation
+                    conversation_id = await self.conversation_manager.get_or_create_conversation(
                         channel_id=channel_id,
                         user_id=user_id,
                         persona=persona
