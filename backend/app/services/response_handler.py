@@ -88,6 +88,35 @@ class ResponseHandler:
             import json
             logger.info(f"🔍 DEBUG: First tool structure: {json.dumps(self.tools[0], indent=2)}")
 
+    def _refresh_tools(self):
+        """Refresh tools list to include newly registered dynamic tools"""
+        raw_functions = get_function_definitions()
+
+        # Convert to Responses API format
+        self.tools = []
+        for func in raw_functions:
+            # Convert Pydantic model to dict if needed
+            if hasattr(func, 'model_dump'):
+                func_dict = func.model_dump()
+            elif hasattr(func, 'dict'):
+                func_dict = func.dict()
+            else:
+                func_dict = {
+                    "name": func.name,
+                    "description": func.description,
+                    "parameters": func.parameters
+                }
+
+            tool = {
+                "type": "function",
+                "name": func_dict["name"],
+                "description": func_dict["description"],
+                "parameters": func_dict["parameters"]
+            }
+            self.tools.append(tool)
+
+        logger.info(f"🔄 Tools refreshed: {len(self.tools)} tools now available")
+
     def _load_system_prompt(self) -> str:
         """Load system prompt from file or use default"""
         from pathlib import Path
@@ -295,9 +324,17 @@ REMEMBER: Use diagnostic tools proactively. Check if diagnose_* tools exist, or 
                 and current_input[0].get("type") == "function_call_output"
             )
 
-            # Send assistant message to user ONLY if this is NOT a response to tool outputs
-            # This prevents duplicate messages (tool functions send their own messages)
-            if content.get("assistant_message") and not is_tool_output_response:
+            # Check for tool calls
+            tool_calls = content.get("tool_calls", [])
+
+            # Send assistant message if this is the final response (no more tool calls)
+            # OR if this is the first iteration (user-facing response before tools)
+            should_send_message = (
+                content.get("assistant_message") and
+                (not tool_calls or iteration == 1)  # Final response OR first iteration
+            )
+
+            if should_send_message:
                 final_message = content["assistant_message"]
                 self.bot.send_ai_message(
                     channel_id=channel_id,
@@ -306,11 +343,6 @@ REMEMBER: Use diagnostic tools proactively. Check if diagnose_* tools exist, or 
                     metadata={"response_id": response.id}
                 )
                 logger.info(f"Sent assistant message to user")
-            elif is_tool_output_response:
-                logger.info(f"Skipping assistant message (response to tool outputs)")
-
-            # Check for tool calls
-            tool_calls = content.get("tool_calls", [])
 
             if not tool_calls:
                 # No more tool calls - we're done
@@ -415,6 +447,12 @@ REMEMBER: Use diagnostic tools proactively. Check if diagnose_* tools exist, or 
                 })
 
                 logger.info(f"Tool {function_name} executed: success={result.success}")
+
+                # 🔄 CRITICAL: If register_dynamic_tool was called, refresh tools list
+                # This makes the new tool available in the SAME conversation
+                if function_name == "register_dynamic_tool" and result.success:
+                    logger.info("🔄 Refreshing tools after register_dynamic_tool...")
+                    self._refresh_tools()
 
             except Exception as e:
                 logger.error(f"Error executing tool call: {e}", exc_info=True)
