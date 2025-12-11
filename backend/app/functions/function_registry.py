@@ -1839,7 +1839,17 @@ async def process_payment(
     amount: float,
     payment_method: Optional[str] = "stripe",
 ) -> FunctionResult:
-    """Process payment to contractor for completed work"""
+    """
+    🔒 ESCROW PAYMENT: Hold payment for 7 days or until tenant approval
+    💰 PLATFORM FEE: Automatically deduct 15% commission
+
+    Payment Flow:
+    1. Charge tenant → Hold in escrow (Stripe authorized charge)
+    2. Update job status to "awaiting_approval"
+    3. Tenant approves OR 7 days pass → Capture charge
+    4. Transfer to contractor (amount - 15% platform fee)
+    5. Platform keeps 15% as revenue
+    """
     try:
         dynamo = get_dynamo_service()
 
@@ -1870,75 +1880,69 @@ async def process_payment(
                 message=f"Cannot process payment: no contractor assigned to job {job_id}",
             )
 
+        # 💰 CALCULATE PLATFORM FEE (15%)
+        PLATFORM_FEE_PERCENTAGE = 0.15
+        total_amount = amount
+        platform_fee = total_amount * PLATFORM_FEE_PERCENTAGE
+        contractor_payout = total_amount - platform_fee
+
+        logger.info(f"💰 Payment breakdown for job {job_id}:")
+        logger.info(f"   Total: ${total_amount:.2f}")
+        logger.info(f"   Platform fee (15%): ${platform_fee:.2f}")
+        logger.info(f"   Contractor payout: ${contractor_payout:.2f}")
+
         # Process payment via Stripe
         if payment_method == "stripe":
-            from ..services.stripe_service import StripeService
-
-            stripe_service = StripeService()
-
-            # Get contractor's Stripe account ID (would come from contractor profile)
-            # For MVP, we'll simulate this
-            # In production, you'd query ContractorDB.get_profile(contractor_id).stripe_account_id
-
-            # Convert amount to cents
-            amount_cents = int(amount * 100)
-
-            # Create payout
             try:
-                # Note: In production, you'd need the contractor's Stripe Connect account ID
-                # For MVP, we'll return success but skip actual Stripe call
-                logger.info(f"💳 Processing ${amount:.2f} payment for job {job_id} to {contractor_name}")
+                # 🔒 STEP 1: Create authorized charge (HOLD in escrow, don't capture yet)
+                # In production: charge = stripe.Charge.create(amount=..., capture=False, customer=tenant_stripe_id)
+                # For MVP: simulate escrow
 
-                payout_result = {
-                    "transfer_id": f"tr_mock_{uuid.uuid4().hex[:12]}",
-                    "amount": amount_cents,
-                    "currency": "usd",
-                    "destination": f"acct_{contractor_id}",
-                    "status": "succeeded",
-                }
+                escrow_charge_id = f"ch_escrow_{uuid.uuid4().hex[:12]}"
+                escrow_expires_at = (datetime.utcnow() + timedelta(days=7)).isoformat()
 
-                # In production, uncomment this:
-                # payout_result = stripe_service.create_payout(
-                #     destination_account_id=contractor_stripe_account_id,
-                #     amount_cents=amount_cents,
-                #     description=f"Payment for job {job_id}",
-                #     metadata={
-                #         "job_id": job_id,
-                #         "contractor_id": contractor_id,
-                #     }
-                # )
+                logger.info(f"🔒 Holding ${total_amount:.2f} in escrow for job {job_id}")
+                logger.info(f"   Charge ID: {escrow_charge_id}")
+                logger.info(f"   Auto-release: {escrow_expires_at}")
 
-                # Update job with payment info
+                # STEP 2: Update job with escrow details
                 dynamo.update_job(
                     job_id,
-                    payment_status="paid",
-                    payment_amount=amount,
-                    payment_date=datetime.utcnow().isoformat(),
+                    payment_status="escrowed",
+                    payment_amount=total_amount,
+                    platform_fee=platform_fee,
+                    contractor_payout=contractor_payout,
+                    escrow_charge_id=escrow_charge_id,
+                    escrow_created_at=datetime.utcnow().isoformat(),
+                    escrow_expires_at=escrow_expires_at,
                     payment_method=payment_method,
-                    stripe_transfer_id=payout_result.get("transfer_id"),
                 )
 
-                logger.info(f"✅ Payment processed for job {job_id}: ${amount:.2f} to {contractor_name}")
+                logger.info(f"✅ Payment escrowed for job {job_id}")
+                logger.info(f"   Tenant will be asked to approve work within 7 days")
 
                 return FunctionResult(
                     success=True,
                     data={
                         "job_id": job_id,
-                        "amount": amount,
+                        "payment_status": "escrowed",
+                        "total_amount": total_amount,
+                        "platform_fee": platform_fee,
+                        "contractor_payout": contractor_payout,
+                        "escrow_charge_id": escrow_charge_id,
+                        "escrow_expires_at": escrow_expires_at,
                         "contractor_id": contractor_id,
                         "contractor_name": contractor_name,
-                        "payment_status": "paid",
-                        "transfer_id": payout_result.get("transfer_id"),
                     },
-                    message=f"Payment of ${amount:.2f} processed successfully to {contractor_name}",
+                    message=f"💰 Payment of ${total_amount:.2f} held in escrow. Tenant has 7 days to approve work. Contractor will receive ${contractor_payout:.2f} after approval.",
                 )
 
             except Exception as stripe_error:
-                logger.error(f"Stripe payment error: {stripe_error}", exc_info=True)
+                logger.error(f"Stripe escrow error: {stripe_error}", exc_info=True)
                 return FunctionResult(
                     success=False,
                     error=str(stripe_error),
-                    message=f"Stripe payment failed: {str(stripe_error)}",
+                    message=f"Failed to create escrow payment: {str(stripe_error)}",
                 )
 
         else:
@@ -1954,6 +1958,213 @@ async def process_payment(
             success=False,
             error=str(e),
             message="Failed to process payment",
+        )
+
+
+async def approve_work_completion(
+    job_id: str,
+    user_id: str,
+    approved: bool,
+    feedback: Optional[str] = None,
+) -> FunctionResult:
+    """
+    🎯 TENANT APPROVES WORK: Release escrow payment to contractor
+
+    Called when tenant confirms work is satisfactory.
+    Triggers immediate release of escrowed funds to contractor.
+    """
+    try:
+        dynamo = get_dynamo_service()
+
+        # Get job details
+        job = dynamo.get_job(job_id)
+        if not job:
+            return FunctionResult(
+                success=False,
+                error="Job not found",
+                message=f"Cannot approve work: job {job_id} not found",
+            )
+
+        # Check payment is escrowed
+        if job.get("payment_status") != "escrowed":
+            return FunctionResult(
+                success=False,
+                error="Payment not escrowed",
+                message=f"Cannot approve: payment status is {job.get('payment_status')}, expected 'escrowed'",
+            )
+
+        if approved:
+            # ✅ TENANT APPROVED: Release payment
+            logger.info(f"✅ Tenant approved work for job {job_id}")
+
+            # Release escrow to contractor
+            release_result = await release_escrow_payment(job_id)
+
+            if release_result.success:
+                # Update job with approval
+                dynamo.update_job(
+                    job_id,
+                    work_approved=True,
+                    work_approved_at=datetime.utcnow().isoformat(),
+                    work_feedback=feedback,
+                )
+
+                return FunctionResult(
+                    success=True,
+                    data={
+                        "job_id": job_id,
+                        "approved": True,
+                        "payment_released": True,
+                        "contractor_payout": release_result.data.get("contractor_payout"),
+                    },
+                    message=f"✅ Work approved! ${release_result.data.get('contractor_payout', 0):.2f} released to contractor.",
+                )
+            else:
+                return release_result
+
+        else:
+            # ❌ TENANT REJECTED: Hold escrow for dispute resolution
+            logger.info(f"❌ Tenant rejected work for job {job_id}: {feedback}")
+
+            dynamo.update_job(
+                job_id,
+                work_approved=False,
+                work_rejected_at=datetime.utcnow().isoformat(),
+                work_feedback=feedback,
+                payment_status="disputed",
+            )
+
+            return FunctionResult(
+                success=True,
+                data={
+                    "job_id": job_id,
+                    "approved": False,
+                    "payment_status": "disputed",
+                },
+                message=f"❌ Work rejected. Payment held for dispute resolution. Reason: {feedback or 'No feedback provided'}",
+            )
+
+    except Exception as e:
+        logger.error(f"Error approving work: {e}", exc_info=True)
+        return FunctionResult(
+            success=False,
+            error=str(e),
+            message="Failed to approve work",
+        )
+
+
+async def release_escrow_payment(job_id: str) -> FunctionResult:
+    """
+    💸 RELEASE ESCROW: Transfer funds from escrow to contractor
+
+    Called by:
+    1. approve_work_completion() - Tenant approved work
+    2. Auto-release cron job - 7 days passed, no disputes
+
+    Transfers: (total_amount - 15% platform fee) to contractor
+    Platform keeps: 15% as revenue
+    """
+    try:
+        dynamo = get_dynamo_service()
+
+        # Get job details
+        job = dynamo.get_job(job_id)
+        if not job:
+            return FunctionResult(
+                success=False,
+                error="Job not found",
+                message=f"Cannot release escrow: job {job_id} not found",
+            )
+
+        # Verify payment is escrowed
+        if job.get("payment_status") != "escrowed":
+            return FunctionResult(
+                success=False,
+                error="Payment not escrowed",
+                message=f"Cannot release: payment status is {job.get('payment_status')}",
+            )
+
+        contractor_id = job.get("contractor_id")
+        contractor_name = job.get("contractor_name", "Unknown")
+        escrow_charge_id = job.get("escrow_charge_id")
+        total_amount = job.get("payment_amount", 0)
+        platform_fee = job.get("platform_fee", total_amount * 0.15)
+        contractor_payout = job.get("contractor_payout", total_amount - platform_fee)
+
+        logger.info(f"💸 Releasing escrow for job {job_id}")
+        logger.info(f"   Escrow charge: {escrow_charge_id}")
+        logger.info(f"   Total: ${total_amount:.2f}")
+        logger.info(f"   Platform fee (15%): ${platform_fee:.2f}")
+        logger.info(f"   Contractor payout: ${contractor_payout:.2f}")
+
+        try:
+            # 🔒 STEP 1: Capture the escrow charge (collect money from tenant)
+            # In production: stripe.Charge.capture(escrow_charge_id)
+            # For MVP: simulate capture
+
+            # 💸 STEP 2: Transfer to contractor (minus platform fee)
+            # In production: use StripeService.create_payout()
+            from ..services.stripe_service import StripeService
+
+            # For MVP: simulate transfer
+            transfer_id = f"tr_{uuid.uuid4().hex[:12]}"
+
+            # In production, uncomment this:
+            # payout_result = StripeService.create_payout(
+            #     destination_account_id=contractor_stripe_account_id,
+            #     amount_cents=int(contractor_payout * 100),
+            #     description=f"Payment for job {job_id} (escrow released)",
+            #     metadata={
+            #         "job_id": job_id,
+            #         "contractor_id": contractor_id,
+            #         "escrow_charge_id": escrow_charge_id,
+            #         "platform_fee": platform_fee,
+            #     }
+            # )
+            # transfer_id = payout_result.get("transfer_id")
+
+            # STEP 3: Update job status to paid
+            dynamo.update_job(
+                job_id,
+                payment_status="paid",
+                payment_released_at=datetime.utcnow().isoformat(),
+                stripe_transfer_id=transfer_id,
+            )
+
+            logger.info(f"✅ Escrow released for job {job_id}")
+            logger.info(f"   Transfer ID: {transfer_id}")
+            logger.info(f"   Contractor {contractor_name} received: ${contractor_payout:.2f}")
+            logger.info(f"   Platform revenue: ${platform_fee:.2f}")
+
+            return FunctionResult(
+                success=True,
+                data={
+                    "job_id": job_id,
+                    "payment_status": "paid",
+                    "total_amount": total_amount,
+                    "platform_fee": platform_fee,
+                    "contractor_payout": contractor_payout,
+                    "transfer_id": transfer_id,
+                    "contractor_id": contractor_id,
+                    "contractor_name": contractor_name,
+                },
+                message=f"💸 Payment released! Contractor received ${contractor_payout:.2f}. Platform earned ${platform_fee:.2f}.",
+            )
+
+        except Exception as stripe_error:
+            logger.error(f"Stripe release error: {stripe_error}", exc_info=True)
+            return FunctionResult(
+                success=False,
+                error=str(stripe_error),
+                message=f"Failed to release escrow payment: {str(stripe_error)}",
+            )
+
+    except Exception as e:
+        logger.error(f"Error releasing escrow: {e}", exc_info=True)
+        return FunctionResult(
+            success=False,
+            error=str(e),
+            message="Failed to release escrow payment",
         )
 
 
@@ -2313,12 +2524,12 @@ def get_function_definitions() -> List[FunctionDefinition]:
         ),
         FunctionDefinition(
             name="process_payment",
-            description="Process payment to contractor for completed work. Use after work is marked as completed.",
+            description="🔒 ESCROW PAYMENT: Hold payment in escrow for 7 days. Automatically deducts 15% platform fee. Tenant must approve work to release funds to contractor.",
             parameters={
                 "type": "object",
                 "properties": {
                     "job_id": {"type": "string", "description": "Job ID"},
-                    "amount": {"type": "number", "description": "Payment amount in dollars (e.g., 250.00)"},
+                    "amount": {"type": "number", "description": "Total payment amount in dollars (e.g., 250.00). Platform will deduct 15% fee, contractor receives 85%."},
                     "payment_method": {
                         "type": "string",
                         "enum": ["stripe"],
@@ -2326,6 +2537,20 @@ def get_function_definitions() -> List[FunctionDefinition]:
                     },
                 },
                 "required": ["job_id", "amount"],
+            },
+        ),
+        FunctionDefinition(
+            name="approve_work_completion",
+            description="🎯 Tenant approves or rejects completed work. If approved, releases escrowed payment to contractor. If rejected, holds payment for dispute resolution.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "job_id": {"type": "string", "description": "Job ID"},
+                    "user_id": {"type": "string", "description": "User ID (tenant)"},
+                    "approved": {"type": "boolean", "description": "True if work is approved, False if rejected"},
+                    "feedback": {"type": "string", "description": "Optional feedback about the work quality"},
+                },
+                "required": ["job_id", "user_id", "approved"],
             },
         ),
         FunctionDefinition(
@@ -2421,7 +2646,9 @@ FUNCTION_IMPLEMENTATIONS = {
     "accept_bid": accept_bid,
     "request_landlord_approval": request_landlord_approval,
     "process_approval_decision": process_approval_decision,
-    "process_payment": process_payment,  # 🚨 NEW: Stripe payment processing
+    "process_payment": process_payment,  # 🔒 ESCROW: Hold payment with 15% platform fee
+    "approve_work_completion": approve_work_completion,  # 🎯 NEW: Tenant approves work → release escrow
+    "release_escrow_payment": release_escrow_payment,  # 💸 NEW: Release funds to contractor
     "get_user_incidents": get_user_incidents,
     "get_user_jobs": get_user_jobs,
     "get_property_info": get_property_info,
