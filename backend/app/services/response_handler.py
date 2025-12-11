@@ -220,14 +220,40 @@ REMEMBER: Use diagnostic tools proactively. Check if diagnose_* tools exist, or 
             ]
 
             # 3. Handle tool loop (call Response API + execute tools repeatedly)
-            result = await self.handle_tool_loop(
-                conversation_id=conversation_id,
-                prompt_id=self.prompt_id,
-                input_items=input_items,
-                channel_id=channel_id,
-                user_id=user_id,
-                max_iterations=5
-            )
+            try:
+                result = await self.handle_tool_loop(
+                    conversation_id=conversation_id,
+                    prompt_id=self.prompt_id,
+                    input_items=input_items,
+                    channel_id=channel_id,
+                    user_id=user_id,
+                    max_iterations=5
+                )
+            except Exception as e:
+                # 🔥 CRITICAL: Detect corrupted conversation state
+                if "No tool output found for function call" in str(e):
+                    logger.warning(f"⚠️ Conversation corrupted (missing tool output), creating new conversation...")
+
+                    # Create a new conversation to recover
+                    conversation_id = await self.conversation_manager.create_conversation(
+                        channel_id=channel_id,
+                        user_id=user_id,
+                        persona=persona
+                    )
+                    logger.info(f"✅ Created new conversation: {conversation_id}")
+
+                    # Retry with fresh conversation
+                    result = await self.handle_tool_loop(
+                        conversation_id=conversation_id,
+                        prompt_id=self.prompt_id,
+                        input_items=input_items,
+                        channel_id=channel_id,
+                        user_id=user_id,
+                        max_iterations=5
+                    )
+                else:
+                    # Different error, re-raise
+                    raise
 
             logger.info(f"Message processing complete: {result.get('tool_calls_executed', 0)} tool calls executed")
 
@@ -379,12 +405,56 @@ REMEMBER: Use diagnostic tools proactively. Check if diagnose_* tools exist, or 
 
         if iteration >= max_iterations:
             logger.warning(f"Tool loop reached max iterations ({max_iterations})")
-            self.bot.send_ai_message(
-                channel_id=channel_id,
-                persona="tenant",
-                text="I'm processing your request. This might take a moment...",
-                metadata={"max_iterations_reached": True}
-            )
+
+            # 🔥 CRITICAL: Close the conversation properly by sending final tool outputs
+            # Without this, the conversation is left in a broken state
+            if tool_outputs:
+                logger.info(f"🔄 Sending final tool outputs to close conversation...")
+                try:
+                    # Send one final API call with the pending tool outputs
+                    final_response = self.openai_client.responses.create(
+                        prompt={"id": prompt_id},
+                        conversation=conversation_id,
+                        input=tool_outputs,
+                        tools=self.tools
+                    )
+                    logger.info(f"✅ Conversation closed with final response: {final_response.id}")
+
+                    # Extract any final message
+                    final_content = await self.extract_response_content(final_response)
+                    if final_content.get("assistant_message"):
+                        final_message = final_content["assistant_message"]
+                        self.bot.send_ai_message(
+                            channel_id=channel_id,
+                            persona="tenant",
+                            text=final_message,
+                            metadata={"response_id": final_response.id, "max_iterations_recovery": True}
+                        )
+                        logger.info(f"✅ Sent final message after max iterations")
+                    else:
+                        # No message from API, send fallback
+                        self.bot.send_ai_message(
+                            channel_id=channel_id,
+                            persona="tenant",
+                            text="I've processed your request. Let me know if you need anything else!",
+                            metadata={"max_iterations_reached": True}
+                        )
+                except Exception as e:
+                    logger.error(f"Failed to close conversation: {e}", exc_info=True)
+                    self.bot.send_ai_message(
+                        channel_id=channel_id,
+                        persona="tenant",
+                        text="I'm processing your request. This might take a moment...",
+                        metadata={"max_iterations_reached": True, "close_failed": True}
+                    )
+            else:
+                # No pending tool outputs, just send message
+                self.bot.send_ai_message(
+                    channel_id=channel_id,
+                    persona="tenant",
+                    text="I'm processing your request. This might take a moment...",
+                    metadata={"max_iterations_reached": True}
+                )
 
         return {
             "tool_calls_executed": total_tool_calls,
