@@ -7,9 +7,26 @@ This script registers 3 essential diagnostic tools:
 3. schedule_preventive_maintenance - Proactive maintenance scheduler
 
 Run once to populate the dynamic tools system.
+
+Usage:
+    # From Heroku dyno:
+    python -m backend.app.dynamic_tools.seed_starter_tools
+
+    # Or use the standalone script:
+    cd backend && python -c "from app.dynamic_tools.seed_starter_tools import seed_tools; seed_tools()"
 """
 import logging
-from .tool_runtime import get_dynamic_tool_runtime
+import sys
+import os
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
+
+try:
+    from backend.app.dynamic_tools.tool_runtime import get_dynamic_tool_runtime
+except ImportError:
+    # Fallback for relative import when run as module
+    from .tool_runtime import get_dynamic_tool_runtime
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
