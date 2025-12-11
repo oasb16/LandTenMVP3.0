@@ -325,6 +325,12 @@ REMEMBER: Use diagnostic tools proactively. Check if diagnose_* tools exist, or 
             except Exception as e:
                 logger.error(f"Responses API error: {e}", exc_info=True)
 
+                # 🔥 CRITICAL: Check for corrupted conversation state
+                if "No tool output found for function call" in str(e):
+                    logger.warning(f"⚠️ Corrupted conversation detected, re-raising for recovery...")
+                    # Re-raise so outer try/except can handle recovery
+                    raise
+
                 # Provide user-friendly error messages based on error type
                 error_message = "I encountered an error processing your request. Please try again."
 
