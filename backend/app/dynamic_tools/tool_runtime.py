@@ -16,7 +16,8 @@ logger = logging.getLogger(__name__)
 def get_dynamo_service():
     """Lazy import to avoid circular dependencies"""
     try:
-        from app.services.dynamo_service import get_dynamo_service as _get_dynamo_service
+        # Use relative import to work regardless of how module is loaded
+        from ..services.dynamo_service import get_dynamo_service as _get_dynamo_service
         return _get_dynamo_service()
     except Exception as e:
         logger.warning(f"⚠️ DynamoDB service not available: {e}")
