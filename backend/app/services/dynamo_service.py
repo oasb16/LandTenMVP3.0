@@ -507,9 +507,9 @@ class PropertyDB:
 
 
 class DynamicToolDB:
-    """Manage landten_dynamic_tools table for AI-generated diagnostic tools"""
+    """Manage landten_dev_dynamic_tools table for AI-generated diagnostic tools"""
 
-    TABLE_NAME = "landten_dynamic_tools"
+    TABLE_NAME = "landten_dev_dynamic_tools"
 
     @staticmethod
     def create_tool(tool_data: Dict[str, Any]) -> Dict[str, Any]:
