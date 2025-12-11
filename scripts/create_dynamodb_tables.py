@@ -2,13 +2,14 @@
 """
 Create DynamoDB tables for property management workflow system.
 
-Creates 6 tables:
+Creates 7 tables:
 1. incidents - Tenant-reported incidents
 2. jobs - Contractor job postings
 3. bids - Contractor bids on jobs
 4. contractors - Contractor profiles
 5. payments - Payment transactions
 6. conversation_mappings - Slack channel to OpenAI Conversation ID mappings
+7. dynamic_tools - AI-generated diagnostic tools (for Custom AI Diagnostic Models)
 
 All tables use PAY_PER_REQUEST billing for cost efficiency.
 Script is idempotent - safe to run multiple times.
@@ -454,6 +455,64 @@ def create_conversation_mappings_table(client, table_name: str) -> None:
             raise
 
 
+def create_dynamic_tools_table(client, table_name: str) -> None:
+    """
+    Create dynamic_tools table.
+
+    Stores AI-generated diagnostic tools for Custom AI Diagnostic Models.
+    Allows tools to be shared across all AI instances and persist between sessions.
+
+    Primary Key: tool_id (HASH)
+    GSIs:
+    - tool_name-index: Find tool by name
+    - category-index: Query tools by category (plumbing, electrical, hvac, etc.)
+    """
+    print(f"Creating table: {table_name}")
+
+    try:
+        client.create_table(
+            TableName=table_name,
+            KeySchema=[
+                {"AttributeName": "tool_id", "KeyType": "HASH"}
+            ],
+            AttributeDefinitions=[
+                {"AttributeName": "tool_id", "AttributeType": "S"},
+                {"AttributeName": "tool_name", "AttributeType": "S"},
+                {"AttributeName": "category", "AttributeType": "S"}
+            ],
+            GlobalSecondaryIndexes=[
+                {
+                    "IndexName": "tool_name-index",
+                    "KeySchema": [
+                        {"AttributeName": "tool_name", "KeyType": "HASH"}
+                    ],
+                    "Projection": {"ProjectionType": "ALL"}
+                },
+                {
+                    "IndexName": "category-index",
+                    "KeySchema": [
+                        {"AttributeName": "category", "KeyType": "HASH"}
+                    ],
+                    "Projection": {"ProjectionType": "ALL"}
+                }
+            ],
+            BillingMode="PAY_PER_REQUEST",
+            Tags=[
+                {"Key": "Environment", "Value": os.getenv("STAGE", "dev")},
+                {"Key": "Application", "Value": "LandTenMVP"},
+                {"Key": "Purpose", "Value": "DynamicToolPersistence"}
+            ]
+        )
+
+        print(f"✓ Table {table_name} created successfully")
+
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "ResourceInUseException":
+            print(f"⚠ Table {table_name} already exists")
+        else:
+            raise
+
+
 def wait_for_table(client, table_name: str, max_attempts: int = 30) -> bool:
     """Wait for table to become active."""
     print(f"Waiting for {table_name} to become active...")
@@ -548,7 +607,8 @@ def main():
         ("bids", create_bids_table),
         ("contractors", create_contractors_table),
         ("payments", create_payments_table),
-        ("conversation_mappings", create_conversation_mappings_table)
+        ("conversation_mappings", create_conversation_mappings_table),
+        ("dynamic_tools", create_dynamic_tools_table)
     ]
 
     # Create tables
