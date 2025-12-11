@@ -42,6 +42,9 @@ class ResponseHandler:
         self.bot = get_bot()
         self.prompt_id = os.getenv("LANDTEN_PROMPT_ID")
 
+        # Load enhanced system prompt for auto-tool-generation
+        self.system_prompt = self._load_system_prompt()
+
         # Get available tools for function calling
         raw_functions = get_function_definitions()
 
@@ -72,18 +75,48 @@ class ResponseHandler:
             self.tools.append(tool)
 
         if not self.prompt_id:
-            raise ValueError(
-                "LANDTEN_PROMPT_ID environment variable not set. "
-                "Please create prompt in OpenAI dashboard and set the ID."
+            logger.warning(
+                "LANDTEN_PROMPT_ID not set - using local system prompt instead"
             )
 
-        logger.info(f"ResponseHandler initialized with prompt: {self.prompt_id}")
+        logger.info(f"ResponseHandler initialized with prompt: {self.prompt_id or 'local'}")
         logger.info(f"Loaded {len(self.tools)} tools for function calling")
+        logger.info(f"📋 System prompt: {len(self.system_prompt)} chars")
 
         # DEBUG: Log first tool structure to verify format
         if self.tools:
             import json
             logger.info(f"🔍 DEBUG: First tool structure: {json.dumps(self.tools[0], indent=2)}")
+
+    def _load_system_prompt(self) -> str:
+        """Load system prompt from file or use default"""
+        from pathlib import Path
+
+        prompt_path = Path(__file__).parent.parent.parent / "system_prompts" / "tenant_agent_prompt.txt"
+
+        if prompt_path.exists():
+            try:
+                with open(prompt_path, "r") as f:
+                    prompt = f.read()
+                logger.info(f"✅ Loaded system prompt from {prompt_path}")
+                return prompt
+            except Exception as e:
+                logger.error(f"Failed to load system prompt: {e}")
+
+        # Fallback to inline prompt
+        return """You are PropertyHelper, an empathetic AI assistant for property maintenance.
+
+CRITICAL: When users describe maintenance problems, ALWAYS use diagnostic tools:
+1. Check if tool exists (diagnose_water_leak, estimate_hvac_repair, schedule_preventive_maintenance)
+2. If exists: USE IT IMMEDIATELY with the symptom data
+3. If not: Generate new tool using register_dynamic_tool, then use it
+4. Enhance your response with tool data (cost, urgency, severity)
+
+Example:
+User: "Brown water dripping from ceiling"
+You: Call diagnose_water_leak(leak_location="bathroom ceiling", water_color="brown", flow_rate="dripping")
+Then: Use result to provide specific diagnosis, cost, and urgency
+"""
 
     async def process_message(
         self,
@@ -126,7 +159,18 @@ class ResponseHandler:
 
             logger.info(f"Using conversation: {conversation_id}")
 
-            # 2. Prepare input items
+            # 2. Prepare input items with system prompt injection
+            # Inject auto-tool-generation instructions into first user message
+            enhanced_message = f"""<system_context>
+{self.system_prompt}
+</system_context>
+
+<user_message>
+{message}
+</user_message>
+
+REMEMBER: Use diagnostic tools proactively. Check if diagnose_* tools exist, or generate new ones with register_dynamic_tool."""
+
             input_items = [
                 {
                     "type": "message",
@@ -134,7 +178,7 @@ class ResponseHandler:
                     "content": [
                         {
                             "type": "input_text",
-                            "text": message
+                            "text": enhanced_message
                         }
                     ]
                 }
