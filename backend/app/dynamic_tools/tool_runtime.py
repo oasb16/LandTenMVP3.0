@@ -231,22 +231,55 @@ Tool ID: {tool_record["tool_id"]}
             logger.warning(f"Storage directory does not exist: {self.storage_dir}")
             return
 
+        loaded_count = 0
         for tool_file in self.storage_dir.glob("*.py"):
             try:
-                code = tool_file.read_text()
+                full_content = tool_file.read_text()
                 tool_name = tool_file.stem
 
-                # Extract metadata from header comment
-                lines = code.split('\n')
-                metadata_lines = [l for l in lines if l.startswith('#') or '"""' in l]
+                # Extract metadata from header docstring
+                description = "Dynamic tool"
+                category = "general"
 
-                # Register tool (this will validate and compile it)
+                lines = full_content.split('\n')
+                for line in lines:
+                    if 'Description:' in line:
+                        description = line.split('Description:')[1].strip()
+                    elif 'Category:' in line:
+                        category = line.split('Category:')[1].strip()
+
+                # Extract actual code (skip header docstring)
+                # Find the end of the header docstring
+                code_start = full_content.find('"""', 10)  # Skip first """
+                if code_start != -1:
+                    code_start = full_content.find('"""', code_start + 1)  # Find closing """
+                    if code_start != -1:
+                        code = full_content[code_start + 3:].strip()
+                    else:
+                        code = full_content
+                else:
+                    code = full_content
+
+                # Re-register tool (validates and compiles it)
                 logger.info(f"📂 Loading tool from disk: {tool_name}")
-                # Note: We're re-registering, which will validate the code
-                # You might want to extract metadata from the header instead
+                result = self.register_tool(
+                    tool_name=tool_name,
+                    code=code,
+                    description=description,
+                    category=category,
+                    created_by="disk_load"
+                )
+
+                if result["success"]:
+                    loaded_count += 1
+                    logger.info(f"✅ Loaded: {tool_name}")
+                else:
+                    logger.error(f"❌ Failed to load {tool_name}: {result.get('errors')}")
 
             except Exception as e:
                 logger.error(f"Failed to load tool {tool_file}: {e}", exc_info=True)
+
+        logger.info(f"📦 Loaded {loaded_count} tools from disk")
 
 
 # Singleton instance
