@@ -207,12 +207,31 @@ Then: Use result to provide specific diagnosis, cost, and urgency
                     "building_manager": "None on file"
                 }
 
-            # Extract relevant fields for variables
+            # Extract property address
+            address = property_data.get("address", "Unknown property")
+
+            # Look up landlord name from landlord_id
+            landlord_id = property_data.get("landlord_id")
+            landlord_name = "Unknown landlord"
+            if landlord_id:
+                landlord_user = self.dynamo_service.get_user(landlord_id)
+                if landlord_user:
+                    landlord_name = landlord_user.get("name", landlord_user.get("email", landlord_id))
+
+            # Look up tenant name from user_id
+            tenant_name = user_id  # Default to user_id
+            tenant_user = self.dynamo_service.get_user(user_id)
+            if tenant_user:
+                tenant_name = tenant_user.get("name", tenant_user.get("email", user_id))
+
+            # Building manager (not in current schema, but prepare for future)
+            building_manager = property_data.get("building_manager", "None on file")
+
             return {
-                "address": property_data.get("address", "Unknown property"),
-                "landlord_name": property_data.get("landlord_name", "Unknown landlord"),
-                "tenant_name": property_data.get("tenant_name", user_id),
-                "building_manager": property_data.get("building_manager", "None on file")
+                "address": address,
+                "landlord_name": landlord_name,
+                "tenant_name": tenant_name,
+                "building_manager": building_manager
             }
 
         except Exception as e:
@@ -395,17 +414,18 @@ Then: Use result to provide specific diagnosis, cost, and urgency
 
             # Call Responses API with tools enabled
             try:
+                # Build prompt object with variables inside
+                prompt_obj = {"id": prompt_id}
+                if variables:
+                    prompt_obj["variables"] = variables
+
                 # Build request parameters
                 request_params = {
-                    "prompt": {"id": prompt_id},
+                    "prompt": prompt_obj,  # ✅ Variables inside prompt object
                     "conversation": conversation_id,
                     "input": current_input,
                     "tools": self.tools  # ✅ CRITICAL: Enable function calling
                 }
-
-                # Add variables if provided (for dashboard prompt placeholders)
-                if variables:
-                    request_params["variables"] = variables
 
                 response = await self.openai_client.responses.create(**request_params)
 
@@ -506,17 +526,18 @@ Then: Use result to provide specific diagnosis, cost, and urgency
             if tool_outputs:
                 logger.info(f"🔄 Sending final tool outputs to close conversation...")
                 try:
+                    # Build prompt object with variables inside
+                    final_prompt_obj = {"id": prompt_id}
+                    if variables:
+                        final_prompt_obj["variables"] = variables
+
                     # Send one final API call with the pending tool outputs
                     final_request_params = {
-                        "prompt": {"id": prompt_id},
+                        "prompt": final_prompt_obj,  # ✅ Variables inside prompt object
                         "conversation": conversation_id,
                         "input": tool_outputs,
                         "tools": self.tools
                     }
-
-                    # Add variables if provided
-                    if variables:
-                        final_request_params["variables"] = variables
 
                     final_response = await self.openai_client.responses.create(**final_request_params)
                     logger.info(f"✅ Conversation closed with final response: {final_response.id}")
