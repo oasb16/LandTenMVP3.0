@@ -439,11 +439,68 @@ Then: Use result to provide specific diagnosis, cost, and urgency
                     "tools": self.tools  # ✅ CRITICAL: Enable function calling
                 }
 
+                # 🔍 DEBUG: Log complete request details
+                logger.info(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                logger.info(f"🔍 RESPONSES API REQUEST (Iteration {iteration})")
+                logger.info(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                logger.info(f"📋 Prompt Object:")
+                logger.info(f"   - ID: {prompt_obj.get('id')}")
+                logger.info(f"   - Version: {prompt_obj.get('version', 'NOT SET - WILL USE v1!')}")
+                if variables:
+                    logger.info(f"   - Variables: {json.dumps(variables, indent=6)}")
+                else:
+                    logger.info(f"   - Variables: NONE")
+                logger.info(f"💬 Conversation ID: {conversation_id}")
+                logger.info(f"📥 Input Items: {len(current_input)} item(s)")
+                for idx, item in enumerate(current_input):
+                    logger.info(f"   Item {idx}: type={item.get('type')}, role={item.get('role', 'N/A')}")
+                    if item.get('type') == 'message' and item.get('content'):
+                        for content_item in item['content']:
+                            if content_item.get('type') == 'input_text':
+                                text = content_item.get('text', '')
+                                preview = text[:100] + '...' if len(text) > 100 else text
+                                logger.info(f"      Text: {preview}")
+                logger.info(f"🔧 Tools Available: {len(self.tools)} tool(s)")
+                tool_names = [t.get('name') for t in self.tools[:10]]  # Show first 10
+                logger.info(f"   First 10 tools: {', '.join(tool_names)}")
+                if len(self.tools) > 10:
+                    logger.info(f"   ... and {len(self.tools) - 10} more")
+                logger.info(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
                 response = await self.openai_client.responses.create(**request_params)
 
-                # Log response with version info
-                version_info = f" (prompt v{self.prompt_version})" if self.prompt_version else ""
-                logger.info(f"Response received: {response.id}{version_info}")
+                # 🔍 DEBUG: Log complete response details
+                logger.info(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                logger.info(f"✅ RESPONSES API RESPONSE (Iteration {iteration})")
+                logger.info(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                version_info = f" (prompt v{self.prompt_version})" if self.prompt_version else " (NO VERSION - USED v1!)"
+                logger.info(f"📄 Response ID: {response.id}{version_info}")
+                logger.info(f"📊 Response Status: {response.status}")
+                logger.info(f"📤 Output Items: {len(response.output)} item(s)")
+
+                # Log each output item
+                for idx, item in enumerate(response.output):
+                    logger.info(f"   Output Item {idx}:")
+                    logger.info(f"      - Type: {item.type}")
+                    logger.info(f"      - Role: {getattr(item, 'role', 'N/A')}")
+
+                    # Check for function calls
+                    if item.type == "function_call" or hasattr(item, 'name'):
+                        logger.info(f"      - 🔧 FUNCTION CALL DETECTED!")
+                        logger.info(f"         Function: {getattr(item, 'name', 'N/A')}")
+                        logger.info(f"         Call ID: {getattr(item, 'call_id', 'N/A')}")
+                        args = getattr(item, 'arguments', 'N/A')
+                        logger.info(f"         Arguments: {args[:200] if isinstance(args, str) and len(args) > 200 else args}")
+
+                    # Check for message content
+                    if item.type == "message" and hasattr(item, 'content'):
+                        for content_item in item.content:
+                            if hasattr(content_item, 'text'):
+                                text = content_item.text
+                                preview = text[:200] + '...' if len(text) > 200 else text
+                                logger.info(f"      - Message Text: {preview}")
+
+                logger.info(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
             except Exception as e:
                 logger.error(f"Responses API error: {e}", exc_info=True)
@@ -478,8 +535,34 @@ Then: Use result to provide specific diagnosis, cost, and urgency
             # Extract response content
             content = await self.extract_response_content(response)
 
+            # 🔍 DEBUG: Log extracted content
+            logger.info(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+            logger.info(f"🔍 EXTRACTED CONTENT (Iteration {iteration})")
+            logger.info(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
             # Check for tool calls FIRST
             tool_calls = content.get("tool_calls", [])
+
+            logger.info(f"🔧 Tool Calls Found: {len(tool_calls)}")
+            if tool_calls:
+                for idx, tc in enumerate(tool_calls):
+                    logger.info(f"   Tool Call {idx}:")
+                    logger.info(f"      - ID: {tc.get('id')}")
+                    logger.info(f"      - Type: {tc.get('type')}")
+                    logger.info(f"      - Function: {tc.get('function', {}).get('name')}")
+                    args = tc.get('function', {}).get('arguments', '')
+                    logger.info(f"      - Arguments: {args[:200] if len(args) > 200 else args}")
+            else:
+                logger.warning(f"   ⚠️ NO TOOL CALLS EXTRACTED - AI may have ignored tool-calling instructions!")
+
+            assistant_msg = content.get("assistant_message")
+            if assistant_msg:
+                preview = assistant_msg[:300] + '...' if len(assistant_msg) > 300 else assistant_msg
+                logger.info(f"💬 Assistant Message: {preview}")
+            else:
+                logger.info(f"💬 Assistant Message: NONE")
+
+            logger.info(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
             # Send assistant message if:
             # - This is the first iteration (initial user-facing response), OR
