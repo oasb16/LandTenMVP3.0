@@ -58,6 +58,14 @@ class IncidentPhoto(BaseModel):
     )
     caption: Optional[str] = Field(None, description="Optional photo caption")
     uploaded_by: str = Field(..., description="User ID who uploaded the photo")
+    ai_analysis: Optional[str] = Field(
+        None,
+        description="AI-generated analysis of property issues visible in the photo"
+    )
+    ai_analysis_error: Optional[str] = Field(
+        None,
+        description="Error message if AI analysis failed"
+    )
 
 
 class Incident(BaseModel):
