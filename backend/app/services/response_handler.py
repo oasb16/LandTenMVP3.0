@@ -36,7 +36,7 @@ class ResponseHandler:
 
     def __init__(self):
         """Initialize ResponseHandler"""
-        self.openai_client = openai.Client(api_key=os.getenv("OPENAI_API_KEY"))
+        self.openai_client = openai.AsyncClient(api_key=os.getenv("OPENAI_API_KEY"))
         self.dynamo_service = get_dynamo_service()
         self.conversation_manager = get_conversation_manager(dynamo_service=self.dynamo_service)
         self.bot = get_bot()
@@ -317,7 +317,7 @@ REMEMBER: Use diagnostic tools proactively. Check if diagnose_* tools exist, or 
 
             # Call Responses API with tools enabled
             try:
-                response = self.openai_client.responses.create(
+                response = await self.openai_client.responses.create(
                     prompt={"id": prompt_id},
                     conversation=conversation_id,
                     input=current_input,
@@ -422,7 +422,7 @@ REMEMBER: Use diagnostic tools proactively. Check if diagnose_* tools exist, or 
                 logger.info(f"🔄 Sending final tool outputs to close conversation...")
                 try:
                     # Send one final API call with the pending tool outputs
-                    final_response = self.openai_client.responses.create(
+                    final_response = await self.openai_client.responses.create(
                         prompt={"id": prompt_id},
                         conversation=conversation_id,
                         input=tool_outputs,

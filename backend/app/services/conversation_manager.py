@@ -38,7 +38,7 @@ class ConversationManager:
             dynamo_service: DynamoDB service instance (for mapping storage)
         """
         self.dynamo = dynamo_service
-        self.openai_client = openai.Client(api_key=os.getenv("OPENAI_API_KEY"))
+        self.openai_client = openai.AsyncClient(api_key=os.getenv("OPENAI_API_KEY"))
 
     async def get_or_create_conversation(
         self,
@@ -73,7 +73,7 @@ class ConversationManager:
         # Create new conversation
         logger.info(f"Creating new conversation for channel: {channel_id}")
 
-        conversation = self.openai_client.conversations.create(
+        conversation = await self.openai_client.conversations.create(
             metadata={
                 "channel_id": channel_id,
                 "user_id": user_id,
@@ -113,10 +113,10 @@ class ConversationManager:
         """
         try:
             # Get conversation details
-            conversation = self.openai_client.conversations.retrieve(conversation_id)
+            conversation = await self.openai_client.conversations.retrieve(conversation_id)
 
             # Get conversation items (messages, tool calls, custom state items)
-            items = self.openai_client.conversations.items.list(conversation_id)
+            items = await self.openai_client.conversations.items.list(conversation_id)
 
             # Extract state from items
             state = self._extract_state_from_items(items.data)
@@ -189,7 +189,7 @@ class ConversationManager:
             data: State data to store
         """
         try:
-            self.openai_client.conversations.items.create(
+            await self.openai_client.conversations.items.create(
                 conversation_id=conversation_id,
                 item={
                     "type": "custom",
