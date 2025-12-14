@@ -153,6 +153,78 @@ You: Call diagnose_water_leak(leak_location="bathroom ceiling", water_color="bro
 Then: Use result to provide specific diagnosis, cost, and urgency
 """
 
+    async def _get_property_context(self, channel_id: str, user_id: str) -> Dict[str, Any]:
+        """
+        Fetch property context data for dashboard variables.
+
+        Retrieves property information from conversation metadata and DynamoDB
+        to populate variables like property_address, landlord_name, etc.
+
+        Args:
+            channel_id: Slack channel ID
+            user_id: User identifier
+
+        Returns:
+            dict: Property context with address, landlord_name, tenant_name, building_manager
+        """
+        try:
+            # Get conversation mapping to retrieve property_id from metadata
+            mapping = self.dynamo_service.get_conversation_mapping(channel_id)
+
+            if not mapping or not mapping.get("conversation_id"):
+                logger.warning(f"No conversation mapping found for channel: {channel_id}")
+                return {
+                    "address": "Unknown property",
+                    "landlord_name": "Unknown landlord",
+                    "tenant_name": user_id,
+                    "building_manager": "None on file"
+                }
+
+            conversation_id = mapping["conversation_id"]
+
+            # Get conversation to access metadata with property_id
+            conversation = await self.openai_client.conversations.retrieve(conversation_id)
+            property_id = conversation.metadata.get("property_id")
+
+            if not property_id:
+                logger.warning(f"No property_id in conversation metadata for: {conversation_id}")
+                return {
+                    "address": "Unknown property",
+                    "landlord_name": "Unknown landlord",
+                    "tenant_name": user_id,
+                    "building_manager": "None on file"
+                }
+
+            # Fetch property data from DynamoDB
+            property_data = self.dynamo_service.get_property(property_id)
+
+            if not property_data:
+                logger.warning(f"No property data found for property_id: {property_id}")
+                return {
+                    "address": f"Property {property_id}",
+                    "landlord_name": "Unknown landlord",
+                    "tenant_name": user_id,
+                    "building_manager": "None on file"
+                }
+
+            # Extract relevant fields for variables
+            return {
+                "address": property_data.get("address", "Unknown property"),
+                "landlord_name": property_data.get("landlord_name", "Unknown landlord"),
+                "tenant_name": property_data.get("tenant_name", user_id),
+                "building_manager": property_data.get("building_manager", "None on file")
+            }
+
+        except Exception as e:
+            logger.error(f"Error fetching property context: {e}", exc_info=True)
+            # Return safe defaults on error
+            return {
+                "address": "Unknown property",
+                "landlord_name": "Unknown landlord",
+                "tenant_name": user_id,
+                "building_manager": "None on file"
+            }
+
     async def process_message(
         self,
         channel_id: str,
@@ -194,18 +266,10 @@ Then: Use result to provide specific diagnosis, cost, and urgency
 
             logger.info(f"Using conversation: {conversation_id}")
 
-            # 2. Prepare input items with system prompt injection
-            # Inject auto-tool-generation instructions into first user message
-            enhanced_message = f"""<system_context>
-{self.system_prompt}
-</system_context>
+            # 2. Fetch property context for variables
+            property_data = await self._get_property_context(channel_id, user_id)
 
-<user_message>
-{message}
-</user_message>
-
-REMEMBER: Use diagnostic tools proactively. Check if diagnose_* tools exist, or generate new ones with register_dynamic_tool."""
-
+            # 3. Prepare input items (just the user message - dashboard prompt handles system context)
             input_items = [
                 {
                     "type": "message",
@@ -213,13 +277,23 @@ REMEMBER: Use diagnostic tools proactively. Check if diagnose_* tools exist, or 
                     "content": [
                         {
                             "type": "input_text",
-                            "text": enhanced_message
+                            "text": message
                         }
                     ]
                 }
             ]
 
-            # 3. Handle tool loop (call Response API + execute tools repeatedly)
+            # 4. Prepare variables for dashboard prompt
+            prompt_variables = {
+                "property_address": property_data.get("address", "Unknown property"),
+                "landlord_name": property_data.get("landlord_name", "Unknown landlord"),
+                "tenant_name": property_data.get("tenant_name", user_id),
+                "building_manager": property_data.get("building_manager", "None on file"),
+                "persona": persona,
+                "channel_id": channel_id
+            }
+
+            # 5. Handle tool loop (call Response API + execute tools repeatedly)
             try:
                 result = await self.handle_tool_loop(
                     conversation_id=conversation_id,
@@ -227,7 +301,8 @@ REMEMBER: Use diagnostic tools proactively. Check if diagnose_* tools exist, or 
                     input_items=input_items,
                     channel_id=channel_id,
                     user_id=user_id,
-                    max_iterations=5
+                    max_iterations=5,
+                    variables=prompt_variables  # ← Pass variables to tool loop
                 )
             except Exception as e:
                 # 🔥 CRITICAL: Detect corrupted conversation state
@@ -253,7 +328,8 @@ REMEMBER: Use diagnostic tools proactively. Check if diagnose_* tools exist, or 
                         input_items=input_items,
                         channel_id=channel_id,
                         user_id=user_id,
-                        max_iterations=5
+                        max_iterations=5,
+                        variables=prompt_variables  # ← Pass variables to retry call
                     )
                 else:
                     # Different error, re-raise
@@ -283,7 +359,8 @@ REMEMBER: Use diagnostic tools proactively. Check if diagnose_* tools exist, or 
         input_items: List[Dict[str, Any]],
         channel_id: str,
         user_id: str,
-        max_iterations: int = 5
+        max_iterations: int = 5,
+        variables: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Handle explicit tool loop for Responses API.
@@ -302,6 +379,7 @@ REMEMBER: Use diagnostic tools proactively. Check if diagnose_* tools exist, or 
             channel_id: Slack channel ID
             user_id: User identifier
             max_iterations: Maximum tool loop iterations (default: 5)
+            variables: Optional variables for dashboard prompt (e.g., property_address, landlord_name)
 
         Returns:
             dict: Result with tool_calls_executed count and final_message
@@ -317,12 +395,19 @@ REMEMBER: Use diagnostic tools proactively. Check if diagnose_* tools exist, or 
 
             # Call Responses API with tools enabled
             try:
-                response = await self.openai_client.responses.create(
-                    prompt={"id": prompt_id},
-                    conversation=conversation_id,
-                    input=current_input,
-                    tools=self.tools  # ✅ CRITICAL: Enable function calling
-                )
+                # Build request parameters
+                request_params = {
+                    "prompt": {"id": prompt_id},
+                    "conversation": conversation_id,
+                    "input": current_input,
+                    "tools": self.tools  # ✅ CRITICAL: Enable function calling
+                }
+
+                # Add variables if provided (for dashboard prompt placeholders)
+                if variables:
+                    request_params["variables"] = variables
+
+                response = await self.openai_client.responses.create(**request_params)
 
                 logger.info(f"Response received: {response.id}")
 
@@ -422,12 +507,18 @@ REMEMBER: Use diagnostic tools proactively. Check if diagnose_* tools exist, or 
                 logger.info(f"🔄 Sending final tool outputs to close conversation...")
                 try:
                     # Send one final API call with the pending tool outputs
-                    final_response = await self.openai_client.responses.create(
-                        prompt={"id": prompt_id},
-                        conversation=conversation_id,
-                        input=tool_outputs,
-                        tools=self.tools
-                    )
+                    final_request_params = {
+                        "prompt": {"id": prompt_id},
+                        "conversation": conversation_id,
+                        "input": tool_outputs,
+                        "tools": self.tools
+                    }
+
+                    # Add variables if provided
+                    if variables:
+                        final_request_params["variables"] = variables
+
+                    final_response = await self.openai_client.responses.create(**final_request_params)
                     logger.info(f"✅ Conversation closed with final response: {final_response.id}")
 
                     # Extract any final message
