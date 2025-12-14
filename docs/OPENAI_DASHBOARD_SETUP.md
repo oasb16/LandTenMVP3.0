@@ -1,7 +1,7 @@
 # OpenAI Dashboard Setup Guide - LandTen MVP 3.0
 
 **Last Updated:** 2025-12-14
-**Prompt Version:** 11
+**Prompt Version:** 15
 **Model:** gpt-4o-mini
 
 This guide shows you how to properly configure the OpenAI Dashboard to work with the LandTen property management AI system.
@@ -72,8 +72,8 @@ Before starting, ensure you have:
 
 4. **Save as NEW version:**
    - Click **"Save as new version"**
-   - Version should increment to **v11**
-   - Add version note: "Fixed anti-hallucination rules for tool output"
+   - Version should increment to **v15**
+   - Add version note: "Added smart tool generation logic to prevent hardcoded diagnostic data"
 
 ### Step 2: Configure Prompt Variables
 
@@ -196,7 +196,7 @@ In the prompt settings, ensure:
 response = await openai_client.responses.create(
     prompt={
         "id": "pmpt_xxx",
-        "version": "11",
+        "version": "15",
         "variables": {
             "property_address": "123 Main St",
             ...
@@ -300,7 +300,7 @@ Please upload photos of:
 
 2. Update environment variable:
    ```bash
-   heroku config:set LANDTEN_PROMPT_VERSION=11 -a landtenmvp3
+   heroku config:set LANDTEN_PROMPT_VERSION=15 -a landtenmvp3
    ```
 
 3. Restart app:
@@ -314,8 +314,8 @@ Please upload photos of:
 
 5. Verify logs show:
    ```
-   ✅ ResponseHandler initialized with prompt: pmpt_xxx v11
-   ✅ Version: 11
+   ✅ ResponseHandler initialized with prompt: pmpt_xxx v15
+   ✅ Version: 15
    ✅ Tools Available: 27 tool(s)
    ✅ FUNCTION CALL DETECTED!
    ✅ Function: diagnose_water_leak
@@ -354,11 +354,11 @@ But response shows: ❌ "Diagnosis: Unknown leak, Severity: Medium"
    ```
    ResponseHandler initialized with prompt: pmpt_xxx v??
    ```
-   - If showing v10 or lower → Upload new prompt (v11)
+   - If showing v14 or lower → Upload new prompt (v15)
 
 2. **Update environment variable:**
    ```bash
-   heroku config:set LANDTEN_PROMPT_VERSION=11 -a landtenmvp3
+   heroku config:set LANDTEN_PROMPT_VERSION=15 -a landtenmvp3
    ```
 
 3. **Restart app:**
@@ -368,8 +368,8 @@ But response shows: ❌ "Diagnosis: Unknown leak, Severity: Medium"
 
 4. **Verify new prompt is active:**
    - Test again
-   - Check logs show "prompt v11"
-   - Response should show real tool data
+   - Check logs show "prompt v15"
+   - Response should show real tool data with smart logic
 
 ---
 
@@ -475,7 +475,7 @@ Dashboard tests use manually added variables and tools. Production passes them d
 ```yaml
 Prompt Configuration:
   Prompt ID: pmpt_69372d719cbc81979d5bd4c8fa43d248007953d6d1c462aa
-  Version: 11 (latest)
+  Version: 15 (latest)
   Content: Matches backend/system_prompts/tenant_agent_prompt.txt
 
 Model Settings:
@@ -507,7 +507,7 @@ Update these in Heroku (or your `.env` file):
 ```bash
 # Required
 LANDTEN_PROMPT_ID=pmpt_69372d719cbc81979d5bd4c8fa43d248007953d6d1c462aa
-LANDTEN_PROMPT_VERSION=11  # ← UPDATE THIS!
+LANDTEN_PROMPT_VERSION=15  # ← UPDATE THIS!
 OPENAI_API_KEY=sk-proj-...
 
 # Verify with:
@@ -520,19 +520,20 @@ heroku config -a landtenmvp3 | grep LANDTEN
 
 After making dashboard changes:
 
-- [ ] Uploaded new prompt content (v11)
+- [ ] Uploaded new prompt content (v15)
 - [ ] Set model to `gpt-4o-mini`
 - [ ] Set temperature to `0.3`
 - [ ] Set max tokens to `4096`
 - [ ] Removed `top_p` parameter
 - [ ] Enabled function calling
-- [ ] Updated `LANDTEN_PROMPT_VERSION=11` in Heroku
+- [ ] Updated `LANDTEN_PROMPT_VERSION=15` in Heroku
 - [ ] Restarted Heroku app
 - [ ] Tested with "My pool is overflowing"
-- [ ] Verified logs show "prompt v11"
+- [ ] Verified logs show "prompt v15"
 - [ ] Verified logs show "Tools Available: 27"
 - [ ] Verified logs show "FUNCTION CALL DETECTED"
 - [ ] Verified response shows REAL tool data (not "Unknown leak")
+- [ ] Verified tools use LOGIC-BASED output (not hardcoded data)
 
 ---
 
@@ -551,18 +552,43 @@ If you encounter issues not covered in this guide:
    - `🔍 EXTRACTED CONTENT` - Shows tool calls found
 
 3. **Common log indicators:**
-   - `Version: 11` ✅ Using latest prompt
+   - `Version: 15` ✅ Using latest prompt
    - `Version: NOT SET` ❌ Version not being passed
    - `Tools Available: 27` ✅ Tools loaded
    - `Tools Available: 0` ❌ Tools not loaded
    - `FUNCTION CALL DETECTED!` ✅ AI is calling tools
    - `NO TOOL CALLS EXTRACTED` ❌ AI not calling tools
-   - `Diagnosis: Unknown leak` ❌ Showing fake data
-   - `Diagnosis: Backwash valve stuck` ✅ Showing real data
+   - `Diagnosis: Unknown leak` ❌ Showing fake/hardcoded data
+   - `Diagnosis: Backwash valve stuck` ✅ Showing real, context-aware data
 
 ---
 
 **Last Updated:** 2025-12-14
-**Document Version:** 1.0
-**Prompt Version:** 11
+**Document Version:** 1.1
+**Prompt Version:** 15
 **Model:** gpt-4o-mini
+
+---
+
+## Version 15 Changelog
+
+**What's New in v15:**
+
+1. **Smart Tool Generation Framework**
+   - Added comprehensive section teaching AI to generate logic-based diagnostic tools
+   - Prevents hardcoded return values in dynamically generated tools
+   - Ensures tools use conditional logic to analyze input parameters
+
+2. **Key Improvements:**
+   - Tools now parse symptom descriptions and adjust diagnoses accordingly
+   - Different symptoms (e.g., "kitchen light not working" vs "basement power outage") produce different diagnoses
+   - Tools check for emergency combinations (e.g., water + electricity)
+   - Cost estimates and severity levels are context-aware
+
+3. **Example Enhancements:**
+   - `diagnose_electrical_hazard` now differentiates between power outages, sparking, and light failures
+   - `diagnose_water_leak` considers flooding vs dripping, water color contamination
+   - All tools use input-driven logic instead of generic placeholder responses
+
+**Why This Matters:**
+Previously, dynamically generated tools would return the same diagnosis for different symptoms (e.g., "tripped breaker" for both a light switch issue and a full power outage). Version 15 teaches the AI to generate tools that intelligently analyze symptoms and provide accurate, context-specific diagnostics.

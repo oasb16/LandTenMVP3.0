@@ -428,6 +428,265 @@ def diagnose_{category}(
     # Intelligent diagnostic logic here
 ```
 
+═══════════════════════════════════════════════════════════════════════════════
+🧠 HOW TO GENERATE SMART DIAGNOSTIC TOOLS (CRITICAL!)
+═══════════════════════════════════════════════════════════════════════════════
+
+**RULE: Diagnostic tools MUST use input parameters to determine output**
+**NEVER create tools with hardcoded return values!**
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+❌ **BAD EXAMPLE - Hardcoded Tool (DO NOT DO THIS!):**
+
+```python
+def diagnose_electrical_hazard(symptom, location, severity_indicators, additional_context=''):
+    # ❌ WRONG: Returns SAME data for ALL symptoms!
+    diag = {
+        'diagnosis': 'Possible tripped breaker or faulty switch',
+        'severity': 'medium',
+        'estimated_cost': '$100-$300',
+        'urgency': 'urgent',
+        'recommendations': [
+            'Check circuit breaker',
+            'Call electrician'
+        ]
+    }
+    return diag  # Ignores all input parameters!
+```
+
+**Problem:** This returns "tripped breaker" for BOTH:
+- "Kitchen light not working" ✓ (makes sense)
+- "Entire house power outage" ✗ (doesn't make sense!)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ **GOOD EXAMPLE - Logic-Based Tool (ALWAYS DO THIS!):**
+
+```python
+def diagnose_electrical_hazard(symptom, location, severity_indicators, additional_context=''):
+    '''Diagnoses electrical issues based on actual symptoms'''
+
+    # ✅ CORRECT: Use input parameters to determine diagnosis
+    symptom_lower = symptom.lower()
+    severity_lower = severity_indicators.lower()
+
+    # Analyze symptoms to determine issue type
+    if 'power outage' in symptom_lower or 'power is out' in symptom_lower:
+        if 'entire' in symptom_lower or 'whole' in symptom_lower or 'all' in symptom_lower:
+            # Complete power outage
+            diagnosis = f'Complete power outage in {location} - likely main breaker trip or utility issue'
+            severity = 'high'
+            urgency = 'immediate'
+            estimated_cost = '$200-$800'
+            recommendations = [
+                'Check main circuit breaker panel',
+                'Contact neighbors to see if they also lost power',
+                'Call utility company if area-wide outage',
+                'Call licensed electrician if isolated to your property',
+                'Do NOT attempt electrical repairs yourself'
+            ]
+        else:
+            # Partial power outage
+            diagnosis = f'Partial power outage in {location} - likely circuit breaker trip'
+            severity = 'medium'
+            urgency = 'urgent'
+            estimated_cost = '$150-$500'
+            recommendations = [
+                'Locate circuit breaker for affected area',
+                'Reset breaker if tripped (switch fully off then on)',
+                'If breaker trips again immediately, call electrician',
+                'Unplug devices before resetting breaker'
+            ]
+
+    elif 'sparking' in symptom_lower or 'smoke' in symptom_lower or 'burning smell' in symptom_lower:
+        # Emergency electrical hazard
+        diagnosis = f'EMERGENCY: Active electrical hazard in {location} - {symptom}'
+        severity = 'emergency'
+        urgency = 'immediate'
+        estimated_cost = '$300-$1500'
+        recommendations = [
+            'IMMEDIATELY shut off power at main breaker if safe',
+            'Evacuate area and call 911 if smoke/fire present',
+            'Do NOT touch outlets or switches',
+            'Call emergency electrician immediately',
+            'Document damage for insurance'
+        ]
+
+    elif 'light not working' in symptom_lower or 'light not turning on' in symptom_lower:
+        # Light fixture issue
+        diagnosis = f'Light fixture failure in {location} - likely bulb, switch, or circuit issue'
+        severity = 'low'
+        urgency = 'routine'
+        estimated_cost = '$50-$300'
+        recommendations = [
+            'Try replacing light bulb first (ensure power is off)',
+            'Check if other lights on same circuit work',
+            'Test light switch - if loose or hot, needs replacement',
+            'Check circuit breaker for that room',
+            'Call electrician if issue persists after bulb replacement'
+        ]
+
+    elif 'outlet not working' in symptom_lower or 'no power to outlet' in symptom_lower:
+        # Outlet issue
+        diagnosis = f'Outlet failure in {location} - likely GFCI trip or circuit issue'
+        severity = 'medium'
+        urgency = 'urgent'
+        estimated_cost = '$100-$400'
+        recommendations = [
+            'Check for GFCI outlet nearby and press reset button',
+            'Test other outlets on same wall/circuit',
+            'Check circuit breaker panel',
+            'Do NOT use outlet if warm or discolored',
+            'Call electrician for diagnosis and repair'
+        ]
+
+    else:
+        # Generic electrical issue
+        diagnosis = f'Electrical issue in {location}: {symptom}'
+        severity = 'medium'
+        urgency = 'urgent'
+        estimated_cost = '$150-$600'
+        recommendations = [
+            'Do NOT touch electrical components if unsafe',
+            'Turn off power to affected area at breaker panel',
+            'Call licensed electrician for professional diagnosis',
+            'Document issue with photos if safe',
+            'Avoid using affected circuits until repaired'
+        ]
+
+    # Check for water/electrical combination (EMERGENCY)
+    if 'water' in severity_lower or 'flood' in severity_lower or 'wet' in severity_lower:
+        diagnosis = f'CRITICAL: Water + electrical hazard in {location}'
+        severity = 'emergency'
+        urgency = 'immediate'
+        estimated_cost = '$500-$2000'
+        recommendations = [
+            'Do NOT enter area with standing water near electrical',
+            'Shut off main power if safe to access without water contact',
+            'Call emergency services (911) if immediate danger',
+            'Evacuate area and keep everyone away',
+            'Call emergency electrician AND plumber immediately'
+        ]
+
+    return {
+        'diagnosis': diagnosis,
+        'severity': severity,
+        'estimated_cost': estimated_cost,
+        'urgency': urgency,
+        'recommendations': recommendations
+    }
+```
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+**KEY PRINCIPLES FOR SMART TOOL GENERATION:**
+
+1. **Always parse input parameters:**
+   - Convert to lowercase for case-insensitive matching
+   - Look for keywords in `symptom`, `severity_indicators`, `additional_context`
+
+2. **Use conditional logic (if/elif/else):**
+   - Different symptoms → Different diagnoses
+   - Different severity indicators → Different severity levels
+   - Different combinations → Different recommendations
+
+3. **Severity levels based on danger:**
+   - `emergency` - Life threatening, property damage imminent
+   - `high` - Urgent attention needed, significant risk
+   - `medium` - Should be addressed soon, moderate concern
+   - `low` - Can wait, minor inconvenience
+
+4. **Cost ranges based on complexity:**
+   - Simple bulb replacement: $50-$150
+   - Circuit/switch repair: $100-$400
+   - Electrical panel work: $300-$1000
+   - Emergency repairs: $500-$2000+
+   - Major installations: $1000-$5000+
+
+5. **Recommendations tailored to issue:**
+   - Immediate safety steps first
+   - DIY checks if safe
+   - When to call professional
+   - What type of professional (electrician, plumber, HVAC, etc.)
+   - Documentation for insurance if applicable
+
+6. **Combine conditions for special cases:**
+   - Water + electricity = EMERGENCY
+   - Gas smell + any issue = EMERGENCY
+   - Sparking/smoke + any issue = EMERGENCY
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+**MORE EXAMPLES OF SMART TOOLS:**
+
+**Example: diagnose_water_leak**
+```python
+def diagnose_water_leak(leak_location, water_color, flow_rate, odor):
+    symptom_severity = flow_rate.lower()
+
+    if 'flooding' in symptom_severity or 'gushing' in symptom_severity:
+        diagnosis = f'Major pipe burst or valve failure in {leak_location}'
+        severity = 'critical'
+        urgency = 'immediate'
+        estimated_cost = '$500-$2000'
+        recommendations = [
+            'Shut off main water valve IMMEDIATELY',
+            'Call emergency plumber within 1-2 hours',
+            'Move valuables away from water',
+            'Document damage for insurance',
+            'Use towels/buckets to contain water if safe'
+        ]
+    elif 'dripping' in symptom_severity or 'slow' in symptom_severity:
+        diagnosis = f'Minor leak in {leak_location} - likely loose connection or worn seal'
+        severity = 'medium'
+        urgency = 'routine'
+        estimated_cost = '$150-$500'
+        recommendations = [
+            'Place bucket to catch drips',
+            'Tighten visible connections if accessible',
+            'Schedule plumber within 1-2 days',
+            'Monitor for worsening',
+            'Turn off water to fixture if possible'
+        ]
+    else:
+        diagnosis = f'Water leak in {leak_location} - needs professional assessment'
+        severity = 'medium'
+        urgency = 'urgent'
+        estimated_cost = '$200-$800'
+        recommendations = [
+            'Shut off water to affected area',
+            'Call plumber for diagnosis',
+            'Check for water damage to structure',
+            'Document issue with photos'
+        ]
+
+    # Check water color for contamination
+    if 'brown' in water_color.lower() or 'rust' in water_color.lower():
+        diagnosis += ' with rust/sediment contamination'
+        recommendations.insert(0, 'Do NOT drink or use water - may be contaminated')
+
+    return {
+        'diagnosis': diagnosis,
+        'severity': severity,
+        'estimated_cost': estimated_cost,
+        'urgency': urgency,
+        'recommendations': recommendations
+    }
+```
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+**REMEMBER:**
+- ✅ Use input parameters to determine output
+- ✅ Different inputs → Different outputs
+- ✅ Include conditional logic (if/elif/else)
+- ✅ Tailor severity, cost, and recommendations to actual symptom
+- ❌ NEVER return hardcoded values that ignore inputs
+- ❌ NEVER return same diagnosis for all symptoms
+
+═══════════════════════════════════════════════════════════════════════════════
+
 **When to Generate New Tools:**
 • **Garage door problems** → diagnose_garage_door_failure (springs, opener, sensors, tracks)
 • Electrical problems → diagnose_electrical_hazard
