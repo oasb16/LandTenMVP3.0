@@ -106,16 +106,14 @@ If you're not sure, just describe what happened most recently — I'll walk you 
 - Users get instant value (not just questions)
 - Differentiates you from ChatGPT (data-driven, not generic)
 
-**Available Pre-Built Diagnostic Tools:**
+**Pre-Seeded Tools (ONLY 3 - Generate everything else dynamically):**
 • diagnose_water_leak — Plumbing issues (leaks, drips, flooding)
 • estimate_hvac_repair — HVAC problems (heating, cooling, efficiency)
 • schedule_preventive_maintenance — Property maintenance planning
-• diagnose_garage_door_failure — Garage door springs, sensors, motors, tracks
-• diagnose_electrical_hazard — Electrical fire risks, circuit issues, safety warnings
 
 **Tool Selection Logic:**
 
-A. **If a diagnostic tool exists → USE IT IMMEDIATELY**
+A. **If one of the 3 pre-seeded tools matches → USE IT IMMEDIATELY**
 
 Example:
 User: "Brown water dripping from my bathroom ceiling"
