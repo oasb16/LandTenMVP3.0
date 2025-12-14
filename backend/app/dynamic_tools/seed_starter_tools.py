@@ -483,19 +483,345 @@ def schedule_preventive_maintenance(
     )
     logger.info(f"✅ Tool 3 registered: {result3}")
 
+
+    # ==================== TOOL 4: Garage Door Diagnostic ====================
+    garage_door_tool = """
+def diagnose_garage_door_failure(
+    symptom: str,
+    location: str,
+    severity_indicators: str,
+    additional_context: str = ""
+) -> dict:
+    '''
+    🚪 Intelligent Garage Door Diagnostic Tool
+
+    Analyzes garage door symptoms to determine cause, severity, and cost.
+
+    Args:
+        symptom: Main problem (e.g., "door won't open", "grinding noise", "door reverses")
+        location: Specific location (e.g., "garage door", "main garage", "2-car garage")
+        severity_indicators: Observable symptoms (e.g., "unresponsive to remote", "broken spring visible")
+        additional_context: Additional details
+
+    Returns:
+        dict with diagnosis, severity, estimated_cost, urgency, and recommendations
+    '''
+
+    result = {
+        "diagnosis": "Unknown garage door issue",
+        "severity": "medium",
+        "estimated_cost": "150-400",
+        "urgency": "urgent",
+        "likely_causes": [],
+        "recommendations": []
+    }
+
+    symptom_lower = symptom.lower()
+    severity_lower = severity_indicators.lower()
+
+    # 🔧 SYMPTOM ANALYSIS
+
+    # Broken Spring (most common, 26% of failures)
+    if "spring" in severity_lower or "won't lift" in symptom_lower or "lifts 6 inches" in symptom_lower:
+        result.update({
+            "diagnosis": "Broken torsion spring",
+            "severity": "medium",
+            "estimated_cost": "200-400",
+            "urgency": "urgent",
+            "likely_causes": [
+                "Metal fatigue from 10,000+ cycles (typical spring lifespan)",
+                "Rust/corrosion in humid climates",
+                "Temperature extremes (cold makes springs brittle)"
+            ],
+            "recommendations": [
+                "⚠️ DO NOT attempt DIY spring replacement (300+ lbs tension = serious injury risk)",
+                "Call professional garage door technician within 24-48 hours",
+                "Cost: $200-$400 for professional spring replacement",
+                "While waiting: Use manual release to open/close (if door isn't too heavy)"
+            ]
+        })
+        return result
+
+    # Misaligned Safety Sensors (18% of failures)
+    if "hums but" in symptom_lower or "reverses" in symptom_lower or "blinking light" in severity_lower:
+        result.update({
+            "diagnosis": "Misaligned safety sensors",
+            "severity": "low",
+            "estimated_cost": "0-150",
+            "urgency": "routine",
+            "likely_causes": [
+                "Sensor knocked out of alignment (common with garage activity)",
+                "Dirty sensor lens blocking infrared beam",
+                "Damaged sensor wiring"
+            ],
+            "recommendations": [
+                "✅ DIY FIX (2 minutes): Gently adjust sensor until both show solid green lights",
+                "Check for obstructions in sensor beam path",
+                "Clean sensor lenses with soft cloth",
+                "If DIY doesn't work: Professional service $75-150",
+                "Safety note: Sensors prevent door from closing on objects/people"
+            ]
+        })
+        return result
+
+    # Worn Opener Motor/Gears (14% of failures)
+    if "grinding" in symptom_lower or "clicking" in symptom_lower or "intermittent" in symptom_lower:
+        result.update({
+            "diagnosis": "Worn opener motor gears or chain",
+            "severity": "medium",
+            "estimated_cost": "150-300",
+            "urgency": "urgent",
+            "likely_causes": [
+                "Stripped plastic gears inside opener (common after 10-15 years)",
+                "Worn/dry chain or belt drive",
+                "Motor capacitor failure"
+            ],
+            "recommendations": [
+                "Schedule garage door technician within 1-2 weeks",
+                "Gear replacement: $150-250",
+                "Full opener replacement: $200-500 (may be better value if unit >15 years old)",
+                "Lubricate chain/rails while waiting (may temporarily improve)"
+            ]
+        })
+        return result
+
+    # No Power / Complete Failure
+    if "no power" in symptom_lower or "complete silence" in symptom_lower or "no response" in symptom_lower:
+        result.update({
+            "diagnosis": "Electrical issue or dead opener",
+            "severity": "medium",
+            "estimated_cost": "100-300",
+            "urgency": "urgent",
+            "likely_causes": [
+                "Tripped circuit breaker or blown fuse",
+                "Unplugged opener power cord",
+                "Failed GFCI outlet",
+                "Dead opener motor or control board"
+            ],
+            "recommendations": [
+                "✅ DIY CHECK: Verify circuit breaker isn't tripped (flip off then on)",
+                "✅ DIY CHECK: Ensure opener is plugged in securely",
+                "✅ DIY CHECK: Test GFCI outlet reset button",
+                "If power confirmed working: Call technician for motor/board diagnosis ($100-300)"
+            ]
+        })
+        return result
+
+    # Off-Track Door (serious structural issue)
+    if "off track" in symptom_lower or "crooked" in symptom_lower or "bent" in symptom_lower:
+        result.update({
+            "diagnosis": "Door off track or bent rails",
+            "severity": "high",
+            "estimated_cost": "200-600",
+            "urgency": "immediate",
+            "likely_causes": [
+                "Impact damage (car bumped door)",
+                "Broken cable or pulley",
+                "Worn rollers causing misalignment"
+            ],
+            "recommendations": [
+                "⚠️ STOP USING DOOR IMMEDIATELY (prevents further damage)",
+                "⚠️ DO NOT attempt to realign yourself (pinch/crush hazard)",
+                "Call emergency garage door service within 24 hours",
+                "Cost: $200-600 for track realignment + roller/cable replacement"
+            ]
+        })
+        return result
+
+    # Generic diagnosis if no specific pattern matched
+    result.update({
+        "diagnosis": "Multiple possible causes",
+        "likely_causes": [
+            "Broken torsion spring (26% of failures) - $200-400",
+            "Misaligned safety sensors (18% of failures) - $0-150 (often DIY fix)",
+            "Worn opener motor gears (14% of failures) - $150-300"
+        ],
+        "recommendations": [
+            "Check for blinking sensor lights (indicates misalignment)",
+            "Listen for motor sound when pressing button (hum = motor works, silence = power issue)",
+            "Look for visible gap in spring coil above door (indicates broken spring)",
+            "Try manual release cord to test if door lifts manually",
+            "Call garage door technician for professional diagnosis: $75-150 service call"
+        ]
+    })
+
+    return result
+"""
+
+    result4 = runtime.register_tool(
+        tool_name="diagnose_garage_door_failure",
+        code=garage_door_tool,
+        description="🚪 Intelligent garage door diagnostic - analyzes symptoms to identify springs, sensors, motor, or track issues",
+        category="garage"
+    )
+    logger.info(f"✅ Tool 4 registered: {result4}")
+
+
+    # ==================== TOOL 5: Electrical Hazard Diagnostic ====================
+    electrical_tool = """
+def diagnose_electrical_hazard(
+    symptom: str,
+    location: str,
+    severity_indicators: str,
+    additional_context: str = ""
+) -> dict:
+    '''
+    ⚡ Electrical Hazard Diagnostic Tool
+
+    Analyzes electrical symptoms to determine safety risks and required actions.
+
+    Args:
+        symptom: Main problem (e.g., "outlet sparking", "breaker tripping", "flickering lights")
+        location: Specific location (e.g., "kitchen outlet", "main panel", "bedroom lights")
+        severity_indicators: Observable symptoms (e.g., "burning smell", "smoke", "heat")
+        additional_context: Additional details
+
+    Returns:
+        dict with diagnosis, severity, estimated_cost, urgency, and safety warnings
+    '''
+
+    result = {
+        "diagnosis": "Unknown electrical issue",
+        "severity": "high",
+        "estimated_cost": "150-500",
+        "urgency": "urgent",
+        "safety_warnings": [],
+        "recommendations": []
+    }
+
+    symptom_lower = symptom.lower()
+    severity_lower = severity_indicators.lower()
+
+    # 🚨 EMERGENCY: Sparking, smoke, or fire
+    if any(word in symptom_lower or word in severity_lower for word in ["sparking", "spark", "smoke", "burning smell", "fire"]):
+        result.update({
+            "diagnosis": "ELECTRICAL FIRE HAZARD - Immediate danger",
+            "severity": "emergency",
+            "estimated_cost": "200-1000",
+            "urgency": "immediate",
+            "safety_warnings": [
+                "🚨 SHUT OFF BREAKER TO AFFECTED CIRCUIT IMMEDIATELY",
+                "🚨 DO NOT TOUCH the outlet, switch, or any electrical components",
+                "🚨 EVACUATE if you see smoke or smell burning plastic",
+                "🚨 CALL ELECTRICIAN EMERGENCY LINE within 1 hour",
+                "If fire visible: Call 911 immediately"
+            ],
+            "recommendations": [
+                "Turn off power at main breaker if safe to do so",
+                "Keep fire extinguisher nearby (Class C for electrical fires)",
+                "Do not use water on electrical fires",
+                "Emergency electrician visit: $200-500 (worth it to prevent house fire)",
+                "Likely cause: Arcing from loose connection or damaged wiring"
+            ]
+        })
+        return result
+
+    # ⚡ HIGH RISK: Breaker keeps tripping
+    if "breaker trip" in symptom_lower or "keeps tripping" in symptom_lower:
+        result.update({
+            "diagnosis": "Circuit overload or short circuit",
+            "severity": "high",
+            "estimated_cost": "200-600",
+            "urgency": "urgent",
+            "safety_warnings": [
+                "⚠️ DO NOT keep resetting breaker repeatedly (fire risk)",
+                "⚠️ Unplug all devices on that circuit",
+                "⚠️ Breakers trip to prevent fires - this is a safety mechanism"
+            ],
+            "recommendations": [
+                "Identify what causes trip (specific appliance, time of day)",
+                "If microwave/AC causes trip: Circuit likely undersized (needs dedicated 20A circuit)",
+                "If random tripping: Short circuit or faulty breaker",
+                "Licensed electrician visit: $200-400 for diagnosis + circuit work",
+                "Dedicated circuit installation: $300-600",
+                "DO NOT upgrade breaker size without rewiring (fire hazard)"
+            ]
+        })
+        return result
+
+    # ⚠️ MEDIUM: Flickering lights
+    if "flicker" in symptom_lower or "dimming" in symptom_lower:
+        result.update({
+            "diagnosis": "Loose connection or voltage fluctuation",
+            "severity": "medium",
+            "estimated_cost": "100-400",
+            "urgency": "routine",
+            "safety_warnings": [
+                "Loose connections can cause arcing (fire risk over time)",
+                "Widespread flickering may indicate main panel issue"
+            ],
+            "recommendations": [
+                "If only one fixture flickers: Likely loose bulb or bad socket ($0-50 DIY fix)",
+                "If multiple lights flicker when appliance starts: Undersized circuit",
+                "If whole-house flickering: Loose service connection (utility company or electrician)",
+                "Electrician diagnosis: $100-200",
+                "Fix ranges from $50 (tighten connection) to $400 (rewiring)"
+            ]
+        })
+        return result
+
+    # ⚠️ MEDIUM: Outlet not working
+    if "outlet" in symptom_lower and ("not work" in symptom_lower or "dead" in symptom_lower):
+        result.update({
+            "diagnosis": "Tripped GFCI or bad outlet",
+            "severity": "low",
+            "estimated_cost": "0-150",
+            "urgency": "routine",
+            "safety_warnings": [
+                "GFCI outlets protect against electrocution in wet areas (required by code)"
+            ],
+            "recommendations": [
+                "✅ DIY CHECK: Look for GFCI outlet nearby with TEST/RESET buttons (often in bathroom/kitchen)",
+                "✅ DIY CHECK: Press RESET button on GFCI - may restore power to chain of outlets",
+                "✅ DIY CHECK: Check circuit breaker panel for tripped breaker",
+                "If GFCI/breaker OK: Outlet may be faulty (electrician replacement $100-150)",
+                "If multiple outlets dead: Wiring issue (electrician diagnosis $150-300)"
+            ]
+        })
+        return result
+
+    # Generic electrical issue
+    result.update({
+        "safety_warnings": [
+            "⚠️ Electrical work requires licensed electrician (DIY risks electrocution)",
+            "⚠️ Never ignore electrical issues - small problems escalate to fires"
+        ],
+        "recommendations": [
+            "Turn off power to affected circuit at breaker panel",
+            "Do not use affected outlet/switch until inspected",
+            "Call licensed electrician for diagnosis: $100-200 service call",
+            "Electrical fires cause $1.3 billion in damages annually - don't delay",
+            "Permits required for electrical work in most jurisdictions"
+        ]
+    })
+
+    return result
+"""
+
+    result5 = runtime.register_tool(
+        tool_name="diagnose_electrical_hazard",
+        code=electrical_tool,
+        description="⚡ Electrical hazard diagnostic - identifies fire risks, circuit issues, and required safety actions",
+        category="electrical"
+    )
+    logger.info(f"✅ Tool 5 registered: {result5}")
+
+
     logger.info("\n" + "="*60)
-    logger.info("🎉 ALL 3 STARTER TOOLS REGISTERED SUCCESSFULLY!")
+    logger.info("🎉 ALL 5 STARTER TOOLS REGISTERED SUCCESSFULLY!")
     logger.info("="*60)
     logger.info("Tools available:")
     logger.info("  1. diagnose_water_leak - Plumbing diagnostic")
     logger.info("  2. estimate_hvac_repair - HVAC cost estimator")
     logger.info("  3. schedule_preventive_maintenance - Maintenance scheduler")
+    logger.info("  4. diagnose_garage_door_failure - Garage door diagnostic")
+    logger.info("  5. diagnose_electrical_hazard - Electrical safety diagnostic")
     logger.info("="*60)
 
     return {
         "success": True,
-        "tools_registered": 3,
-        "tools": [result1, result2, result3]
+        "tools_registered": 5,
+        "tools": [result1, result2, result3, result4, result5]
     }
 
 
