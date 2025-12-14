@@ -15,6 +15,7 @@ from .conversation_manager import get_conversation_manager
 from ..functions.function_registry import execute_function, get_function_definitions
 from .stream_bot import get_bot
 from .dynamo_service import get_dynamo_service
+from ..config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,8 @@ class ResponseHandler:
         self.dynamo_service = get_dynamo_service()
         self.conversation_manager = get_conversation_manager(dynamo_service=self.dynamo_service)
         self.bot = get_bot()
-        self.prompt_id = os.getenv("LANDTEN_PROMPT_ID")
+        self.prompt_id = settings.LANDTEN_PROMPT_ID
+        self.prompt_version = settings.LANDTEN_PROMPT_VERSION  # ✅ CRITICAL: Prevent auto-revert to v1
 
         # Load enhanced system prompt for auto-tool-generation
         self.system_prompt = self._load_system_prompt()
@@ -79,7 +81,11 @@ class ResponseHandler:
                 "LANDTEN_PROMPT_ID not set - using local system prompt instead"
             )
 
-        logger.info(f"ResponseHandler initialized with prompt: {self.prompt_id or 'local'}")
+        # Log prompt ID and version (version prevents auto-revert to v1)
+        prompt_info = f"{self.prompt_id or 'local'}"
+        if self.prompt_version:
+            prompt_info += f" v{self.prompt_version}"
+        logger.info(f"ResponseHandler initialized with prompt: {prompt_info}")
         logger.info(f"Loaded {len(self.tools)} tools for function calling")
         logger.info(f"📋 System prompt: {len(self.system_prompt)} chars")
 
@@ -414,8 +420,14 @@ Then: Use result to provide specific diagnosis, cost, and urgency
 
             # Call Responses API with tools enabled
             try:
-                # Build prompt object with variables inside
+                # Build prompt object with version and variables inside
                 prompt_obj = {"id": prompt_id}
+
+                # ✅ CRITICAL: Add version to prevent auto-revert to v1
+                if self.prompt_version:
+                    prompt_obj["version"] = self.prompt_version
+
+                # Add variables if provided
                 if variables:
                     prompt_obj["variables"] = variables
 
@@ -429,7 +441,9 @@ Then: Use result to provide specific diagnosis, cost, and urgency
 
                 response = await self.openai_client.responses.create(**request_params)
 
-                logger.info(f"Response received: {response.id}")
+                # Log response with version info
+                version_info = f" (prompt v{self.prompt_version})" if self.prompt_version else ""
+                logger.info(f"Response received: {response.id}{version_info}")
 
             except Exception as e:
                 logger.error(f"Responses API error: {e}", exc_info=True)
@@ -526,8 +540,14 @@ Then: Use result to provide specific diagnosis, cost, and urgency
             if tool_outputs:
                 logger.info(f"🔄 Sending final tool outputs to close conversation...")
                 try:
-                    # Build prompt object with variables inside
+                    # Build prompt object with version and variables inside
                     final_prompt_obj = {"id": prompt_id}
+
+                    # ✅ CRITICAL: Add version to prevent auto-revert to v1
+                    if self.prompt_version:
+                        final_prompt_obj["version"] = self.prompt_version
+
+                    # Add variables if provided
                     if variables:
                         final_prompt_obj["variables"] = variables
 
@@ -540,7 +560,10 @@ Then: Use result to provide specific diagnosis, cost, and urgency
                     }
 
                     final_response = await self.openai_client.responses.create(**final_request_params)
-                    logger.info(f"✅ Conversation closed with final response: {final_response.id}")
+
+                    # Log final response with version info
+                    version_info = f" (prompt v{self.prompt_version})" if self.prompt_version else ""
+                    logger.info(f"✅ Conversation closed with final response: {final_response.id}{version_info}")
 
                     # Extract any final message
                     final_content = await self.extract_response_content(final_response)
