@@ -64,6 +64,7 @@ class Settings:
 
         # OpenAI Responses API (Migration to new architecture)
         self.LANDTEN_PROMPT_ID: Optional[str] = os.getenv("LANDTEN_PROMPT_ID")
+        self.LANDTEN_PROMPT_VERSION: Optional[str] = os.getenv("LANDTEN_PROMPT_VERSION")  # ✅ CRITICAL: Prevent auto-revert to v1
 
         # Validate LANDTEN_PROMPT_ID for Responses API
         # Note: This validation is disabled by default to allow gradual migration
