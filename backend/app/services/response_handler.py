@@ -321,14 +321,15 @@ Then: Use result to provide specific diagnosis, cost, and urgency
                     if is_image:
                         image_url = att.get('url') or att.get('image_url') or att.get('asset_url')
                         if image_url:
+                            # ✅ CRITICAL FIX: Use 'input_image' for Responses API (not 'image_url')
                             content_blocks.append({
-                                "type": "image_url",
-                                "image_url": {
+                                "type": "input_image",  # Responses API format
+                                "input_image": {
                                     "url": image_url,
                                     "detail": "high"  # High detail for property issue analysis
                                 }
                             })
-                            logger.info(f"   📸 Added image {idx + 1} to AI input: {image_url[:80]}")
+                            logger.info(f"   📸 Added image {idx + 1} to AI input (input_image): {image_url[:80]}")
                     else:
                         # For non-image attachments, include URL in text
                         file_url = att.get('url') or att.get('asset_url')
