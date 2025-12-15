@@ -6,18 +6,26 @@ import React from 'react';
 import { Attachment as StreamAttachment } from 'stream-chat-react';
 import type { AttachmentProps } from 'stream-chat-react';
 import { MessageCards } from './MessageCards';
+import { ImageAttachment } from './ImageAttachment';
+import { GalleryAttachment } from './GalleryAttachment';
+import { FileAttachment } from './FileAttachment';
 
 interface CustomAttachmentProps extends AttachmentProps {
   onActionClick?: (actionValue: string) => void;
 }
 
 /**
- * Custom Attachment component for PropertyAI interactive cards
+ * Custom Attachment component for Stream Chat
  *
- * This component integrates with Stream Chat's attachment rendering pipeline
- * to display custom card types (incident, discovery, job, bids, approval, completion)
+ * Handles multiple attachment types:
+ * - PropertyAI cards (incident, discovery, job, bids, approval, completion)
+ * - Images (single)
+ * - Gallery (multiple images)
+ * - Files (documents, PDFs, etc.)
+ * - Video/Audio (delegates to Stream's default player)
+ * - Scraped content (delegates to Stream's Card component)
  *
- * Usage: Pass this component to Channel's `Attachment` prop
+ * Includes AI vision analysis display for images
  */
 export const CustomAttachment: React.FC<CustomAttachmentProps> = ({
   attachments,
@@ -27,29 +35,59 @@ export const CustomAttachment: React.FC<CustomAttachmentProps> = ({
     return null;
   }
 
-  // Separate PropertyAI cards from standard attachments
+  console.log('[CustomAttachment] Processing attachments:', {
+    total: attachments.length,
+    types: attachments.map((a: any) => a.type || 'unknown'),
+    details: attachments.map((a: any) => ({
+      type: a.type,
+      mime_type: a.mime_type,
+      title: a.title,
+      hasUrl: !!a.url || !!a.image_url || !!a.asset_url,
+      aiAnalysis: a.ai_analysis ? 'present' : 'none',
+    })),
+  });
+
+  // 1. Separate PropertyAI cards
   const cardAttachments = attachments.filter((att: any) =>
     ["incident", "discovery", "job", "bids", "approval", "completion"].includes(att.type)
   );
 
-  const standardAttachments = attachments.filter((att: any) =>
-    !["incident", "discovery", "job", "bids", "approval", "completion"].includes(att.type)
+  // 2. Separate images
+  const imageAttachments = attachments.filter((att: any) =>
+    att.type === 'image' ||
+    (att.mime_type && att.mime_type.startsWith('image/')) ||
+    (att.url && /\.(jpg|jpeg|png|gif|webp|bmp|svg|heic|tiff)$/i.test(att.url))
   );
 
-  console.log('[CustomAttachment] Rendering attachments:', {
-    total: attachments.length,
-    cardCount: cardAttachments.length,
-    standardCount: standardAttachments.length,
-    cardTypes: cardAttachments.map((a: any) => a.type)
+  // 3. Separate files
+  const fileAttachments = attachments.filter((att: any) =>
+    att.type === 'file' ||
+    (att.mime_type && !att.mime_type.startsWith('image/') && !att.mime_type.startsWith('video/') && !att.mime_type.startsWith('audio/'))
+  );
+
+  // 4. Everything else (video, audio, scraped content) - delegate to Stream
+  const streamAttachments = attachments.filter((att: any) =>
+    !["incident", "discovery", "job", "bids", "approval", "completion"].includes(att.type) &&
+    att.type !== 'image' &&
+    att.type !== 'file' &&
+    !imageAttachments.includes(att) &&
+    !fileAttachments.includes(att)
+  );
+
+  console.log('[CustomAttachment] Categorized:', {
+    cards: cardAttachments.length,
+    images: imageAttachments.length,
+    files: fileAttachments.length,
+    stream: streamAttachments.length,
   });
 
   return (
-    <>
-      {/* Render PropertyAI interactive cards */}
+    <div className="flex flex-col gap-3">
+      {/* 1. Render PropertyAI interactive cards */}
       {cardAttachments.length > 0 && (
         <div className="propertyai-cards">
           {cardAttachments.map((attachment: any, index: number) => (
-            <div key={index} className="propertyai-card-wrapper">
+            <div key={`card-${index}`} className="propertyai-card-wrapper">
               <MessageCards
                 message={{ attachments: [attachment] } as any}
                 onActionClick={onActionClick || (() => {})}
@@ -59,9 +97,53 @@ export const CustomAttachment: React.FC<CustomAttachmentProps> = ({
         </div>
       )}
 
-      {/* Render standard attachments using Stream's default renderer */}
-      {standardAttachments.length > 0 && (
-        <StreamAttachment attachments={standardAttachments} />
+      {/* 2. Render images (single or gallery) */}
+      {imageAttachments.length > 0 && (
+        <>
+          {imageAttachments.length === 1 ? (
+            <ImageAttachment
+              key="image-0"
+              url={imageAttachments[0].url || imageAttachments[0].image_url || imageAttachments[0].asset_url}
+              thumb_url={imageAttachments[0].thumb_url}
+              title={imageAttachments[0].title}
+              alt={imageAttachments[0].text}
+              aiAnalysis={imageAttachments[0].ai_analysis}
+              aiAnalysisError={imageAttachments[0].ai_analysis_error}
+            />
+          ) : (
+            <GalleryAttachment
+              key="gallery"
+              images={imageAttachments.map((img: any) => ({
+                url: img.url || img.image_url || img.asset_url,
+                thumb_url: img.thumb_url,
+                title: img.title,
+                alt: img.text,
+                aiAnalysis: img.ai_analysis,
+              }))}
+            />
+          )}
+        </>
+      )}
+
+      {/* 3. Render files */}
+      {fileAttachments.length > 0 && (
+        <div className="flex flex-col gap-2">
+          {fileAttachments.map((file: any, index: number) => (
+            <FileAttachment
+              key={`file-${index}`}
+              url={file.url || file.asset_url}
+              title={file.title}
+              text={file.text}
+              file_size={file.file_size}
+              mime_type={file.mime_type}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* 4. Render video/audio/scraped content using Stream's default renderer */}
+      {streamAttachments.length > 0 && (
+        <StreamAttachment attachments={streamAttachments} />
       )}
 
       <style jsx>{`
@@ -69,8 +151,6 @@ export const CustomAttachment: React.FC<CustomAttachmentProps> = ({
           display: flex;
           flex-direction: column;
           gap: 0.75rem;
-          margin: 0.5rem 0;
-          width: 100%;
         }
 
         .propertyai-card-wrapper {
@@ -78,6 +158,6 @@ export const CustomAttachment: React.FC<CustomAttachmentProps> = ({
           max-width: 600px;
         }
       `}</style>
-    </>
+    </div>
   );
 };

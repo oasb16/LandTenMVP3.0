@@ -5,6 +5,7 @@ import { Loader2, WifiOff, Bot, BotOff, UserPlus } from "lucide-react";
 import { useStreamChat } from "@/hooks/chat/StreamChatContext";
 import { Chat, Channel, ChannelHeader, MessageList, MessageInput, Window, Thread } from "stream-chat-react";
 import "stream-chat-react/dist/css/v2/index.css";
+import { CustomAttachment } from "./ai/CustomAttachment";
 
 type Props = {
   className?: string;
@@ -166,7 +167,7 @@ export default function StreamChatPane({ className, showEscalation, onEscalate }
       }}
     >
       <Chat client={client} theme="str-chat__theme-dark">
-        <Channel channel={activeChannel}>
+        <Channel channel={activeChannel} Attachment={CustomAttachment}>
           <Window>
             <ChannelHeader />
 
@@ -247,6 +248,7 @@ function MessageInputWithWebhook({ agentEnabled }: { agentEnabled: boolean }) {
   console.log("[MessageInputWithWebhook] Initialized with agentEnabled =", agentEnabled, user, activeChannel);
   const handleSubmit = useCallback(
     async (input: any) => {
+      // Extract text from various possible input formats
       const messageText =
         typeof input === "string"
           ? input
@@ -256,32 +258,41 @@ function MessageInputWithWebhook({ agentEnabled }: { agentEnabled: boolean }) {
           ? input.text
           : "";
 
-      if (!messageText.trim()) {
-        console.warn("[MessageInputWithWebhook] ⚠️ No valid text extracted from input:", input);
+      // 🔥 CRITICAL FIX: Extract attachments from input
+      const attachments =
+        input?.attachments ||
+        input?.message?.attachments ||
+        [];
+
+      console.log("[MessageInputWithWebhook] ✅ Extracted from input:", {
+        text: messageText.substring(0, 100),
+        attachmentCount: attachments.length,
+        attachments: attachments.map((a: any) => ({
+          type: a.type,
+          name: a.name,
+          file_size: a.file_size,
+          mime_type: a.mime_type,
+        })),
+      });
+
+      // Allow empty text if we have attachments (photo-only messages)
+      if (!messageText.trim() && attachments.length === 0) {
+        console.warn("[MessageInputWithWebhook] ⚠️ No text or attachments in input:", input);
         return;
       }
 
-      console.log("[MessageInputWithWebhook] Extracted messageText:", messageText);
-      const text = messageText
+      const text = messageText;
 
-      // if (!text?.trim() || !activeChannel) {
-      //   console.log('[MessageInputWithWebhook] Missing text or channel');
-      //   return;
-      // }
-
-      console.log('[MessageInputWithWebhook] Sending:', text);
+      console.log('[MessageInputWithWebhook] Sending:', text || '[Photo only]');
       console.log('[MessageInputWithWebhook] Agent:', agentEnabled ? 'ON' : 'OFF');
+      console.log('[MessageInputWithWebhook] Attachments:', attachments.length);
 
       console.log("[MessageInputWithWebhook] Active channel before send:", activeChannel?.cid);
       console.log("[MessageInputWithWebhook] User before send:", user?.id);
-      console.log("[MessageInputWithWebhook] Preparing message payload for ...", user);
-      console.log("[MessageInputWithWebhook] Message text:", text);
-      console.log("[MessageInputWithWebhook] Agent enabled:", agentEnabled);
-      console.log("[MessageInputWithWebhook] Preparing to send message...");
       console.log("[MessageInputWithWebhook] Message payload:", {
         text,
         user,
-        attachments: [],
+        attachments,  // ✅ FIXED: Pass actual attachments
         mentioned_users: [],
         metadata: {
           agentEnabled,
@@ -290,18 +301,18 @@ function MessageInputWithWebhook({ agentEnabled }: { agentEnabled: boolean }) {
       });
 
       try {
-        // // ✅ Step 1: Send valid message to Stream
-      //   const messagePayload = {
-      //     text,
-      //     attachments: [], // must be present
-      //     mentioned_users: [], // also optional, but safer
-      //     metadata: {
-      //       agentEnabled,
-      //       persona: user?.role || 'tenant',
-      //     },
-      //   };
-      //   console.log("[MessageInputWithWebhook] Sending message to Stream:", messagePayload);
-        const result = await sendMessage(text);
+        // ✅ Step 1: Send valid message to Stream with attachments
+        const messagePayload = {
+          text,
+          attachments,  // ✅ FIXED: Include actual attachments
+          mentioned_users: [],
+          metadata: {
+            agentEnabled,
+            persona: (user as any)?.role || 'tenant',
+          },
+        };
+        console.log("[MessageInputWithWebhook] Sending message to Stream:", messagePayload);
+        const result = await sendMessage(text, messagePayload);
         console.log('[MessageInputWithWebhook] ✅ Sent to Stream:', result);
 
         // ✅ Step 2: Forward to AI webhook if enabled
@@ -316,6 +327,7 @@ function MessageInputWithWebhook({ agentEnabled }: { agentEnabled: boolean }) {
             type: 'message.new',
             message: {
               text,
+              attachments,  // ✅ FIXED: Include attachments in webhook payload
               user: {
                 id: user?.id,
                 name: user?.name,
