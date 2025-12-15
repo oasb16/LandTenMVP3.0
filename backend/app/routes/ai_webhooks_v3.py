@@ -198,11 +198,16 @@ async def handle_new_message(payload: Dict[str, Any]) -> Dict[str, Any]:
         channel_id = payload.get("channel_id", "unknown")
         user_id = user.get("id", "unknown")
         message_text = message.get("text", "")
+        attachments = message.get("attachments", [])  # 🔥 EXTRACT ATTACHMENTS
 
         logger.info(f"========== ASYNC QUEUE MODE: New Message ==========")
         logger.info(f"Channel: {channel_id}")
         logger.info(f"User: {user_id} ({user.get('name', 'unknown')})")
-        logger.info(f"Text: {message_text[:120]}")
+        logger.info(f"Text: {message_text[:120] if message_text else '[No text - photo only]'}")
+        logger.info(f"📎 Attachments: {len(attachments)} attachment(s)")
+        if attachments:
+            for idx, att in enumerate(attachments):
+                logger.info(f"   📎 Attachment {idx + 1}: type={att.get('type')}, mime={att.get('mime_type')}, url={att.get('url', att.get('image_url', att.get('asset_url', 'N/A')))[:80]}")
 
         # Ignore bot messages
         if user.get("is_bot") or str(user_id).startswith("ai-"):
@@ -303,11 +308,22 @@ async def handle_new_message_background(payload: Dict[str, Any]) -> Dict[str, An
         channel_id = payload.get("channel_id", "unknown")
         user_id = user.get("id", "unknown")
         message_text = message.get("text", "")
+        attachments = message.get("attachments", [])  # 🔥 EXTRACT ATTACHMENTS
 
         logger.info(f"========== New Message ==========")
         logger.info(f"Channel: {channel_id}")
         logger.info(f"User: {user_id} ({user.get('name', 'unknown')})")
-        logger.info(f"Text: {message_text[:120]}")
+        logger.info(f"Text: {message_text[:120] if message_text else '[No text - photo only]'}")
+        logger.info(f"📎 Attachments: {len(attachments)} attachment(s)")
+        if attachments:
+            for idx, att in enumerate(attachments):
+                att_type = att.get('type', 'unknown')
+                att_mime = att.get('mime_type', 'unknown')
+                att_url = att.get('url') or att.get('image_url') or att.get('asset_url', 'N/A')
+                logger.info(f"   📎 Attachment {idx + 1}: type={att_type}, mime={att_mime}, url={att_url[:80]}")
+                # For images, log if AI analysis is present
+                if 'ai_analysis' in att:
+                    logger.info(f"      🤖 AI Analysis present: {att.get('ai_analysis', '')[:60]}...")
 
         # Ignore bot messages
         if user.get("is_bot") or str(user_id).startswith("ai-"):
@@ -337,13 +353,31 @@ async def handle_new_message_background(payload: Dict[str, Any]) -> Dict[str, An
 
         logger.info(f"Processing message with ResponseHandler for persona: {persona}")
 
+        # 🔥 CRITICAL FIX: Build complete message with attachments
+        # For photo-only messages, create descriptive text from attachments
+        complete_message = message_text
+        if not complete_message and attachments:
+            # Photo-only message - describe attachments
+            image_count = sum(1 for att in attachments if 'image' in att.get('mime_type', '') or att.get('type') == 'image')
+            file_count = len(attachments) - image_count
+
+            parts = []
+            if image_count > 0:
+                parts.append(f"{image_count} photo{'s' if image_count > 1 else ''}")
+            if file_count > 0:
+                parts.append(f"{file_count} file{'s' if file_count > 1 else ''}")
+
+            complete_message = f"[User sent {', '.join(parts)}]"
+            logger.info(f"📸 Photo-only message detected, generated description: {complete_message}")
+
         # Process message using new single-flow architecture
         try:
             result = await response_handler.process_message(
                 channel_id=channel_id,
                 user_id=user_id,
-                message=message_text,
-                persona=persona
+                message=complete_message,
+                persona=persona,
+                attachments=attachments  # 🔥 PASS ATTACHMENTS TO HANDLER
             )
 
             if result.get("success"):

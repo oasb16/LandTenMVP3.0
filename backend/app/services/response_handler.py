@@ -255,7 +255,8 @@ Then: Use result to provide specific diagnosis, cost, and urgency
         channel_id: str,
         user_id: str,
         message: str,
-        persona: str = "tenant"
+        persona: str = "tenant",
+        attachments: Optional[List[Dict[str, Any]]] = None  # 🔥 NEW: Accept attachments
     ) -> Dict[str, Any]:
         """
         Process user message using Responses API.
@@ -264,7 +265,7 @@ Then: Use result to provide specific diagnosis, cost, and urgency
 
         Flow:
         1. Get or create conversation
-        2. Call Responses API with user message
+        2. Call Responses API with user message + attachments
         3. Extract assistant message + tool calls
         4. Send assistant message to user FIRST (preserve empathy!)
         5. If tool calls exist, execute them in a loop
@@ -275,6 +276,7 @@ Then: Use result to provide specific diagnosis, cost, and urgency
             user_id: User identifier
             message: User's message text
             persona: User role (tenant, landlord, contractor)
+            attachments: Optional list of message attachments (photos, files, etc.)
 
         Returns:
             dict: Result with success, message, tool_calls_executed, etc.
@@ -294,17 +296,53 @@ Then: Use result to provide specific diagnosis, cost, and urgency
             # 2. Fetch property context for variables
             property_data = await self._get_property_context(channel_id, user_id)
 
-            # 3. Prepare input items (just the user message - dashboard prompt handles system context)
+            # 3. Prepare input items with message + attachments
+            content_blocks = [
+                {
+                    "type": "input_text",
+                    "text": message or "[Photo attached]"  # Ensure non-empty text
+                }
+            ]
+
+            # 🔥 NEW: Add image attachments as image_url blocks (for OpenAI Vision)
+            if attachments:
+                logger.info(f"📎 Processing {len(attachments)} attachment(s) for AI")
+                for idx, att in enumerate(attachments):
+                    att_type = att.get('type', '')
+                    att_mime = att.get('mime_type', '')
+
+                    # Check if it's an image
+                    is_image = (
+                        att_type == 'image' or
+                        'image' in att_mime or
+                        any(att.get('url', '').lower().endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'])
+                    )
+
+                    if is_image:
+                        image_url = att.get('url') or att.get('image_url') or att.get('asset_url')
+                        if image_url:
+                            content_blocks.append({
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": image_url,
+                                    "detail": "high"  # High detail for property issue analysis
+                                }
+                            })
+                            logger.info(f"   📸 Added image {idx + 1} to AI input: {image_url[:80]}")
+                    else:
+                        # For non-image attachments, include URL in text
+                        file_url = att.get('url') or att.get('asset_url')
+                        file_name = att.get('title') or 'Unnamed file'
+                        if file_url:
+                            # Append file info to the message text
+                            content_blocks[0]['text'] += f"\n[User attached file: {file_name} - {file_url}]"
+                            logger.info(f"   📄 Added file {idx + 1} info to text: {file_name}")
+
             input_items = [
                 {
                     "type": "message",
                     "role": "user",
-                    "content": [
-                        {
-                            "type": "input_text",
-                            "text": message
-                        }
-                    ]
+                    "content": content_blocks
                 }
             ]
 
