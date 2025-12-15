@@ -42,7 +42,7 @@ type StreamChatContextValue = {
   loading: boolean;
   error: string | null;
   selectChannel: (channel: Channel) => void;
-  sendMessage: (text: string) => Promise<void>;
+  sendMessage: (text: string, messageData?: any) => Promise<void>;
   triggerAction: (actionValue: string) => Promise<void>;
 };
 
@@ -708,14 +708,23 @@ export function StreamChatProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const sendMessage = useCallback(
-    async (text: string) => {
-      if (!activeChannel || !text.trim()) return;
+    async (text: string, messageData?: any) => {
+      if (!activeChannel) return;
+      // Allow empty text if we have attachments
+      if (!text.trim() && (!messageData?.attachments || messageData.attachments.length === 0)) {
+        return;
+      }
       try {
         console.log("[StreamChat] Sending message:", text.substring(0, 50));
-        const result = await activeChannel.sendMessage({
+        console.log("[StreamChat] Attachments:", messageData?.attachments?.length || 0);
+
+        const messagePayload = {
           text,
           type: "regular",
-        });
+          ...messageData,  // 🔥 Include attachments and other message data
+        };
+
+        const result = await activeChannel.sendMessage(messagePayload);
         console.log("[StreamChat] Message sent successfully, result:", result?.message?.id);
 
         if (result) {
