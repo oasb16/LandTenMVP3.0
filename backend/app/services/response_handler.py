@@ -363,7 +363,8 @@ Then: Use result to provide specific diagnosis, cost, and urgency
                     channel_id=channel_id,
                     user_id=user_id,
                     max_iterations=5,
-                    variables=prompt_variables  # ← Pass variables to tool loop
+                    variables=prompt_variables,  # ← Pass variables to tool loop
+                    attachments=attachments  # 🔥 Pass attachments for incident photos
                 )
             except Exception as e:
                 # 🔥 CRITICAL: Detect corrupted conversation state
@@ -390,7 +391,8 @@ Then: Use result to provide specific diagnosis, cost, and urgency
                         channel_id=channel_id,
                         user_id=user_id,
                         max_iterations=5,
-                        variables=prompt_variables  # ← Pass variables to retry call
+                        variables=prompt_variables,  # ← Pass variables to retry call
+                        attachments=attachments  # 🔥 Pass attachments for incident photos
                     )
                 else:
                     # Different error, re-raise
@@ -421,7 +423,8 @@ Then: Use result to provide specific diagnosis, cost, and urgency
         channel_id: str,
         user_id: str,
         max_iterations: int = 5,
-        variables: Optional[Dict[str, Any]] = None
+        variables: Optional[Dict[str, Any]] = None,
+        attachments: Optional[List[Dict[str, Any]]] = None  # 🔥 NEW: Accept attachments
     ) -> Dict[str, Any]:
         """
         Handle explicit tool loop for Responses API.
