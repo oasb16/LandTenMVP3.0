@@ -219,8 +219,16 @@ async def create_incident(
     user_id: str,
     channel_id: str,
     property_id: Optional[str] = None,
+    attachments: Optional[List[Dict[str, Any]]] = None,  # 🔥 NEW: Accept attachments
 ) -> FunctionResult:
-    """Create a new maintenance incident"""
+    """
+    Create a new maintenance incident.
+
+    Automatically processes image attachments:
+    - Downloads images from Stream Chat CDN
+    - Uploads to S3 for permanent storage
+    - Attaches to incident.photos field
+    """
     try:
         # 🚨 FIX: Clean expired fingerprints first
         _clean_expired_fingerprints(user_id)
@@ -318,6 +326,54 @@ async def create_incident(
         incident_id = f"inc_{uuid.uuid4().hex[:12]}"
         now = datetime.utcnow().isoformat()
 
+        # 🔥 NEW: Process image attachments and upload to S3
+        photos = []
+        if attachments:
+            logger.info(f"📸 Processing {len(attachments)} attachment(s) for incident {incident_id}")
+            from ..services.s3_uploader import get_s3_uploader
+
+            s3_uploader = get_s3_uploader()
+
+            for idx, attachment in enumerate(attachments):
+                att_type = attachment.get('type', '')
+                att_mime = attachment.get('mime_type', '')
+
+                # Check if it's an image
+                is_image = (
+                    att_type == 'image' or
+                    'image' in att_mime or
+                    any(attachment.get('url', '').lower().endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'])
+                )
+
+                if is_image:
+                    # Get image URL from attachment (Stream Chat format)
+                    image_url = attachment.get('url') or attachment.get('image_url') or attachment.get('asset_url')
+
+                    if image_url:
+                        logger.info(f"   📷 Uploading image {idx + 1}: {image_url[:80]}...")
+
+                        try:
+                            # Download from Stream Chat CDN and upload to S3
+                            photo_record = await s3_uploader.download_and_upload(
+                                source_url=image_url,
+                                incident_id=incident_id,
+                                content_type=att_mime or 'image/jpeg',
+                                ai_analysis=None  # Will be populated later if needed
+                            )
+
+                            if photo_record:
+                                photos.append(photo_record)
+                                logger.info(f"   ✅ Uploaded to S3: {photo_record['url']}")
+                            else:
+                                logger.warning(f"   ⚠️ Failed to upload image {idx + 1}")
+
+                        except Exception as e:
+                            logger.error(f"   ❌ Error uploading image {idx + 1}: {e}")
+                else:
+                    logger.debug(f"   ⏭️ Skipping non-image attachment: type={att_type}, mime={att_mime}")
+
+            logger.info(f"📸 Processed {len(photos)} image(s) for incident {incident_id}")
+
         incident_data = {
             "incident_id": incident_id,
             "user_id": user_id,
@@ -333,7 +389,7 @@ async def create_incident(
             "updated_at": now,
             "channel_id": channel_id,
             "discovery_index": 0,
-            "media_urls": [],
+            "photos": photos,  # 🔥 NEW: S3 photo URLs with metadata
         }
 
         # Save to DynamoDB
@@ -469,9 +525,17 @@ async def update_incident(
     incident_id: str,
     user_id: str,
     status: Optional[str] = None,
+    attachments: Optional[List[Dict[str, Any]]] = None,  # 🔥 NEW: Accept attachments
     **kwargs,
 ) -> FunctionResult:
-    """Update an existing incident"""
+    """
+    Update an existing incident.
+
+    Automatically processes new image attachments:
+    - Downloads images from Stream Chat CDN
+    - Uploads to S3 for permanent storage
+    - Appends to existing incident.photos
+    """
     try:
         dynamo = get_dynamo_service()
 
@@ -515,6 +579,55 @@ async def update_incident(
 
         # Also strip user_id if it leaked in
         updates.pop("user_id", None)
+
+        # 🔥 NEW: Process new image attachments and append to existing photos
+        if attachments:
+            logger.info(f"📸 Processing {len(attachments)} new attachment(s) for incident {incident_id}")
+            from ..services.s3_uploader import get_s3_uploader
+
+            s3_uploader = get_s3_uploader()
+            new_photos = []
+
+            for idx, attachment in enumerate(attachments):
+                att_type = attachment.get('type', '')
+                att_mime = attachment.get('mime_type', '')
+
+                # Check if it's an image
+                is_image = (
+                    att_type == 'image' or
+                    'image' in att_mime or
+                    any(attachment.get('url', '').lower().endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'])
+                )
+
+                if is_image:
+                    image_url = attachment.get('url') or attachment.get('image_url') or attachment.get('asset_url')
+
+                    if image_url:
+                        logger.info(f"   📷 Uploading new image {idx + 1}: {image_url[:80]}...")
+
+                        try:
+                            photo_record = await s3_uploader.download_and_upload(
+                                source_url=image_url,
+                                incident_id=incident_id,
+                                content_type=att_mime or 'image/jpeg',
+                                ai_analysis=None
+                            )
+
+                            if photo_record:
+                                new_photos.append(photo_record)
+                                logger.info(f"   ✅ Uploaded to S3: {photo_record['url']}")
+                            else:
+                                logger.warning(f"   ⚠️ Failed to upload image {idx + 1}")
+
+                        except Exception as e:
+                            logger.error(f"   ❌ Error uploading image {idx + 1}: {e}")
+
+            # Append new photos to existing photos list
+            if new_photos:
+                existing_photos = existing.get('photos', []) if existing else []
+                all_photos = existing_photos + new_photos
+                updates['photos'] = all_photos
+                logger.info(f"📸 Added {len(new_photos)} new photo(s). Total: {len(all_photos)}")
 
         logger.info(f"✅ Updating incident {incident_id} with fields: {list(updates.keys())}")
 
@@ -2818,6 +2931,8 @@ async def execute_function(
             arguments["channel_id"] = context.get("channel_id")
         if "property_id" in valid_params and "property_id" not in arguments:
             arguments["property_id"] = context.get("property_id")
+        if "attachments" in valid_params and "attachments" not in arguments:
+            arguments["attachments"] = context.get("attachments")  # 🔥 Pass attachments
 
         # AGGRESSIVE FILTERING: Strip EVERYTHING not in function signature
         filtered_args = {}

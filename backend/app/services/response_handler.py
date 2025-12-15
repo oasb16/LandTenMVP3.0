@@ -637,7 +637,8 @@ Then: Use result to provide specific diagnosis, cost, and urgency
                 context={
                     "channel_id": channel_id,
                     "user_id": user_id,
-                    "conversation_id": conversation_id
+                    "conversation_id": conversation_id,
+                    "attachments": attachments or []  # 🔥 Pass attachments to tools
                 }
             )
 
