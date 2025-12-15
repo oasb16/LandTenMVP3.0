@@ -1283,6 +1283,15 @@ async def stream_webhook(request: Request):
     print(f"[👤 WEBHOOK] User ID: {user_id}")
     print(f"[📝 WEBHOOK] Message text: {message_text[:100]}{'...' if len(message_text) > 100 else ''}")
 
+    # Log attachments if present
+    attachments = message.get("attachments", [])
+    if attachments:
+        print(f"[📎 WEBHOOK] ✅ Message has {len(attachments)} attachment(s)")
+        for idx, attachment in enumerate(attachments):
+            print(f"[📎 WEBHOOK] Attachment {idx + 1}: type={attachment.get('type')}, {attachment}")
+    else:
+        print(f"[📎 WEBHOOK] ⚠️ No attachments in message")
+
     # Ignore messages from our AI agent
     if user_id == AGENT_USER_ID:
         print(f"[⏭️  WEBHOOK] Ignoring message from AI agent: {AGENT_USER_ID}")
