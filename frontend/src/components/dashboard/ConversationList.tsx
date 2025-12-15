@@ -1,11 +1,11 @@
 import React, { memo, useMemo, useState } from "react";
-import { MessageCircle, TriangleAlert, Plus } from "lucide-react";
+import { MessageCircle, TriangleAlert, Plus, AlertCircle, DollarSign, Shield, Clock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useStreamChat } from "@/hooks/chat/StreamChatContext";
-// import { auth } from "@/utils/firebase";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
+import { parseDiagnosticData } from "../ai/parseDiagnosticData";
 
 const stageTone = (stage: string | null | undefined) => {
   if (!stage) return "bg-slate-800/60 text-slate-200 border border-slate-700/40";
@@ -18,10 +18,37 @@ const stageTone = (stage: string | null | undefined) => {
   return "bg-slate-800/60 text-slate-200 border border-slate-700/40";
 };
 
-const severityIcon = (severity: string | undefined) => {
-  if (severity === "high") return <TriangleAlert className="h-3.5 w-3.5 text-rose-300" />;
-  if (severity === "medium") return <TriangleAlert className="h-3.5 w-3.5 text-amber-300" />;
-  return <TriangleAlert className="h-3.5 w-3.5 text-slate-400" />;
+const severityConfig = {
+  low: {
+    icon: <AlertCircle className="h-3.5 w-3.5 text-emerald-400" />,
+    color: "text-emerald-400",
+    bgColor: "bg-emerald-900/30",
+    borderColor: "border-emerald-500/30",
+  },
+  medium: {
+    icon: <TriangleAlert className="h-3.5 w-3.5 text-amber-400" />,
+    color: "text-amber-400",
+    bgColor: "bg-amber-900/30",
+    borderColor: "border-amber-500/30",
+  },
+  high: {
+    icon: <TriangleAlert className="h-3.5 w-3.5 text-orange-400" />,
+    color: "text-orange-400",
+    bgColor: "bg-orange-900/30",
+    borderColor: "border-orange-500/30",
+  },
+  urgent: {
+    icon: <TriangleAlert className="h-3.5 w-3.5 text-red-400 animate-pulse" />,
+    color: "text-red-400",
+    bgColor: "bg-red-900/30",
+    borderColor: "border-red-500/30",
+  },
+  emergency: {
+    icon: <TriangleAlert className="h-3.5 w-3.5 text-red-500 animate-pulse" />,
+    color: "text-red-500",
+    bgColor: "bg-red-900/40",
+    borderColor: "border-red-500/40",
+  },
 };
 
 const formatSnippet = (text: string | undefined) => {
@@ -29,13 +56,56 @@ const formatSnippet = (text: string | undefined) => {
   return text.length > 64 ? `${text.slice(0, 61)}…` : text;
 };
 
+// Parse diagnostic data from channel messages
+function parseChannelInsights(channel: any) {
+  const messages = channel?.state?.messages || [];
+  let severity = null;
+  let urgency = null;
+  let estimatedCost = null;
+  let hasSafety = false;
+
+  // Parse recent messages (last 10)
+  for (let i = messages.length - 1; i >= Math.max(0, messages.length - 10); i--) {
+    const msg = messages[i];
+    const text = msg.text || "";
+    const metadata = (msg as any).metadata || {};
+
+    const diagnosticData = parseDiagnosticData(text);
+
+    if (diagnosticData.hasDiagnostic) {
+      if (!severity && diagnosticData.diagnosticResult?.severity) {
+        severity = diagnosticData.diagnosticResult.severity;
+      }
+      if (!severity && metadata.severity) {
+        severity = metadata.severity;
+      }
+
+      if (!urgency && diagnosticData.diagnosticResult?.urgency) {
+        urgency = diagnosticData.diagnosticResult.urgency;
+      }
+      if (!urgency && metadata.urgency) {
+        urgency = metadata.urgency;
+      }
+
+      if (!estimatedCost && diagnosticData.diagnosticResult?.estimatedCost) {
+        estimatedCost = diagnosticData.diagnosticResult.estimatedCost;
+      }
+
+      if (!hasSafety && diagnosticData.safetyConsiderations && diagnosticData.safetyConsiderations.length > 0) {
+        hasSafety = true;
+      }
+    }
+  }
+
+  return { severity, urgency, estimatedCost, hasSafety };
+}
+
 function ConversationListComponent() {
   const { client, channels, activeChannel, selectChannel, flowState } = useStreamChat();
   const { data: session } = useSession();
   const router = useRouter();
   const [creating, setCreating] = useState(false);
   const [localChannels, setLocalChannels] = useState<any[]>([]);
-  // simple inline toast state as a fallback to a global toast provider
   const [toast, setToast] = useState<{ id: number; message: string } | null>(null);
 
   const items = useMemo(
@@ -49,14 +119,21 @@ function ConversationListComponent() {
         const flowMeta = (channelData.flow_state as Record<string, unknown> | undefined) ?? {};
         const stageFromChannel = (flowMeta.stage as string | undefined) ?? flowState?.stage ?? null;
         const incidentId = (flowMeta.incidentId as string | undefined) ?? flowState?.incidentId ?? null;
-        const severity = (channelData.severity as string | undefined) ?? "medium";
+
+        // Parse diagnostic insights from messages
+        const insights = parseChannelInsights(channel);
+        const severity = insights.severity || (channelData.severity as string | undefined) || "medium";
+
         return {
           channel,
           id: channel.id || channel.cid,
           title: (channelData.name as string | undefined) ?? incidentId ?? channel.cid,
           lastMessage: formatSnippet(lastMessage?.text),
           stage: stageFromChannel,
-          severity,
+          severity: severity.toLowerCase(),
+          urgency: insights.urgency,
+          estimatedCost: insights.estimatedCost,
+          hasSafety: insights.hasSafety,
         };
       });
     },
@@ -102,7 +179,6 @@ function ConversationListComponent() {
     }
   };
 
-
   return (
     <div className="flex h-full flex-col gap-4">
       <div className="sticky top-0 z-10 flex items-center justify-between rounded-xl border border-slate-800/60 bg-slate-900/70 px-3 py-2 backdrop-blur">
@@ -130,8 +206,11 @@ function ConversationListComponent() {
 
       <ScrollArea className="flex-1 rounded-2xl border border-slate-800/60 bg-slate-900/40 p-2">
         <div className="space-y-2">
-          {items.map(({ channel, id, title, lastMessage, stage, severity }) => {
+          {items.map(({ channel, id, title, lastMessage, stage, severity, urgency, estimatedCost, hasSafety }) => {
             const isActive = activeChannel?.cid === channel.cid;
+            const severityKey = (severity || "medium") as keyof typeof severityConfig;
+            const config = severityConfig[severityKey] || severityConfig.medium;
+
             return (
               <button
                 type="button"
@@ -139,25 +218,49 @@ function ConversationListComponent() {
                 onClick={() => selectChannel(channel)}
                 className={`w-full rounded-xl border px-3 py-3 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60 ${
                   isActive
-                    ? "border-emerald-500/40 bg-emerald-500/10"
-                    : "border-slate-800/60 bg-slate-900/60 hover:bg-slate-800/60"
+                    ? `border-emerald-500/40 bg-emerald-500/10`
+                    : `${config.borderColor} ${config.bgColor} hover:bg-slate-800/60`
                 }`}
               >
                 <div className="flex items-start justify-between gap-3">
-                  <div className="space-y-1">
-                    <p className="font-medium text-slate-100">{title}</p>
+                  <div className="flex-1 space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium text-slate-100">{title}</p>
+                      {hasSafety && (
+                        <Shield className="h-3.5 w-3.5 text-red-400 animate-pulse" title="Safety alerts present" />
+                      )}
+                    </div>
                     {lastMessage ? (
                       <p className="text-xs text-slate-400">{lastMessage}</p>
                     ) : (
                       <p className="text-xs text-slate-500">No messages yet</p>
                     )}
+
+                    {/* Diagnostic Info Row */}
+                    {(urgency || estimatedCost) && (
+                      <div className="flex items-center gap-3 text-[10px] text-slate-400">
+                        {urgency && (
+                          <span className="flex items-center gap-1">
+                            <Clock className="h-3 w-3" />
+                            {urgency}
+                          </span>
+                        )}
+                        {estimatedCost && (
+                          <span className="flex items-center gap-1">
+                            <DollarSign className="h-3 w-3" />
+                            {estimatedCost}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
-                  <div className="flex min-w-[110px] flex-col items-end gap-1">
+
+                  <div className="flex min-w-[110px] flex-col items-end gap-1.5">
                     <Badge variant="secondary" className={`capitalize ${stageTone(stage)}`}>
                       {stage ?? "general"}
                     </Badge>
-                    <div className="flex items-center gap-1 text-[11px] uppercase tracking-wide text-slate-400">
-                      {severityIcon(severity)}
+                    <div className={`flex items-center gap-1 text-[11px] uppercase tracking-wide ${config.color}`}>
+                      {config.icon}
                       <span>{severity}</span>
                     </div>
                   </div>
@@ -172,4 +275,3 @@ function ConversationListComponent() {
 }
 
 export const ConversationList = memo(ConversationListComponent);
-
