@@ -212,7 +212,7 @@ function AIContextPanelComponent() {
 
       const diagnosticData = parseDiagnosticData(text);
 
-      if (diagnosticData.hasDiagnostic) {
+      if (diagnosticData && diagnosticData.hasDiagnostic) {
         hasDiagnostic = true;
 
         if (!severity && diagnosticData.diagnosticResult?.severity) {
@@ -237,11 +237,11 @@ function AIContextPanelComponent() {
           description = diagnosticData.diagnosticResult.description;
         }
 
-        if (diagnosticData.safetyConsiderations && diagnosticData.safetyConsiderations.length > 0) {
+        if (diagnosticData.safetyConsiderations && Array.isArray(diagnosticData.safetyConsiderations) && diagnosticData.safetyConsiderations.length > 0) {
           safetyIssues = Math.max(safetyIssues, diagnosticData.safetyConsiderations.length);
         }
 
-        if (diagnosticData.nextSteps && diagnosticData.nextSteps.length > 0) {
+        if (diagnosticData.nextSteps && Array.isArray(diagnosticData.nextSteps) && diagnosticData.nextSteps.length > 0) {
           diagnosticData.nextSteps.forEach((step) => nextStepsSet.add(step));
         }
       }
