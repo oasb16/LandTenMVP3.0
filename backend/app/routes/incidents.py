@@ -29,6 +29,7 @@ from ..models.incident import (
 from ..deps.auth import verify_firebase_token
 from ..repos.property_repo import PropertyRepo
 from ..deps.dynamo import get_dynamo_resource, table_name
+from ..services.gpt_vision import analyze_property_image, VisionAnalysisError
 
 # Configure router
 router = APIRouter(prefix="/api/v1/incidents", tags=["incidents"])
@@ -376,7 +377,41 @@ async def upload_photo(
             logger.error(f"[incidents] Failed to generate presigned URL: {str(e)}")
             presigned_url = f"https://{BUCKET_NAME}.s3.amazonaws.com/{s3_key}"
 
-        # Create photo record
+        # 🔍 AI VISION ANALYSIS - Analyze image for property issues
+        ai_analysis = None
+        ai_analysis_error = None
+
+        try:
+            logger.info(f"[incidents] 🤖 Starting AI vision analysis for photo {photo_id}...")
+
+            # Analyze the image using GPT-4o Vision
+            analysis_result = await analyze_property_image(
+                image_bytes=file_contents,
+                issue_type="general"  # Can be made dynamic based on incident category
+            )
+
+            if analysis_result["success"]:
+                ai_analysis = analysis_result["result"]
+                logger.info(
+                    f"[incidents] ✅ AI analysis complete for {photo_id}: "
+                    f"{len(ai_analysis)} chars"
+                )
+            else:
+                ai_analysis_error = analysis_result["error"]
+                logger.warning(
+                    f"[incidents] ⚠️ AI analysis failed for {photo_id}: "
+                    f"{ai_analysis_error}"
+                )
+
+        except Exception as e:
+            ai_analysis_error = str(e)
+            logger.error(
+                f"[incidents] ❌ AI vision analysis error for {photo_id}: {e}",
+                exc_info=True
+            )
+            # Continue even if AI analysis fails - don't block photo upload
+
+        # Create photo record with AI analysis
         now = datetime.utcnow()
         photo_record = {
             "photo_id": photo_id,
@@ -385,7 +420,9 @@ async def upload_photo(
             "thumbnail_url": None,  # TODO: Generate thumbnail in future phase
             "uploaded_at": now.isoformat() + "Z",
             "uploaded_by": tenant_id,
-            "caption": None
+            "caption": None,
+            "ai_analysis": ai_analysis,  # AI-generated property issue summary
+            "ai_analysis_error": ai_analysis_error  # Error message if analysis failed
         }
 
         # Update incident.photos array atomically using list_append
@@ -417,7 +454,9 @@ async def upload_photo(
             "photo_id": photo_id,
             "url": presigned_url,
             "s3_key": s3_key,
-            "uploaded_at": photo_record["uploaded_at"]
+            "uploaded_at": photo_record["uploaded_at"],
+            "ai_analysis": ai_analysis,  # AI-generated property issue summary
+            "ai_analysis_error": ai_analysis_error  # Error if analysis failed
         }
 
     except HTTPException:
