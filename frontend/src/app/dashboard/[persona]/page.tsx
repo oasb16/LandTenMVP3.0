@@ -113,13 +113,16 @@ export default function PersonaDashboardPage() {
     : null;
 
   const conversationPanelClasses = [
-    "rounded-2xl border border-slate-800/60 bg-slate-900/50 backdrop-blur-md p-4",
+    "rounded-2xl border border-slate-800/60 bg-slate-900/50 backdrop-blur-md",
     activeTab === "conversations" ? "flex" : "hidden",
     "lg:flex",
     "flex-col",
     "h-full",
-    "gap-4",
+    "min-h-0", // Allow flex shrinking
+    "overflow-hidden", // Contain children
     "col-span-12 lg:col-span-4 xl:col-span-3",
+    "p-0 sm:p-4", // Mobile: no padding, Desktop: padding
+    "gap-0 sm:gap-4", // Mobile: no gap, Desktop: gap
   ].join(" ");
 
   const chatPanelClasses = [
@@ -128,8 +131,10 @@ export default function PersonaDashboardPage() {
     "lg:flex",
     "flex-col",
     "h-full",
-    "min-h-0",
+    "min-h-0", // Allow flex shrinking
+    "overflow-hidden", // Contain children
     "col-span-12 lg:col-span-8 xl:col-span-6",
+    "p-0 sm:p-3", // Mobile: no padding, Desktop: small padding
   ].join(" ");
 
   const insightsPanelClasses = [
@@ -147,21 +152,21 @@ export default function PersonaDashboardPage() {
 
   return (
     <div className="h-screen overflow-hidden bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100">
-      <div className="mx-auto flex h-full max-w-7xl flex-col px-4 pb-6 pt-6 sm:px-6 lg:px-10">
-        <header className="mb-4 flex flex-col gap-4 rounded-3xl border border-slate-800/60 bg-slate-950/80 p-6 backdrop-blur-xl lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <p className="text-xs uppercase tracking-[0.35em] text-emerald-300">Command Center</p>
-            <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-50 lg:text-3xl">
+      <div className="mx-auto flex h-full max-w-7xl flex-col px-2 sm:px-4 pb-3 sm:pb-6 pt-3 sm:pt-6 lg:px-10">
+        <header className="mb-3 sm:mb-4 flex flex-col gap-2 sm:gap-4 rounded-2xl sm:rounded-3xl border border-slate-800/60 bg-slate-950/80 p-3 sm:p-6 backdrop-blur-xl lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-w-0">
+            <p className="text-[10px] sm:text-xs uppercase tracking-[0.25em] sm:tracking-[0.35em] text-emerald-300">Command Center</p>
+            <h1 className="mt-0.5 sm:mt-1 text-lg sm:text-2xl font-semibold tracking-tight text-slate-50 lg:text-3xl truncate">
               {personaLabel} operations
             </h1>
-            <p className="mt-2 text-sm text-slate-400">
+            <p className="mt-1 sm:mt-2 text-xs sm:text-sm text-slate-400 hidden sm:block">
               Signed in as {session.user.email}. Coordinate incidents, automation, and approvals in real time.
             </p>
           </div>
           <button
             type="button"
             onClick={() => signOut({ callbackUrl: "/" })}
-            className="self-start rounded-full bg-emerald-500 px-5 py-2 text-sm font-semibold text-emerald-950 shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-400 lg:self-auto"
+            className="self-start rounded-full bg-emerald-500 px-4 sm:px-5 py-1.5 sm:py-2 text-xs sm:text-sm font-semibold text-emerald-950 shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-400 lg:self-auto flex-shrink-0"
           >
             Sign out
           </button>

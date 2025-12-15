@@ -180,15 +180,15 @@ function ConversationListComponent() {
   };
 
   return (
-    <div className="flex h-full flex-col gap-4">
-      <div className="sticky top-0 z-10 flex items-center justify-between rounded-xl border border-slate-800/60 bg-slate-900/70 px-3 py-2 backdrop-blur">
-        <div>
-          <h2 className="text-base font-semibold text-slate-100">Active Conversations</h2>
-          <p className="text-xs text-slate-400">Monitor AI-guided flows across your portfolio.</p>
+    <div className="flex h-full min-h-0 flex-col gap-2 sm:gap-4 p-2 sm:p-0">
+      <div className="flex-shrink-0 flex items-center justify-between rounded-xl border border-slate-800/60 bg-slate-900/70 px-2 sm:px-3 py-1.5 sm:py-2 backdrop-blur">
+        <div className="min-w-0 flex-1">
+          <h2 className="text-sm sm:text-base font-semibold text-slate-100 truncate">Active Conversations</h2>
+          <p className="text-[10px] sm:text-xs text-slate-400 hidden sm:block">Monitor AI-guided flows across your portfolio.</p>
         </div>
-        <div className="flex items-center gap-3">
-          <Badge className="bg-slate-800/80 text-slate-200">
-            <MessageCircle className="mr-1 h-3.5 w-3.5" />
+        <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
+          <Badge className="bg-slate-800/80 text-slate-200 text-[10px] sm:text-xs px-1.5 sm:px-2">
+            <MessageCircle className="mr-0.5 sm:mr-1 h-3 w-3 sm:h-3.5 sm:w-3.5" />
             {items.length}
           </Badge>
 
@@ -196,15 +196,16 @@ function ConversationListComponent() {
             type="button"
             onClick={handleNewChat}
             disabled={creating}
-            className={`inline-flex items-center gap-2 rounded-md px-3 py-1 text-sm font-medium transition disabled:opacity-60 disabled:pointer-events-none bg-emerald-600/90 hover:bg-emerald-600/100 text-white`}
+            className={`inline-flex items-center gap-1 sm:gap-2 rounded-md px-2 sm:px-3 py-1 text-xs sm:text-sm font-medium transition disabled:opacity-60 disabled:pointer-events-none bg-emerald-600/90 hover:bg-emerald-600/100 text-white`}
           >
-            <Plus className="h-4 w-4" />
-            {creating ? "Creating…" : "New Chat"}
+            <Plus className="h-3 w-3 sm:h-4 sm:w-4" />
+            <span className="hidden sm:inline">{creating ? "Creating…" : "New Chat"}</span>
+            <span className="sm:hidden">+</span>
           </button>
         </div>
       </div>
 
-      <ScrollArea className="flex-1 rounded-2xl border border-slate-800/60 bg-slate-900/40 p-2">
+      <ScrollArea className="flex-1 min-h-0 rounded-xl sm:rounded-2xl border border-slate-800/60 bg-slate-900/40 p-1.5 sm:p-2">
         <div className="space-y-2">
           {items.map(({ channel, id, title, lastMessage, stage, severity, urgency, estimatedCost, hasSafety }) => {
             const isActive = activeChannel?.cid === channel.cid;
@@ -216,38 +217,38 @@ function ConversationListComponent() {
                 type="button"
                 key={id}
                 onClick={() => selectChannel(channel)}
-                className={`w-full rounded-xl border px-3 py-3 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60 ${
+                className={`w-full rounded-lg sm:rounded-xl border px-2 sm:px-3 py-2 sm:py-3 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60 ${
                   isActive
                     ? `border-emerald-500/40 bg-emerald-500/10`
                     : `${config.borderColor} ${config.bgColor} hover:bg-slate-800/60`
                 }`}
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 space-y-1.5">
-                    <div className="flex items-center gap-2">
-                      <p className="font-medium text-slate-100">{title}</p>
+                <div className="flex items-start justify-between gap-2 sm:gap-3">
+                  <div className="flex-1 space-y-1 sm:space-y-1.5 min-w-0">
+                    <div className="flex items-center gap-1.5 sm:gap-2">
+                      <p className="font-medium text-slate-100 text-xs sm:text-sm truncate">{title}</p>
                       {hasSafety && (
-                        <Shield className="h-3.5 w-3.5 text-red-400 animate-pulse" title="Safety alerts present" />
+                        <Shield className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-red-400 animate-pulse flex-shrink-0" title="Safety alerts present" />
                       )}
                     </div>
                     {lastMessage ? (
-                      <p className="text-xs text-slate-400">{lastMessage}</p>
+                      <p className="text-[10px] sm:text-xs text-slate-400 truncate">{lastMessage}</p>
                     ) : (
-                      <p className="text-xs text-slate-500">No messages yet</p>
+                      <p className="text-[10px] sm:text-xs text-slate-500">No messages yet</p>
                     )}
 
                     {/* Diagnostic Info Row */}
                     {(urgency || estimatedCost) && (
-                      <div className="flex items-center gap-3 text-[10px] text-slate-400">
+                      <div className="flex items-center gap-2 sm:gap-3 text-[9px] sm:text-[10px] text-slate-400">
                         {urgency && (
-                          <span className="flex items-center gap-1">
-                            <Clock className="h-3 w-3" />
+                          <span className="flex items-center gap-0.5 sm:gap-1">
+                            <Clock className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
                             {urgency}
                           </span>
                         )}
                         {estimatedCost && (
-                          <span className="flex items-center gap-1">
-                            <DollarSign className="h-3 w-3" />
+                          <span className="flex items-center gap-0.5 sm:gap-1">
+                            <DollarSign className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
                             {estimatedCost}
                           </span>
                         )}
@@ -255,11 +256,11 @@ function ConversationListComponent() {
                     )}
                   </div>
 
-                  <div className="flex min-w-[110px] flex-col items-end gap-1.5">
-                    <Badge variant="secondary" className={`capitalize ${stageTone(stage)}`}>
+                  <div className="flex min-w-[80px] sm:min-w-[110px] flex-col items-end gap-1 sm:gap-1.5 flex-shrink-0">
+                    <Badge variant="secondary" className={`capitalize text-[9px] sm:text-[10px] px-1.5 sm:px-2 py-0.5 ${stageTone(stage)}`}>
                       {stage ?? "general"}
                     </Badge>
-                    <div className={`flex items-center gap-1 text-[11px] uppercase tracking-wide ${config.color}`}>
+                    <div className={`flex items-center gap-0.5 sm:gap-1 text-[10px] sm:text-[11px] uppercase tracking-wide ${config.color}`}>
                       {config.icon}
                       <span>{severity}</span>
                     </div>
