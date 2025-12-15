@@ -11,6 +11,10 @@ import { TextExpander } from "./TextExpander";
 import { IncidentCardEnhanced } from "./IncidentCardEnhanced";
 import { DiscoveryQuestions } from "./DiscoveryQuestions";
 import { ActionCard } from "./ActionCard";
+import { DiagnosticDataCard } from "./DiagnosticDataCard";
+import { IncidentTimeline } from "./IncidentTimeline";
+import { QuickActionsPanel } from "./QuickActionsPanel";
+import { parseDiagnosticData, determineSeverity } from "./parseDiagnosticData";
 
 type StreamMessage = MessageResponse;
 
@@ -244,6 +248,16 @@ export const CustomMessageUI = memo(function CustomMessageUI({
     return tryParseStructuredReasoning(messageText);
   }, [messageText]);
 
+  // Parse diagnostic data from message text
+  const diagnosticData = useMemo(() => {
+    return parseDiagnosticData(messageText);
+  }, [messageText]);
+
+  // Determine severity level for theming
+  const severityLevel = useMemo(() => {
+    return determineSeverity(diagnosticData, metadata);
+  }, [diagnosticData, metadata]);
+
   useEffect(() => {
     if (isPolicyViolation) {
       setPolicyHighlight(true);
@@ -279,10 +293,18 @@ export const CustomMessageUI = memo(function CustomMessageUI({
   const containerAlignment = isOwnMessage ? "items-end" : "items-start";
   const bubbleAlignment = isOwnMessage ? "self-end" : "self-start";
 
+  // Severity-based theming for AI messages
+  const severityThemes = {
+    low: "bg-gradient-to-br from-slate-900/80 via-slate-900 to-emerald-900/70 text-emerald-100 border border-emerald-500/30",
+    medium: "bg-gradient-to-br from-slate-900/80 via-slate-900 to-amber-900/70 text-amber-100 border border-amber-500/30",
+    high: "bg-gradient-to-br from-slate-900/80 via-slate-900 to-orange-900/70 text-orange-100 border border-orange-500/30",
+    urgent: "bg-gradient-to-br from-slate-900/80 via-slate-900 to-red-900/70 text-red-100 border border-red-500/30",
+  };
+
   const bubbleClasses = [
     "max-w-[85%] rounded-3xl px-4 py-3 text-sm leading-relaxed shadow-lg transition",
     isAIMessage
-      ? "bg-gradient-to-br from-slate-900/80 via-slate-900 to-emerald-900/70 text-emerald-100 border border-emerald-500/30"
+      ? severityThemes[severityLevel]
       : isOwnMessage
         ? "bg-emerald-500/20 text-emerald-100 border border-emerald-400/30"
         : "bg-slate-800/70 text-slate-100 border border-slate-700/50",
@@ -425,6 +447,41 @@ export const CustomMessageUI = memo(function CustomMessageUI({
           </motion.div>
         )
       ) : null}
+
+      {/* Diagnostic Data Card - Show if diagnostic data is detected */}
+      {isAIMessage && diagnosticData.hasDiagnostic && (
+        <div className="w-full max-w-[90%] space-y-3">
+          <DiagnosticDataCard
+            diagnosticResult={diagnosticData.diagnosticResult}
+            photoAnalysis={diagnosticData.photoAnalysis}
+            nextSteps={diagnosticData.nextSteps}
+            safetyConsiderations={diagnosticData.safetyConsiderations}
+            questions={diagnosticData.questions}
+            severity={severityLevel}
+          />
+
+          {/* Quick Actions for diagnostic messages */}
+          <QuickActionsPanel
+            actions={diagnosticData.nextSteps}
+            stage={stage}
+            onActionClick={handleActionClick}
+          />
+        </div>
+      )}
+
+      {/* Incident Timeline - Show for incident-related messages */}
+      {isAIMessage && metadata.incident_id && stage && (
+        <div className="w-full max-w-[90%]">
+          <IncidentTimeline
+            currentStage={stage}
+            incidentId={metadata.incident_id as string}
+            onStageClick={(stageId) => {
+              console.log('[IncidentTimeline] Stage clicked:', stageId);
+              // Could trigger navigation or filter messages by stage
+            }}
+          />
+        </div>
+      )}
 
       {contextType && (
         <span className="inline-flex w-fit items-center gap-1 rounded-full bg-slate-900/80 px-2 py-0.5 text-xs text-slate-300">
