@@ -133,13 +133,16 @@ export default function PersonaDashboardPage() {
   ].join(" ");
 
   const insightsPanelClasses = [
-    "rounded-2xl border border-slate-800/60 bg-slate-900/50 backdrop-blur-md p-4",
+    "rounded-2xl border border-slate-800/60 bg-slate-900/50 backdrop-blur-md",
     activeTab === "insights" ? "flex" : "hidden",
     "xl:flex",
     "flex-col",
     "h-full",
-    "gap-4",
+    "min-h-0", // KEY: Allow flex children to shrink properly
+    "overflow-hidden", // Prevent parent from expanding
     "col-span-12 xl:col-span-3",
+    // Mobile: remove padding, desktop: add padding
+    "p-0 xl:p-4 xl:gap-4",
   ].join(" ");
 
   return (
@@ -205,7 +208,10 @@ export default function PersonaDashboardPage() {
 
           <aside className={insightsPanelClasses}>
             <AIContextPanel />
-            <DebugPanel />
+            {/* Hide DebugPanel on mobile to save space */}
+            <div className="hidden xl:block">
+              <DebugPanel />
+            </div>
           </aside>
         </main>
 

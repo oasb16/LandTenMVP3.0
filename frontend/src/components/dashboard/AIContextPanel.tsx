@@ -161,7 +161,7 @@ function AIContextPanelComponent() {
   const severityConfig = severityLevel ? severityColors[severityLevel] : "text-slate-400 border-slate-700 bg-slate-900/70";
 
   return (
-    <div className="h-full w-full overflow-y-auto px-3 py-4 pb-safe space-y-3">
+    <div className="flex-1 min-h-0 w-full overflow-y-auto overflow-x-hidden px-2 sm:px-3 py-3 sm:py-4 space-y-2 sm:space-y-3" style={{ WebkitOverflowScrolling: 'touch' }}>
       {/* Incident Timeline - Horizontal on mobile */}
       {incidentId && flowState?.stage && (
         <div className="w-full">
@@ -176,32 +176,32 @@ function AIContextPanelComponent() {
       {/* Diagnostic Summary Card - Prominent on mobile */}
       {conversationInsights.hasDiagnostic && (
         <Card className={`border ${severityConfig} backdrop-blur-sm`}>
-          <CardHeader className="p-4">
-            <CardTitle className="flex items-center gap-2 text-base font-semibold">
-              <AlertTriangle className={`h-5 w-5 ${severityLevel ? severityColors[severityLevel].split(' ')[0] : ''}`} />
+          <CardHeader className="p-3 sm:p-4">
+            <CardTitle className="flex items-center gap-2 text-sm sm:text-base font-semibold">
+              <AlertTriangle className={`h-4 w-4 sm:h-5 sm:w-5 ${severityLevel ? severityColors[severityLevel].split(' ')[0] : ''}`} />
               Incident Summary
             </CardTitle>
-            <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+            <div className="mt-2 sm:mt-3 grid grid-cols-2 gap-2 sm:gap-3 text-xs sm:text-sm">
               {conversationInsights.severity && (
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs text-slate-400">Severity</span>
-                  <span className={`font-semibold capitalize ${severityLevel ? severityColors[severityLevel].split(' ')[0] : ''}`}>
+                <div className="flex flex-col gap-0.5 sm:gap-1">
+                  <span className="text-[10px] sm:text-xs text-slate-400">Severity</span>
+                  <span className={`text-xs sm:text-sm font-semibold capitalize ${severityLevel ? severityColors[severityLevel].split(' ')[0] : ''}`}>
                     {conversationInsights.severity}
                   </span>
                 </div>
               )}
               {conversationInsights.urgency && (
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs text-slate-400">Urgency</span>
-                  <span className="font-semibold capitalize text-slate-200">
+                <div className="flex flex-col gap-0.5 sm:gap-1">
+                  <span className="text-[10px] sm:text-xs text-slate-400">Urgency</span>
+                  <span className="text-xs sm:text-sm font-semibold capitalize text-slate-200">
                     {conversationInsights.urgency}
                   </span>
                 </div>
               )}
               {conversationInsights.estimatedCost && (
-                <div className="flex flex-col gap-1 col-span-2">
-                  <span className="text-xs text-slate-400">Estimated Cost</span>
-                  <span className="font-semibold text-emerald-300">
+                <div className="flex flex-col gap-0.5 sm:gap-1 col-span-2">
+                  <span className="text-[10px] sm:text-xs text-slate-400">Estimated Cost</span>
+                  <span className="text-xs sm:text-sm font-semibold text-emerald-300">
                     ${conversationInsights.estimatedCost}
                   </span>
                 </div>
@@ -214,12 +214,12 @@ function AIContextPanelComponent() {
       {/* Safety Alerts - Prominent if present */}
       {conversationInsights.safetyIssues > 0 && (
         <Card className="border border-red-500/40 bg-red-900/30 backdrop-blur-sm">
-          <CardHeader className="p-4">
-            <CardTitle className="flex items-center gap-2 text-base font-semibold text-red-200">
-              <Shield className="h-5 w-5 animate-pulse" />
+          <CardHeader className="p-2.5 sm:p-4">
+            <CardTitle className="flex items-center gap-2 text-sm sm:text-base font-semibold text-red-200">
+              <Shield className="h-4 w-4 sm:h-5 sm:w-5 animate-pulse" />
               Safety Alert
             </CardTitle>
-            <CardDescription className="text-red-100 mt-2 text-sm">
+            <CardDescription className="text-red-100 mt-1 sm:mt-2 text-xs sm:text-sm">
               {conversationInsights.safetyIssues} safety consideration{conversationInsights.safetyIssues > 1 ? 's' : ''} identified
             </CardDescription>
           </CardHeader>
@@ -232,20 +232,20 @@ function AIContextPanelComponent() {
           onClick={() => toggleSection("snapshot")}
           className="w-full text-left"
         >
-          <CardHeader className="p-4">
-            <CardTitle className="flex items-center justify-between text-sm font-semibold text-emerald-200">
-              <div className="flex items-center gap-2">
-                <Sparkles className="h-4 w-4" />
+          <CardHeader className="p-2.5 sm:p-4">
+            <CardTitle className="flex items-center justify-between text-xs sm:text-sm font-semibold text-emerald-200">
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                <Sparkles className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                 Flow Snapshot
               </div>
               <ChevronDown
-                className={`h-4 w-4 transition-transform ${expandedSections.has("snapshot") ? "rotate-180" : ""}`}
+                className={`h-3.5 w-3.5 sm:h-4 sm:w-4 transition-transform ${expandedSections.has("snapshot") ? "rotate-180" : ""}`}
               />
             </CardTitle>
           </CardHeader>
         </button>
         {expandedSections.has("snapshot") && (
-          <CardDescription className="px-4 pb-4 text-slate-300 text-sm">
+          <CardDescription className="px-2.5 sm:px-4 pb-2.5 sm:pb-4 text-slate-300 text-xs sm:text-sm leading-relaxed">
             {copy.summary}
           </CardDescription>
         )}
@@ -253,16 +253,16 @@ function AIContextPanelComponent() {
 
       {/* Incident Context - Compact */}
       <Card className="border border-slate-800/70 bg-slate-900/60 backdrop-blur-sm">
-        <CardHeader className="p-4">
-          <CardTitle className="flex items-center justify-between text-sm font-semibold text-slate-100">
+        <CardHeader className="p-2.5 sm:p-4">
+          <CardTitle className="flex items-center justify-between text-xs sm:text-sm font-semibold text-slate-100">
             <span>Incident</span>
             {incidentId ? (
-              <span className="text-xs text-emerald-300 font-mono">{String(incidentId).slice(-8)}</span>
+              <span className="text-[10px] sm:text-xs text-emerald-300 font-mono">{String(incidentId).slice(-8)}</span>
             ) : (
-              <span className="text-xs text-slate-500">None</span>
+              <span className="text-[10px] sm:text-xs text-slate-500">None</span>
             )}
           </CardTitle>
-          <CardDescription className="text-slate-400 text-xs mt-1">
+          <CardDescription className="text-slate-400 text-[10px] sm:text-xs mt-0.5 sm:mt-1">
             Focus: <strong className="text-slate-200">{persona?.toUpperCase()}</strong>
           </CardDescription>
         </CardHeader>
@@ -270,9 +270,9 @@ function AIContextPanelComponent() {
 
       {/* Agent Status - Compact */}
       <Card className="border border-slate-800/70 bg-slate-900/60 backdrop-blur-sm">
-        <CardHeader className="p-4">
-          <CardTitle className="flex items-center gap-2 text-sm font-semibold text-slate-100">
-            <Activity className={`h-4 w-4 ${reasoningState.active ? "text-amber-300 animate-pulse" : "text-slate-400"}`} />
+        <CardHeader className="p-2.5 sm:p-4">
+          <CardTitle className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm font-semibold text-slate-100">
+            <Activity className={`h-3.5 w-3.5 sm:h-4 sm:w-4 ${reasoningState.active ? "text-amber-300 animate-pulse" : "text-slate-400"}`} />
             {reasoningState.active ? "Agent Analyzing..." : "Agent Ready"}
           </CardTitle>
         </CardHeader>
@@ -280,13 +280,13 @@ function AIContextPanelComponent() {
 
       {/* Flow Stage - Compact */}
       <Card className="border border-slate-800/70 bg-slate-900/60 backdrop-blur-sm">
-        <CardHeader className="p-4">
-          <CardTitle className="flex items-center justify-between text-sm font-semibold text-slate-100">
-            <div className="flex items-center gap-2">
-              <Workflow className="h-4 w-4 text-indigo-300" />
+        <CardHeader className="p-2.5 sm:p-4">
+          <CardTitle className="flex items-center justify-between text-xs sm:text-sm font-semibold text-slate-100">
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <Workflow className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-indigo-300" />
               Stage
             </div>
-            <span className="text-xs text-indigo-300 capitalize">{copy.label}</span>
+            <span className="text-[10px] sm:text-xs text-indigo-300 capitalize">{copy.label}</span>
           </CardTitle>
         </CardHeader>
       </Card>
@@ -298,23 +298,23 @@ function AIContextPanelComponent() {
             onClick={() => toggleSection("nextsteps")}
             className="w-full text-left"
           >
-            <CardHeader className="p-4">
-              <CardTitle className="flex items-center justify-between text-sm font-semibold text-slate-100">
-                <div className="flex items-center gap-2">
-                  <FileText className="h-4 w-4 text-slate-300" />
+            <CardHeader className="p-2.5 sm:p-4">
+              <CardTitle className="flex items-center justify-between text-xs sm:text-sm font-semibold text-slate-100">
+                <div className="flex items-center gap-1.5 sm:gap-2">
+                  <FileText className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-slate-300" />
                   Next Steps
                 </div>
                 <ChevronDown
-                  className={`h-4 w-4 transition-transform ${expandedSections.has("nextsteps") ? "rotate-180" : ""}`}
+                  className={`h-3.5 w-3.5 sm:h-4 sm:w-4 transition-transform ${expandedSections.has("nextsteps") ? "rotate-180" : ""}`}
                 />
               </CardTitle>
             </CardHeader>
           </button>
           {expandedSections.has("nextsteps") && (
-            <CardDescription className="px-4 pb-4 text-slate-400">
-              <ul className="space-y-2 text-xs">
+            <CardDescription className="px-2.5 sm:px-4 pb-2.5 sm:pb-4 text-slate-400">
+              <ul className="space-y-1.5 sm:space-y-2 text-[10px] sm:text-xs">
                 {conversationInsights.nextSteps.map((step, idx) => (
-                  <li key={idx} className="flex items-start gap-2">
+                  <li key={idx} className="flex items-start gap-1.5 sm:gap-2">
                     <span className="text-emerald-400 mt-0.5">•</span>
                     <span className="flex-1 leading-relaxed">{step}</span>
                   </li>
