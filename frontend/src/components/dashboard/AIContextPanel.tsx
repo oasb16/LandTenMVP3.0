@@ -3,7 +3,7 @@ import { Activity, Clock4, Sparkles, Workflow, AlertTriangle, FileText, Shield, 
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useStreamChat } from "@/hooks/chat/StreamChatContext";
 import { IncidentTimeline } from "../ai/IncidentTimeline";
-import { parseDiagnosticData, determineSeverity } from "../ai/parseDiagnosticData";
+import { parseDiagnosticData } from "../ai/parseDiagnosticData";
 
 const STAGE_COPY: Record<string, { label: string; summary: string; next: string }> = {
   discovery: {
@@ -264,7 +264,17 @@ function AIContextPanelComponent() {
     };
   }, [activeChannel?.state?.messages]);
 
-  const severityLevel = determineSeverity(conversationInsights.severity, conversationInsights.urgency);
+  // Determine severity level from parsed data
+  const severityLevel = (() => {
+    const severity = conversationInsights.severity?.toLowerCase();
+    const urgency = conversationInsights.urgency?.toLowerCase();
+
+    if (severity === 'emergency' || urgency === 'immediate' || urgency === 'emergency') return 'urgent';
+    if (severity === 'urgent' || severity === 'high' || urgency === 'urgent' || urgency === 'critical') return 'high';
+    if (severity === 'low' || urgency === 'routine' || urgency === 'low') return 'low';
+    if (conversationInsights.safetyIssues > 0) return 'high';
+    return 'medium';
+  })();
 
   const riskScore = calculateRiskScore(conversationInsights.severity, conversationInsights.urgency);
 
