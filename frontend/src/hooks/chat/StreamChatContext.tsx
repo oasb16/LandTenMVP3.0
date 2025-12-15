@@ -719,19 +719,23 @@ export function StreamChatProvider({ children }: { children: ReactNode }) {
         console.log("[StreamChat] Attachments:", messageData?.attachments?.length || 0);
 
         const messagePayload = {
-          text,
-          type: "regular",
-          ...messageData,  // 🔥 Include attachments and other message data
+          text: text || '',  // Allow empty text with attachments
+          ...(messageData?.attachments && { attachments: messageData.attachments }),
+          ...(messageData?.mentioned_users && { mentioned_users: messageData.mentioned_users }),
+          ...(messageData?.metadata && { metadata: messageData.metadata }),
         };
 
         const result = await activeChannel.sendMessage(messagePayload);
         console.log("[StreamChat] Message sent successfully, result:", result?.message?.id);
+        console.log("[StreamChat] Message attachments in result:", result?.message?.attachments?.length || 0);
 
         if (result) {
           setTimeout(() => {
             updateMessagesFromChannel(activeChannel, true);
           }, 100);
         }
+
+        return result;  // 🔥 CRITICAL: Return the result!
       } catch (err) {
         console.error("[StreamChat] Failed to send message", err);
         throw err;
