@@ -254,10 +254,11 @@ function calculateSystemMetrics(messages: any[], reasoningState: any) {
 }
 
 function AIContextPanelComponent() {
-  const { activeChannel, flowState, reasoningState } = useStreamChat();
+  const { activeChannel, flowState, reasoningState, sendMessage } = useStreamChat();
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
     new Set(["recommendations"])
   );
+  const [isExecutingAction, setIsExecutingAction] = useState<string | null>(null);
 
   const toggleSection = (section: string) => {
     setExpandedSections((prev) => {
@@ -269,6 +270,148 @@ function AIContextPanelComponent() {
       }
       return next;
     });
+  };
+
+  // REAL ACTION HANDLERS
+  const handlePhotoUpload = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.multiple = true;
+    input.onchange = async (e) => {
+      const files = (e.target as HTMLInputElement).files;
+      if (files && files.length > 0) {
+        console.log('📸 Uploading photos:', files.length);
+        // TODO: Integrate with actual file upload handler
+        Array.from(files).forEach(file => {
+          console.log('File:', file.name, file.size);
+        });
+      }
+    };
+    input.click();
+  };
+
+  const handleAnswerQuestion = (question: string) => {
+    // Scroll to the question in chat and focus input
+    const chatInput = document.querySelector('textarea[placeholder*="Message"]') as HTMLTextAreaElement;
+    if (chatInput) {
+      chatInput.focus();
+      chatInput.value = `Regarding: "${question}"\n\n`;
+      chatInput.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  };
+
+  const handleSafetyReview = (count: number) => {
+    // Scroll to safety section in chat
+    const safetyElements = document.querySelectorAll('[data-safety-alert]');
+    if (safetyElements.length > 0) {
+      safetyElements[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } else {
+      // Send message to ask about safety
+      if (sendMessage) {
+        sendMessage({
+          text: `Can you provide more details about the ${count} safety concern${count > 1 ? 's' : ''} you identified?`,
+        });
+      }
+    }
+  };
+
+  const handleConfirmDetails = () => {
+    if (sendMessage) {
+      sendMessage({
+        text: "I can confirm the incident details and provide access information. What specific details do you need?",
+      });
+    }
+  };
+
+  const executeAction = async (action: any) => {
+    setIsExecutingAction(action.id);
+
+    try {
+      switch (action.type) {
+        case 'upload':
+          handlePhotoUpload();
+          break;
+        case 'question':
+          handleAnswerQuestion(action.title);
+          break;
+        case 'safety':
+          handleSafetyReview(parseInt(action.title.match(/\d+/)?.[0] || '1'));
+          break;
+        case 'confirm':
+          handleConfirmDetails();
+          break;
+        default:
+          console.log('Executing action:', action.title);
+      }
+    } finally {
+      setTimeout(() => setIsExecutingAction(null), 500);
+    }
+  };
+
+  // REAL RECOMMENDATION HANDLERS
+  const handleCostOptimization = () => {
+    if (sendMessage) {
+      sendMessage({
+        text: "I'd like to get multiple quotes to optimize costs. Can you help me request quotes from 3 contractors?",
+      });
+    }
+  };
+
+  const handleExpediteResolution = () => {
+    if (sendMessage) {
+      sendMessage({
+        text: "This is high priority. Can you help me find emergency service providers who can respond within 24 hours?",
+      });
+    }
+  };
+
+  const handleMorePhotos = () => {
+    handlePhotoUpload();
+  };
+
+  const handleViewPatterns = () => {
+    if (sendMessage) {
+      sendMessage({
+        text: "Can you show me similar incidents that have been resolved? I'd like to understand common patterns and resolution times.",
+      });
+    }
+  };
+
+  const handleEnableAutoFlow = () => {
+    if (sendMessage) {
+      sendMessage({
+        text: "Please auto-create a work order and request quotes from 3 contractors based on the diagnostic results.",
+      });
+    }
+  };
+
+  const executeRecommendation = async (rec: any) => {
+    setIsExecutingAction(rec.id);
+
+    try {
+      switch (rec.type) {
+        case 'cost':
+          handleCostOptimization();
+          break;
+        case 'urgency':
+          handleExpediteResolution();
+          break;
+        case 'documentation':
+          handleMorePhotos();
+          break;
+        case 'insight':
+          handleViewPatterns();
+          break;
+        case 'automation':
+          handleEnableAutoFlow();
+          break;
+        default:
+          console.log('Executing recommendation:', rec.title);
+      }
+    } finally {
+      setTimeout(() => setIsExecutingAction(null), 500);
+    }
   };
 
   const incidentId = useMemo(() => {
@@ -528,10 +671,15 @@ function AIContextPanelComponent() {
               {actionItems.map((action) => (
                 <div
                   key={action.id}
-                  className="group flex items-start gap-2 p-2 rounded-lg bg-slate-800/40 border border-slate-700/40 hover:bg-slate-800/70 hover:border-amber-500/30 transition cursor-pointer"
+                  onClick={() => executeAction(action)}
+                  className={`group flex items-start gap-2 p-2 rounded-lg bg-slate-800/40 border border-slate-700/40 hover:bg-slate-800/70 hover:border-amber-500/30 transition cursor-pointer ${isExecutingAction === action.id ? 'ring-2 ring-amber-500/50 bg-amber-900/20' : ''}`}
                 >
                   <div className="flex-shrink-0 mt-0.5">
-                    {priorityConfig[action.priority]?.icon}
+                    {isExecutingAction === action.id ? (
+                      <Loader2 className="h-3 w-3 sm:h-3.5 sm:w-3.5 animate-spin text-amber-400" />
+                    ) : (
+                      priorityConfig[action.priority]?.icon
+                    )}
                   </div>
                   <div className="flex-1 min-w-0 space-y-1">
                     <p className="text-[10px] sm:text-xs text-slate-200 font-medium leading-relaxed">{action.title}</p>
@@ -544,14 +692,23 @@ function AIContextPanelComponent() {
                         <Calendar className="h-2.5 w-2.5" />
                         {action.eta}
                       </span>
+                      {isExecutingAction === action.id && (
+                        <span className="text-amber-400 font-semibold">Executing...</span>
+                      )}
                     </div>
                   </div>
                   <div className="flex-shrink-0 flex items-center gap-1.5">
                     <div className={`px-1.5 py-0.5 rounded text-[9px] sm:text-[10px] font-semibold border ${statusConfig[action.status]?.color}`}>
                       {statusConfig[action.status]?.label}
                     </div>
-                    {action.interactive && (
-                      <button className="opacity-0 group-hover:opacity-100 transition p-1 rounded bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30">
+                    {action.interactive && !isExecutingAction && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          executeAction(action);
+                        }}
+                        className="opacity-0 group-hover:opacity-100 transition p-1 rounded bg-amber-500/20 hover:bg-amber-500/40 border border-amber-500/30 hover:scale-110 active:scale-95"
+                      >
                         <ArrowRight className="h-3 w-3 text-amber-400" />
                       </button>
                     )}
@@ -588,25 +745,51 @@ function AIContextPanelComponent() {
               {smartRecommendations.map((rec) => {
                 const Icon = rec.icon;
                 const impactColors = {
-                  critical: 'border-red-500/40 bg-red-900/20',
-                  high: 'border-amber-500/40 bg-amber-900/20',
-                  medium: 'border-indigo-500/40 bg-indigo-900/20',
+                  critical: 'border-red-500/40 bg-red-900/20 hover:bg-red-900/30',
+                  high: 'border-amber-500/40 bg-amber-900/20 hover:bg-amber-900/30',
+                  medium: 'border-indigo-500/40 bg-indigo-900/20 hover:bg-indigo-900/30',
                 };
+                const isExecuting = isExecutingAction === rec.id;
                 return (
                   <div
                     key={rec.id}
-                    className={`group p-3 rounded-lg border ${impactColors[rec.impact as keyof typeof impactColors]} hover:bg-slate-800/50 transition cursor-pointer`}
+                    onClick={() => executeRecommendation(rec)}
+                    className={`group p-3 rounded-lg border ${impactColors[rec.impact as keyof typeof impactColors]} transition cursor-pointer ${isExecuting ? 'ring-2 ring-indigo-500/50' : ''}`}
                   >
                     <div className="flex items-start gap-2">
-                      <div className="flex-shrink-0 p-1.5 rounded-lg bg-indigo-500/20 border border-indigo-500/30">
-                        <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-indigo-300" />
+                      <div className={`flex-shrink-0 p-1.5 rounded-lg border transition ${isExecuting ? 'bg-indigo-500/30 border-indigo-400/50' : 'bg-indigo-500/20 border-indigo-500/30'}`}>
+                        {isExecuting ? (
+                          <Loader2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-indigo-300 animate-spin" />
+                        ) : (
+                          <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-indigo-300" />
+                        )}
                       </div>
                       <div className="flex-1 min-w-0 space-y-1">
                         <h4 className="text-xs sm:text-sm font-bold text-slate-100">{rec.title}</h4>
                         <p className="text-[10px] sm:text-xs text-slate-300 leading-relaxed">{rec.description}</p>
-                        <button className="inline-flex items-center gap-1 text-[10px] sm:text-xs text-indigo-300 hover:text-indigo-200 font-medium transition">
-                          <Play className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
-                          {rec.action}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            executeRecommendation(rec);
+                          }}
+                          disabled={isExecuting}
+                          className={`inline-flex items-center gap-1 text-[10px] sm:text-xs font-medium transition ${
+                            isExecuting
+                              ? 'text-indigo-400 cursor-wait'
+                              : 'text-indigo-300 hover:text-indigo-200 active:scale-95'
+                          }`}
+                        >
+                          {isExecuting ? (
+                            <>
+                              <Loader2 className="h-2.5 w-2.5 sm:h-3 sm:w-3 animate-spin" />
+                              Executing...
+                            </>
+                          ) : (
+                            <>
+                              <Play className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
+                              {rec.action}
+                            </>
+                          )}
                         </button>
                       </div>
                     </div>
