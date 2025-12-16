@@ -10,6 +10,7 @@ export interface ParsedDiagnosticData {
     urgency?: string;
     estimatedCost?: string;
     recommendations?: string[];
+    description?: string;
   };
   photoAnalysis?: {
     findings?: string[];
@@ -19,6 +20,7 @@ export interface ParsedDiagnosticData {
   nextSteps?: string[];
   safetyConsiderations?: string[];
   questions?: string[];
+  choices?: string[]; // NEW: Parse "Would you like me to" choices
 }
 
 export function parseDiagnosticData(text: string): ParsedDiagnosticData {
@@ -41,6 +43,8 @@ export function parseDiagnosticData(text: string): ParsedDiagnosticData {
     'recommendations:',
     'next steps',
     'safety considerations',
+    'would you like me to',
+    'a couple quick questions',
   ];
 
   const lowerText = text.toLowerCase();
@@ -56,17 +60,38 @@ export function parseDiagnosticData(text: string): ParsedDiagnosticData {
 
   // Parse Diagnostic Results section
   const diagnosticMatch = text.match(
-    /(?:Diagnostic results|🔧 Diagnostic results)[:\s]*\(from diagnostic tool\)?\s*([\s\S]*?)(?=\n\n|Photo analysis|Next steps|$)/i
+    /(?:Diagnostic results|🔧 Diagnostic results|🔎 Diagnostic results)[:\s]*\(from diagnostic tool\)?\s*([\s\S]*?)(?=\n\n|Photo analysis|Next steps|What this means|$)/i
   );
 
   if (diagnosticMatch) {
     const diagnosticText = diagnosticMatch[1];
+
+    // Extract diagnosis
+    const diagnosisMatch = diagnosticText.match(/(?:^|\n)\s*-?\s*Diagnosis:\s*(.+?)(?:\n|$)/i);
+    const diagnosis = diagnosisMatch ? diagnosisMatch[1].trim() : undefined;
+
+    // Extract severity
+    const severityMatch = diagnosticText.match(/(?:^|\n)\s*-?\s*Severity:\s*(.+?)(?:\n|$)/i);
+    const severity = severityMatch ? severityMatch[1].trim() : undefined;
+
+    // Extract urgency
+    const urgencyMatch = diagnosticText.match(/(?:^|\n)\s*-?\s*Urgency:\s*(.+?)(?:\n|$)/i);
+    const urgency = urgencyMatch ? urgencyMatch[1].trim() : undefined;
+
+    // Extract estimated cost
+    const costMatch = diagnosticText.match(/(?:^|\n)\s*-?\s*Estimated cost:\s*(.+?)(?:\n|$)/i);
+    const estimatedCost = costMatch ? costMatch[1].trim() : undefined;
+
+    // Extract recommendations
+    const recsMatch = diagnosticText.match(/(?:^|\n)\s*-?\s*Recommendations?:\s*(.+?)(?:\n|$)/i);
+    const recommendations = recsMatch ? [recsMatch[1].trim()] : undefined;
+
     result.diagnosticResult = {
-      diagnosis: extractField(diagnosticText, 'Diagnosis'),
-      severity: extractField(diagnosticText, 'Severity'),
-      urgency: extractField(diagnosticText, 'Urgency'),
-      estimatedCost: extractField(diagnosticText, 'Estimated cost'),
-      recommendations: extractBulletPoints(diagnosticText, 'Recommendations'),
+      diagnosis,
+      severity,
+      urgency,
+      estimatedCost,
+      recommendations,
     };
   }
 
@@ -86,12 +111,34 @@ export function parseDiagnosticData(text: string): ParsedDiagnosticData {
 
   // Parse Next Steps
   const nextStepsMatch = text.match(
-    /Next steps[:\s]*(?:I can take for you|we can take)?[:\s]*([\s\S]*?)(?=\n\n|A few quick questions|Would you like|$)/i
+    /Next steps I can take for you[:\s]*([\s\S]*?)(?=\n\n|A couple quick questions|Would you like|$)/i
   );
 
   if (nextStepsMatch) {
     const stepsText = nextStepsMatch[1];
     result.nextSteps = extractBulletPoints(stepsText);
+  }
+
+  // Parse Questions - numbered or bulleted
+  const questionsMatch = text.match(
+    /(?:A couple quick questions|questions to tailor the plan)[:\s]*([\s\S]*?)(?=\n\nWould you like|$)/i
+  );
+
+  if (questionsMatch) {
+    const questionsText = questionsMatch[1];
+    result.questions = extractBulletPoints(questionsText);
+  }
+
+  // Parse Choices - "Would you like me to" options
+  const choicesMatch = text.match(
+    /Would you like me to[:\s]*([\s\S]*?)$/i
+  );
+
+  if (choicesMatch) {
+    const choicesText = choicesMatch[1];
+    // Split by "or" to get multiple options
+    const options = choicesText.split(/,\s*or\s+|\s+or\s+/);
+    result.choices = options.map(opt => opt.trim()).filter(opt => opt.length > 0);
   }
 
   // Parse Safety Considerations
@@ -102,16 +149,6 @@ export function parseDiagnosticData(text: string): ParsedDiagnosticData {
   if (safetyMatch) {
     const safetyText = safetyMatch[1];
     result.safetyConsiderations = extractBulletPoints(safetyText);
-  }
-
-  // Parse Questions
-  const questionsMatch = text.match(
-    /(?:A few quick questions|questions to refine)[:\s]*([\s\S]*?)(?=\n\nWould you like|$)/i
-  );
-
-  if (questionsMatch) {
-    const questionsText = questionsMatch[1];
-    result.questions = extractBulletPoints(questionsText);
   }
 
   return result;
