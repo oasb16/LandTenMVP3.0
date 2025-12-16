@@ -74,46 +74,40 @@ function calculateRiskScore(severity?: string, urgency?: string): number {
 function extractRealActionItems(conversationInsights: any, stageKey: string, messages: any[]) {
   const actions = [];
 
-  // Parse actual questions from conversation
-  const questions = new Set<string>();
-  messages.slice(-5).forEach(msg => {
-    const text = msg.text || "";
-    // Extract questions that end with ?
-    const questionMatches = text.match(/[A-Z][^?.!]*\?/g);
-    if (questionMatches) {
-      questionMatches.forEach(q => questions.add(q.trim()));
-    }
-  });
-
-  // Add questions as actionable items
-  Array.from(questions).slice(0, 2).forEach((question, idx) => {
-    actions.push({
-      id: `q-${idx}`,
-      priority: "high",
-      title: question,
-      status: "pending",
-      assignee: "You",
-      eta: "Now",
-      type: "question",
-      interactive: true,
-    });
-  });
-
-  // Photo upload status - REAL based on actual attachments
-  if (conversationInsights.photoCount === 0) {
-    actions.push({
-      id: "photo-upload",
-      priority: "critical",
-      title: "Upload photos of the issue",
-      status: "pending",
-      assignee: "You",
-      eta: "ASAP",
-      type: "upload",
-      interactive: true,
+  // PRIORITY 1: Parsed choices from "Would you like me to" - these are the MOST important
+  if (conversationInsights.choices && conversationInsights.choices.length > 0) {
+    conversationInsights.choices.slice(0, 3).forEach((choice: string, idx: number) => {
+      actions.push({
+        id: `choice-${idx}`,
+        priority: "critical",
+        title: choice,
+        status: "pending",
+        assignee: "You",
+        eta: "Now",
+        type: "choice",
+        interactive: true,
+        choiceText: choice, // Store the full choice text to send to AI
+      });
     });
   }
 
-  // Safety - REAL from parsed data
+  // PRIORITY 2: Parsed questions from "A couple quick questions"
+  if (conversationInsights.questions && conversationInsights.questions.length > 0) {
+    conversationInsights.questions.slice(0, 2).forEach((question: string, idx: number) => {
+      actions.push({
+        id: `parsed-q-${idx}`,
+        priority: "high",
+        title: question,
+        status: "pending",
+        assignee: "You",
+        eta: "Now",
+        type: "question",
+        interactive: true,
+      });
+    });
+  }
+
+  // PRIORITY 3: Safety - REAL from parsed data
   if (conversationInsights.safetyIssues > 0) {
     actions.push({
       id: "safety-review",
@@ -127,8 +121,22 @@ function extractRealActionItems(conversationInsights: any, stageKey: string, mes
     });
   }
 
-  // Stage-specific REAL actions
-  if (stageKey === "discovery" && conversationInsights.severity) {
+  // PRIORITY 4: Photo upload - REAL based on actual attachments
+  if (conversationInsights.photoCount === 0 && actions.length < 5) {
+    actions.push({
+      id: "photo-upload",
+      priority: "high",
+      title: "Upload photos of the issue",
+      status: "pending",
+      assignee: "You",
+      eta: "ASAP",
+      type: "upload",
+      interactive: true,
+    });
+  }
+
+  // PRIORITY 5: Stage-specific REAL actions
+  if (stageKey === "discovery" && conversationInsights.severity && actions.length < 5) {
     actions.push({
       id: "confirm-details",
       priority: "high",
@@ -329,6 +337,14 @@ function AIContextPanelComponent() {
 
     try {
       switch (action.type) {
+        case 'choice':
+          // Send the choice text directly to the AI
+          if (sendMessage && action.choiceText) {
+            sendMessage({
+              text: action.choiceText,
+            });
+          }
+          break;
         case 'upload':
           handlePhotoUpload();
           break;
@@ -440,6 +456,8 @@ function AIContextPanelComponent() {
         nextSteps: [],
         photoCount: 0,
         description: null,
+        choices: [],
+        questions: [],
       };
     }
 
@@ -449,6 +467,8 @@ function AIContextPanelComponent() {
     let estimatedCost = null;
     let safetyIssues = 0;
     const nextStepsSet = new Set<string>();
+    const choicesSet = new Set<string>();
+    const questionsSet = new Set<string>();
     let photoCount = 0;
     let description = null;
     let hasDiagnostic = false;
@@ -493,6 +513,16 @@ function AIContextPanelComponent() {
         if (diagnosticData.nextSteps && Array.isArray(diagnosticData.nextSteps) && diagnosticData.nextSteps.length > 0) {
           diagnosticData.nextSteps.forEach((step) => nextStepsSet.add(step));
         }
+
+        // NEW: Extract choices from "Would you like me to" section
+        if (diagnosticData.choices && Array.isArray(diagnosticData.choices) && diagnosticData.choices.length > 0) {
+          diagnosticData.choices.forEach((choice) => choicesSet.add(choice));
+        }
+
+        // NEW: Extract questions from "A couple quick questions" section
+        if (diagnosticData.questions && Array.isArray(diagnosticData.questions) && diagnosticData.questions.length > 0) {
+          diagnosticData.questions.forEach((question) => questionsSet.add(question));
+        }
       }
 
       // Count photos
@@ -510,6 +540,8 @@ function AIContextPanelComponent() {
       nextSteps: Array.from(nextStepsSet),
       photoCount,
       description,
+      choices: Array.from(choicesSet),
+      questions: Array.from(questionsSet),
     };
   }, [activeChannel?.state?.messages]);
 
