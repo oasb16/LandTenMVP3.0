@@ -469,28 +469,21 @@ async def create_incident(
                 f"---\nWe'll gather more details to resolve this quickly."
             )
 
-        # Wrap in expandable format
-        preview = collapse_text(incident_card_text, limit=500)
-        expandable_text = (
-            f"<ai-expanded>\n"
-            f"RAW:\n{incident_card_text}\n\n"
-            f"PREVIEW:\n{preview}\n\n"
-            f"EXPANDABLE: true\n"
-            f"</ai-expanded>"
-        )
-
-        bot.send_ai_message(
+        # Send proper incident card instead of <ai-expanded> format
+        bot.send_incident_card(
             channel_id=channel_id,
             persona="tenant",
-            text=expandable_text,
-            metadata={
+            incident_data={
                 "incident_id": incident_id,
+                "user_id": user_id,
+                "tenant_id": user_id,
+                "title": title,
+                "description": description,
                 "category": category,
                 "severity": severity,
                 "urgency": urgency,
-                "title": title,
-                "success": True,
-                "actionable": True,
+                "status": "detected",
+                "property_id": property_id or "default_property",
             },
         )
 
@@ -796,20 +789,11 @@ async def start_discovery(
             f"**Question 1 of {total}:** {first_question}"
         )
 
-        # Wrap in expandable format
-        preview = collapse_text(full_message, limit=500)
-        expandable_text = (
-            f"<ai-expanded>\n"
-            f"RAW:\n{full_message}\n\n"
-            f"PREVIEW:\n{preview}\n\n"
-            f"EXPANDABLE: true\n"
-            f"</ai-expanded>"
-        )
-
+        # Send plain text message (no <ai-expanded> format needed)
         bot.send_ai_message(
             channel_id=channel_id,
             persona="tenant",
-            text=full_message,  # Send plain text, not expandable
+            text=full_message,
             metadata={
                 "incident_id": incident_id,  # None for pre-incident discovery
                 "question_index": 0,
@@ -1266,24 +1250,21 @@ async def start_diagnosis(
             f"Just let me know how you'd like to proceed!"
         )
 
-        # Wrap in expandable format
-        preview = collapse_text(full_diagnosis, limit=500)
-        expandable_text = (
-            f"<ai-expanded>\n"
-            f"RAW:\n{full_diagnosis}\n\n"
-            f"PREVIEW:\n{preview}\n\n"
-            f"ACTIONS:\n"
-            f"- Create work order\n"
-            f"- Add more details\n"
-            f"- Show status\n\n"
-            f"EXPANDABLE: true\n"
-            f"</ai-expanded>"
-        )
+        # Send structured JSON response instead of <ai-expanded> format
+        # This will be parsed by handle_ai_json_response and rendered as an action card
+        response_data = {
+            "message": full_diagnosis,
+            "next_actions": [
+                "Create work order",
+                "Add more details",
+                "Show status"
+            ]
+        }
 
         bot.send_ai_message(
             channel_id=channel_id,
             persona="tenant",
-            text=expandable_text,
+            text=response_data,
             metadata={
                 "incident_id": incident_id,
                 "category": category,
@@ -1479,53 +1460,34 @@ async def create_work_order(
             logger.error(f"Error updating incident status: {e}")
             # Continue even if status update fails
 
-        # ChatGPT-style conversational work order confirmation with action suggestions
-        full_work_order = (
-            f"Great! I've created a work order to address your {incident.get('category')} issue.\n\n"
-            f"**Work Order Details:**\n"
-            f"- **Order ID:** {job_id}\n"
-            f"- **Service:** {title}\n"
-            f"- **Category:** {incident.get('category')}\n"
-            f"- **Estimated Cost:** ${estimated_cost}\n"
-            f"- **Priority:** {(urgency or incident.get('urgency')).upper()}\n\n"
-            f"**What happens next?**\n"
-            f"1. I'll generate contractor bids for you\n"
-            f"2. You can review and select a contractor\n"
-            f"3. Once approved, we'll schedule the repair\n\n"
-            f"**Available actions:**\n"
-            f"- Generate contractor bids now\n"
-            f"- Review work order status\n"
-            f"- Modify work order details\n"
-            f"- Request landlord approval\n\n"
-            f"Would you like me to generate contractor bids now?"
+        # Send work order card instead of <ai-expanded> format
+        from ..services.card_builder import CardBuilder, send_card_message
+        from ..services.stream_bot import get_bot
+
+        work_order_card = CardBuilder.work_order_card(
+            incident_id=incident_id,
+            job_id=job_id,
+            title=title,
+            category=incident.get("category"),
+            estimated_cost=f"${estimated_cost}",
+            urgency=urgency or incident.get("urgency"),
+            status="created"
         )
 
-        # Wrap in expandable format
-        preview = collapse_text(full_work_order, limit=500)
-        expandable_text = (
-            f"<ai-expanded>\n"
-            f"RAW:\n{full_work_order}\n\n"
-            f"PREVIEW:\n{preview}\n\n"
-            f"ACTIONS:\n"
-            f"- Generate contractor bids\n"
-            f"- Review status\n"
-            f"- Modify details\n"
-            f"- Request approval\n\n"
-            f"EXPANDABLE: true\n"
-            f"</ai-expanded>"
-        )
-
-        bot.send_ai_message(
-            channel_id=channel_id,
-            persona="tenant",
-            text=expandable_text,
+        bot_instance = get_bot()
+        send_card_message(
+            bot_instance.client,
+            channel_id,
+            bot_instance.get_bot_id("tenant"),
+            work_order_card,
+            message_text=f"🔧 Work order created! Here are the details:",
             metadata={
                 "job_id": job_id,
                 "incident_id": incident_id,
                 "title": title,
                 "category": incident.get("category"),
                 "actionable": True,
-            },
+            }
         )
 
         # PHASE OMEGA OBJECTIVE #7: Add work order to topic graph
@@ -1709,58 +1671,32 @@ async def generate_bids(job_id: str, category: str, channel_id: str) -> Function
             except Exception as e:
                 logger.error(f"Error saving bid {bid.get('bid_id')}: {e}")
 
-        # ChatGPT-style conversational bids summary with action suggestions
-        full_bids_summary = (
-            f"Great news! I've received {len(bids)} contractor bids for your {category} work order.\n\n"
-            f"**Top Contractors:**\n\n"
+        # Send bids card instead of <ai-expanded> format
+        from ..services.card_builder import CardBuilder, send_card_message
+        from ..services.stream_bot import get_bot
+
+        # Get incident_id from job if available
+        incident_id = job.get("incident_id", "unknown") if job else "unknown"
+
+        bids_card = CardBuilder.bids_card(
+            incident_id=incident_id,
+            job_id=job_id,
+            bids=bids,
+            recommended_bid_index=0  # First bid is typically recommended
         )
 
-        for i, bid in enumerate(bids[:3], 1):  # Show top 3
-            contractor = bid.get('contractor_name', 'Unknown')
-            quote = bid.get('quote', 0)
-            rating = bid.get('rating', 0)
-            eta = bid.get('eta', 'TBD')
-            full_bids_summary += f"{i}. **{contractor}**\n"
-            full_bids_summary += f"   - Quote: ${quote:.2f}\n"
-            full_bids_summary += f"   - Rating: {'⭐' * int(rating)} ({rating}/5.0)\n"
-            full_bids_summary += f"   - ETA: {eta}\n\n"
-
-        if len(bids) > 3:
-            full_bids_summary += f"*Plus {len(bids) - 3} more contractors available*\n\n"
-
-        full_bids_summary += (
-            f"**What would you like to do?**\n"
-            f"- Accept one of these bids\n"
-            f"- Request more details about a contractor\n"
-            f"- See all available bids\n"
-            f"- Request landlord approval first\n\n"
-            f"Let me know which contractor you'd like to proceed with, or if you need more information!"
-        )
-
-        # Wrap in expandable format
-        preview = collapse_text(full_bids_summary, limit=500)
-        expandable_text = (
-            f"<ai-expanded>\n"
-            f"RAW:\n{full_bids_summary}\n\n"
-            f"PREVIEW:\n{preview}\n\n"
-            f"ACTIONS:\n"
-            f"- Accept bid\n"
-            f"- View contractor details\n"
-            f"- See all bids\n"
-            f"- Request approval\n\n"
-            f"EXPANDABLE: true\n"
-            f"</ai-expanded>"
-        )
-
-        bot.send_ai_message(
-            channel_id=channel_id,
-            persona="landlord",
-            text=expandable_text,
+        bot_instance = get_bot()
+        send_card_message(
+            bot_instance.client,
+            channel_id,
+            bot_instance.get_bot_id("landlord"),
+            bids_card,
+            message_text=f"💼 I've received {len(bids)} contractor bids for your {category} work order:",
             metadata={
                 "job_id": job_id,
                 "bid_count": len(bids),
                 "actionable": True,
-            },
+            }
         )
 
         logger.info(f"Generated {len(bids)} bids for job {job_id}")
@@ -1853,7 +1789,8 @@ async def request_landlord_approval(
         job = dynamo.get_job(job_id)
         incident = dynamo.get_incident(incident_id, job.get("landlord_id", ""))
 
-        # ChatGPT-style conversational approval request with action suggestions
+        # Send structured JSON response instead of <ai-expanded> format
+        # This will be parsed by handle_ai_json_response and rendered as an action card
         full_approval_msg = (
             f"A work order has been created and needs your approval.\n\n"
             f"**Work Order Summary:**\n"
@@ -1863,33 +1800,23 @@ async def request_landlord_approval(
             f"- **Estimated Cost:** ${job.get('estimated_cost')}\n"
             f"- **Priority:** {job.get('urgency', 'routine').upper()}\n\n"
             f"**Property Issue:**\n{incident.get('description', 'No description available') if incident else 'Details not available'}\n\n"
-            f"**What would you like to do?**\n"
-            f"- Approve this work order\n"
-            f"- Reject with feedback\n"
-            f"- Request more details\n"
-            f"- View contractor bids\n\n"
             f"Please review and let me know your decision."
         )
 
-        # Wrap in expandable format
-        preview = collapse_text(full_approval_msg, limit=500)
-        expandable_text = (
-            f"<ai-expanded>\n"
-            f"RAW:\n{full_approval_msg}\n\n"
-            f"PREVIEW:\n{preview}\n\n"
-            f"ACTIONS:\n"
-            f"- Approve work order\n"
-            f"- Reject with feedback\n"
-            f"- Request more details\n"
-            f"- View bids\n\n"
-            f"EXPANDABLE: true\n"
-            f"</ai-expanded>"
-        )
+        response_data = {
+            "message": full_approval_msg,
+            "next_actions": [
+                "Approve work order",
+                "Reject with feedback",
+                "Request more details",
+                "View bids"
+            ]
+        }
 
         bot.send_ai_message(
             channel_id=channel_id,
             persona="landlord",
-            text=expandable_text,
+            text=response_data,
             metadata={
                 "job_id": job_id,
                 "incident_id": incident_id,
