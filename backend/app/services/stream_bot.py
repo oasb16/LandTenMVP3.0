@@ -699,42 +699,57 @@ Current conversation context: {context if context else 'New conversation'}
             return None
 
     def _handle_start_discovery(self, channel_id, user_id, persona, params):
-        """Handle start discovery action"""
-        incident_id = params[0] if params else f"INC-{int(datetime.now().timestamp())}"
+        """Handle start discovery action by calling the actual start_discovery function"""
+        import asyncio
+        from ..functions.function_registry import start_discovery
+
+        incident_id = params[0] if params else None
         bot_id = self.get_bot_id(persona)
-        print(f"[PropertyAIBot] Starting discovery for incident {incident_id}")
+        print(f"[PropertyAIBot] ✅ Starting discovery flow for incident {incident_id}")
 
-        # Send discovery message
-        self.send_message(
-            channel_id=channel_id,
-            bot_id=bot_id,
-            text="Great! Let's gather some details about the issue. I'll ask you a few questions.",
-            internal_type="ai-message"
-        )
+        # Call the actual start_discovery function from function_registry
+        try:
+            # Create event loop if not exists
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
 
-        # Send first discovery question
-        self.send_message(
-            channel_id=channel_id,
-            bot_id=bot_id,
-            text="📍 First, can you tell me exactly where the issue is located? (e.g., 'kitchen sink', 'bedroom ceiling')",
-            internal_type="ai-message"
-        )
+            # Run the discovery function
+            result = loop.run_until_complete(
+                start_discovery(
+                    incident_id=incident_id,
+                    user_id=user_id,
+                    channel_id=channel_id,
+                )
+            )
 
-        # Send discovery progress card
-        discovery_card = CardBuilder.discovery_card(
-            incident_id=incident_id,
-            questions_asked=0,
-            questions_total=4,
-            current_question="Where is the issue located?",
-            images_uploaded=0
-        )
+            if result.success:
+                print(f"[PropertyAIBot] ✅ Discovery started successfully: {result.message}")
+                return {"status": "discovery_started", "data": result.data}
+            else:
+                print(f"[PropertyAIBot] ❌ Discovery failed: {result.error}")
+                self.send_message(
+                    channel_id=channel_id,
+                    bot_id=bot_id,
+                    text=f"Sorry, I had trouble starting discovery: {result.error}",
+                    internal_type="ai-message"
+                )
+                return {"status": "error", "error": result.error}
 
-        return send_card_message(
-            self.client,
-            channel_id,
-            bot_id,
-            discovery_card
-        )
+        except Exception as e:
+            print(f"[PropertyAIBot] ❌ Error in start_discovery: {e}")
+            import traceback
+            traceback.print_exc()
+
+            self.send_message(
+                channel_id=channel_id,
+                bot_id=bot_id,
+                text="Sorry, I encountered an error starting discovery. Please try again.",
+                internal_type="ai-message"
+            )
+            return {"status": "error", "error": str(e)}
 
     def test_ai_json_flow(self, channel_id: str, persona: str):
         """Utility to run a small AI JSON -> card flow for quick verification.
