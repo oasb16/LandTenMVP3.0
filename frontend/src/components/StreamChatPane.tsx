@@ -3,9 +3,10 @@
 import { useEffect, useState, useCallback } from "react";
 import { Loader2, WifiOff, Bot, BotOff, UserPlus } from "lucide-react";
 import { useStreamChat } from "@/hooks/chat/StreamChatContext";
-import { Chat, Channel, ChannelHeader, MessageList, MessageInput, Window, Thread } from "stream-chat-react";
+import { Chat, Channel, ChannelHeader, MessageInput, Window, Thread } from "stream-chat-react";
 import "stream-chat-react/dist/css/v2/index.css";
 import { CustomAttachment } from "./ai/CustomAttachment";
+import { MessageListWithPagination } from "./ai/MessageListWithPagination";
 
 type Props = {
   className?: string;
@@ -171,14 +172,7 @@ export default function StreamChatPane({ className, showEscalation, onEscalate }
           <Window>
             <ChannelHeader />
 
-            <MessageList
-              // Auto-scroll to newest messages
-              disableDateSeparator={false}
-              // Performance optimization
-              messageLimit={50}
-              // Hide typing indicator if needed
-              hideTypingIndicator={false}
-            />
+            <MessageListWithPagination />
 
             {/* Agent Toggle and Message Input Container */}
             <div
