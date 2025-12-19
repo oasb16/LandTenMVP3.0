@@ -1,13 +1,15 @@
 """
-Stripe payment service for contractor payouts.
+Stripe payment service for contractor payouts and hotel checkout.
 
 This service handles:
 - Creating Stripe Connect accounts for contractors
 - Adding external bank accounts
 - Making payouts from landlord to contractor
+- Hotel checkout sessions
 """
 
 import os
+import logging
 from typing import Dict, Any, Optional
 import stripe
 from dotenv import load_dotenv
@@ -15,6 +17,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+logger = logging.getLogger(__name__)
 
 
 class StripeService:
@@ -207,3 +210,99 @@ class StripeService:
             "payouts_enabled": account.payouts_enabled,
             "requirements": account.requirements
         }
+
+    @staticmethod
+    def create_hotel_checkout_session(
+        amount: float,
+        guest_name: str,
+        guest_email: str,
+        guest_phone: Optional[str],
+        reservation_id: str,
+        hotel_name: str = "Hotel",
+        success_url: str = None,
+        cancel_url: str = None
+    ) -> Dict[str, Any]:
+        """
+        Create a Stripe checkout session for hotel payment.
+
+        Args:
+            amount: Amount in dollars
+            guest_name: Guest name
+            guest_email: Guest email
+            guest_phone: Guest phone (optional)
+            reservation_id: Reservation ID
+            hotel_name: Hotel name
+            success_url: Success redirect URL
+            cancel_url: Cancel redirect URL
+
+        Returns:
+            Dict containing checkout URL and session ID
+        """
+        try:
+            # Find or create customer
+            customer = None
+            if guest_email:
+                existing_customers = stripe.Customer.list(
+                    email=guest_email,
+                    limit=1
+                )
+
+                if existing_customers.data:
+                    customer = existing_customers.data[0]
+                else:
+                    customer = stripe.Customer.create(
+                        email=guest_email,
+                        name=guest_name,
+                        phone=guest_phone,
+                    )
+
+            # Create checkout session
+            session_params = {
+                "mode": "payment",
+                "line_items": [
+                    {
+                        "price_data": {
+                            "currency": "usd",
+                            "product_data": {
+                                "name": f"Hotel Stay - {hotel_name}",
+                                "description": f"Reservation for {guest_name}",
+                            },
+                            "unit_amount": int(round(amount * 100)),  # Convert to cents
+                        },
+                        "quantity": 1,
+                    },
+                ],
+                "metadata": {
+                    "reservation_id": reservation_id,
+                    "guest_name": guest_name,
+                    "guest_phone": guest_phone or "",
+                },
+                "success_url": success_url or "https://yourdomain.com/checkout-success?session_id={CHECKOUT_SESSION_ID}",
+                "cancel_url": cancel_url or "https://yourdomain.com/checkout-cancel",
+            }
+
+            if customer:
+                session_params["customer"] = customer.id
+            else:
+                session_params["customer_email"] = guest_email
+
+            session = stripe.checkout.Session.create(**session_params)
+
+            return {
+                "success": True,
+                "checkoutUrl": session.url,
+                "sessionId": session.id,
+            }
+
+        except stripe.error.StripeError as e:
+            logger.error(f"Stripe error: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+        except Exception as e:
+            logger.error(f"Error creating checkout session: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
