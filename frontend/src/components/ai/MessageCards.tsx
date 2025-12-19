@@ -34,11 +34,19 @@ export function MessageCards({ message, onActionClick }: MessageCardsProps) {
   }
 
   const handleActionClick = async (actionValue: string) => {
+    console.log("[MessageCards] 🎯 BUTTON CLICKED:", actionValue);
+    console.log("[MessageCards] onActionClick handler exists:", !!onActionClick);
     setLoadingAction(actionValue);
     try {
+      console.log("[MessageCards] Calling onActionClick...");
       await onActionClick?.(actionValue);
+      console.log("[MessageCards] ✅ onActionClick completed successfully");
+    } catch (error) {
+      console.error("[MessageCards] ❌ onActionClick failed:", error);
+      throw error;
     } finally {
       setLoadingAction(null);
+      console.log("[MessageCards] Loading state cleared");
     }
   };
 
@@ -106,7 +114,15 @@ function BaseCard({ data, children, onActionClick, loadingAction }: CardProps & 
           {buttons.map((btn: any, idx: number) => (
             <button
               key={idx}
-              onClick={() => onActionClick?.(btn.value ?? data.type)}
+              onClick={() => {
+                console.log("[BaseCard] 🖱️ Button clicked:", {
+                  value: btn.value,
+                  label: btn.label || btn.text,
+                  style: btn.style,
+                  fallbackType: data.type,
+                });
+                onActionClick?.(btn.value ?? data.type);
+              }}
               disabled={Boolean(loadingAction) && loadingAction !== btn.value}
               className={`card-button card-button-${btn.style || 'default'}`}
               style={{
