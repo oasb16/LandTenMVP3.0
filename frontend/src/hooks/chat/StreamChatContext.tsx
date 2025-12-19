@@ -459,16 +459,28 @@ export function StreamChatProvider({ children }: { children: ReactNode }) {
 
         if (defaultChannel) {
           console.log("[StreamChat] Setting default channel:", defaultChannel.cid);
+
+          // 🔥 FIX: Use Stream Chat query API to load only 20 messages from server
+          console.log("[StreamChat] Fetching initial", INITIAL_MESSAGE_LOAD, "messages from server...");
+          const channelState = await defaultChannel.query({
+            messages: { limit: INITIAL_MESSAGE_LOAD },
+          });
+
+          if (!isMounted) {
+            console.log("[StreamChat] Component unmounted after channel query, aborting");
+            return;
+          }
+
           setActiveChannel(defaultChannel);
-          const totalMessages = defaultChannel.state.messages.length;
-          const initialMessages = defaultChannel.state.messages
-            .slice(-INITIAL_MESSAGE_LOAD)
-            .map((msg) => normaliseMessageDates(msg));
 
+          const initialMessages = (channelState.messages || []).map((msg) => normaliseMessageDates(msg));
           loadedMessageCount.current = initialMessages.length;
-          setHasMoreMessages(totalMessages > INITIAL_MESSAGE_LOAD);
 
-          console.log("[StreamChat] Loaded", initialMessages.length, "of", totalMessages, "messages");
+          // Check if there are more messages by comparing to channel message count
+          const hasMore = initialMessages.length >= INITIAL_MESSAGE_LOAD;
+          setHasMoreMessages(hasMore);
+
+          console.log("[StreamChat] Loaded", initialMessages.length, "messages from server, hasMore:", hasMore);
           setMessages(initialMessages);
           const defaultChannelData = (defaultChannel.data ?? {}) as Record<string, unknown>;
           const initialFlow =
@@ -512,35 +524,26 @@ export function StreamChatProvider({ children }: { children: ReactNode }) {
   }, [session?.user?.email, session?.user?.persona, status]); // Only depend on stable values
 
   const updateMessagesFromChannel = useCallback(
-    (channel: Channel, forceUpdate = false) => {
-      const totalMessages = channel.state.messages.length;
+    (channel: Channel, newMessage?: MessageResponse) => {
+      // 🔥 FIX: Only update flow state and append new messages
+      // Don't read from channel.state.messages to avoid buffering all messages
 
-      setMessages((prev) => {
-        // Calculate how many messages to show based on what's already loaded
-        const currentLoadCount = Math.max(loadedMessageCount.current, prev.length);
-        const messagesToShow = Math.min(currentLoadCount, totalMessages, MAX_RENDERED_MESSAGES);
+      if (newMessage) {
+        // Append new message to our controlled state
+        setMessages((prev) => {
+          // Check if message already exists
+          if (prev.some(msg => msg.id === newMessage.id)) {
+            // Update existing message
+            return prev.map(msg => msg.id === newMessage.id ? normaliseMessageDates(newMessage) : msg);
+          }
+          // Add new message and limit to MAX_RENDERED_MESSAGES
+          const updated = [...prev, normaliseMessageDates(newMessage)];
+          return updated.slice(-MAX_RENDERED_MESSAGES);
+        });
+      }
 
-        const latestMessages = channel.state.messages
-          .slice(-messagesToShow)
-          .map((msg) => normaliseMessageDates(msg));
-
-        // Update hasMoreMessages flag
-        setHasMoreMessages(totalMessages > messagesToShow);
-
-        if (forceUpdate || prev.length !== latestMessages.length) {
-          loadedMessageCount.current = latestMessages.length;
-          return latestMessages;
-        }
-        const prevLast = prev[prev.length - 1];
-        const newLast = latestMessages[latestMessages.length - 1];
-        if (prevLast?.id !== newLast?.id) {
-          loadedMessageCount.current = latestMessages.length;
-          return latestMessages;
-        }
-        return prev;
-      });
-
-      const newest = channel.state.messages.at(-1);
+      // Update flow state from latest message or channel metadata
+      const newest = newMessage ?? channel.state.messages.at(-1);
       const flowFromMessage = deriveFlowStateFromMessage(newest ? normaliseMessageDates(newest) : undefined);
       const channelData = (channel.data ?? {}) as Record<string, unknown>;
       const flowFromChannel =
@@ -637,23 +640,28 @@ export function StreamChatProvider({ children }: { children: ReactNode }) {
         console.log("[StreamChat] message.new event received:", event.message?.id);
         if (event.message) {
           handleReasoningCue(event.message);
+          updateMessagesFromChannel(channel, event.message);
         }
-        updateMessagesFromChannel(channel, true);
       });
 
       subscribe("message.updated", (event: Event) => {
-        console.log("[StreamChat] message.updated event received");
-        updateMessagesFromChannel(channel, true);
+        console.log("[StreamChat] message.updated event received:", event.message?.id);
+        if (event.message) {
+          updateMessagesFromChannel(channel, event.message);
+        }
       });
 
       subscribe("message.deleted", (event: Event) => {
-        console.log("[StreamChat] message.deleted event received");
-        updateMessagesFromChannel(channel, true);
+        console.log("[StreamChat] message.deleted event received:", event.message?.id);
+        // Remove deleted message from state
+        if (event.message?.id) {
+          setMessages((prev) => prev.filter((msg) => msg.id !== event.message!.id));
+        }
       });
 
       subscribe("channel.updated", (event: Event) => {
         console.log("[StreamChat] channel.updated event received");
-        updateMessagesFromChannel(channel, true);
+        updateMessagesFromChannel(channel);
       });
 
       subscribe("custom.flow_update", (event: Event) => {
@@ -696,7 +704,7 @@ export function StreamChatProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!activeChannel) return;
-    updateMessagesFromChannel(activeChannel);
+    // Don't call updateMessagesFromChannel here - messages are already loaded via channel.query()
     attachChannelListeners(activeChannel);
     return () => {
       channelSubscriptions.current.forEach((unsubscribe) => {
@@ -708,7 +716,7 @@ export function StreamChatProvider({ children }: { children: ReactNode }) {
       });
       channelSubscriptions.current = [];
     };
-  }, [activeChannel, attachChannelListeners, updateMessagesFromChannel]);
+  }, [activeChannel, attachChannelListeners]);
 
   useEffect(() => {
     return () => {
@@ -736,30 +744,56 @@ export function StreamChatProvider({ children }: { children: ReactNode }) {
 
   const loadMoreMessages = useCallback(async () => {
     if (!activeChannel || loadingMore || !hasMoreMessages) {
+      console.log("[StreamChat] Skipping load more:", { hasChannel: !!activeChannel, loadingMore, hasMoreMessages });
       return;
     }
 
-    console.log("[StreamChat] Loading more messages...");
+    console.log("[StreamChat] Loading more messages from server...");
     setLoadingMore(true);
 
     try {
-      const totalMessages = activeChannel.state.messages.length;
-      const currentCount = loadedMessageCount.current;
-      const newCount = Math.min(currentCount + LOAD_MORE_BATCH_SIZE, totalMessages, MAX_RENDERED_MESSAGES);
+      // Get the oldest message ID from currently loaded messages
+      const currentMessages = activeChannel.state.messages || [];
+      const oldestMessage = currentMessages[0];
 
-      console.log(`[StreamChat] Loading ${newCount - currentCount} more messages (${currentCount} -> ${newCount} of ${totalMessages})`);
+      if (!oldestMessage) {
+        console.log("[StreamChat] No messages to paginate from");
+        setLoadingMore(false);
+        setHasMoreMessages(false);
+        return;
+      }
 
-      const olderMessages = activeChannel.state.messages
-        .slice(-newCount)
-        .map((msg) => normaliseMessageDates(msg));
+      console.log("[StreamChat] Fetching", LOAD_MORE_BATCH_SIZE, "messages older than", oldestMessage.id);
 
-      setMessages(olderMessages);
-      loadedMessageCount.current = newCount;
-      setHasMoreMessages(totalMessages > newCount);
+      // 🔥 FIX: Use Stream Chat API to fetch older messages from server
+      const response = await activeChannel.query({
+        messages: {
+          limit: LOAD_MORE_BATCH_SIZE,
+          id_lt: oldestMessage.id, // Get messages older than this ID
+        },
+      });
 
-      console.log("[StreamChat] Successfully loaded more messages");
+      const olderMessages = (response.messages || []).map((msg) => normaliseMessageDates(msg));
+
+      console.log("[StreamChat] Fetched", olderMessages.length, "older messages from server");
+
+      // If we got fewer messages than requested, we've reached the end
+      const hasMore = olderMessages.length >= LOAD_MORE_BATCH_SIZE;
+      setHasMoreMessages(hasMore);
+
+      // Prepend older messages to current state
+      setMessages((prev) => {
+        const combined = [...olderMessages, ...prev];
+        // Limit total messages in memory
+        const limited = combined.slice(-MAX_RENDERED_MESSAGES);
+        loadedMessageCount.current = limited.length;
+        return limited;
+      });
+
+      console.log("[StreamChat] Successfully loaded more messages, hasMore:", hasMore);
     } catch (err) {
       console.error("[StreamChat] Failed to load more messages:", err);
+      setHasMoreMessages(false);
     } finally {
       setLoadingMore(false);
     }
@@ -787,11 +821,7 @@ export function StreamChatProvider({ children }: { children: ReactNode }) {
         console.log("[StreamChat] Message sent successfully, result:", result?.message?.id);
         console.log("[StreamChat] Message attachments in result:", result?.message?.attachments?.length || 0);
 
-        if (result) {
-          setTimeout(() => {
-            updateMessagesFromChannel(activeChannel, true);
-          }, 100);
-        }
+        // ✅ No need to update messages - message.new event will handle it
 
         return result;  // 🔥 CRITICAL: Return the result!
       } catch (err) {
@@ -824,12 +854,7 @@ export function StreamChatProvider({ children }: { children: ReactNode }) {
 
         console.log("[StreamChat] ✅ Action sent successfully:", result?.message?.id);
 
-        // Update messages immediately
-        if (result) {
-          setTimeout(() => {
-            updateMessagesFromChannel(activeChannel, true);
-          }, 100);
-        }
+        // ✅ No need to update messages - message.new event will handle it
       } catch (err) {
         console.error("[StreamChat] ❌ Failed to trigger action:", err);
         throw err;

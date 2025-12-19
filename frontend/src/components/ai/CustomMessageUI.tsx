@@ -198,7 +198,15 @@ export const CustomMessageUI = memo(function CustomMessageUI({
 
   const handleActionClick = useCallback(
     async (actionValue: string) => {
-      await onActionClick?.(actionValue);
+      console.log("[CustomMessageUI] 🎯 handleActionClick called with:", actionValue);
+      console.log("[CustomMessageUI] onActionClick exists:", !!onActionClick);
+      try {
+        await onActionClick?.(actionValue);
+        console.log("[CustomMessageUI] ✅ onActionClick completed successfully");
+      } catch (error) {
+        console.error("[CustomMessageUI] ❌ onActionClick failed:", error);
+        throw error;
+      }
     },
     [onActionClick],
   );

@@ -18,6 +18,18 @@ export function HybridMessage(props: MessageUIComponentProps) {
   const channelState = useChannelStateContext();
   const { message } = props;
 
+  // Wrap triggerAction with logging
+  const wrappedTriggerAction = async (actionValue: string) => {
+    console.log("[HybridMessage] 🎯 triggerAction called with:", actionValue);
+    try {
+      await triggerAction(actionValue);
+      console.log("[HybridMessage] ✅ triggerAction completed successfully");
+    } catch (error) {
+      console.error("[HybridMessage] ❌ triggerAction failed:", error);
+      throw error;
+    }
+  };
+
   // Defensive null check at top
   if (!message) {
     console.warn("[HybridMessage] No message provided, returning null");
@@ -47,7 +59,7 @@ export function HybridMessage(props: MessageUIComponentProps) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         message={message as any}
         currentUserId={currentUserId}
-        onActionClick={triggerAction}
+        onActionClick={wrappedTriggerAction}
       />
     );
   }
