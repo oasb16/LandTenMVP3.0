@@ -1160,7 +1160,7 @@ def _handle_action_message(
     persona: Optional[str] = None,
 ) -> None:
     """
-    Handle action button clicks from the UI.
+    Handle action button clicks from the UI by routing to PropertyAIBot.
     Actions are sent as messages with format: "action:action_name:incident_id"
 
     Examples:
@@ -1169,65 +1169,40 @@ def _handle_action_message(
     - "action:dismiss"
     - "action:approve:INC-456"
     """
+    from ..services.stream_bot import get_bot
+
     message_text = message.get("text", "")
     channel_id = _channel_identifier(channel, channel_state)
+    user_id = message.get("user", {}).get("id", "unknown")
 
-    print(f"[🎯 ACTION] Parsing action: {message_text}")
+    print(f"[🎯 ACTION] Routing action to PropertyAIBot: {message_text}")
+    print(f"[🎯 ACTION] User: {user_id}, Channel: {channel_id}, Persona: {persona}")
 
-    # Parse action format: action:action_name:optional_incident_id
-    parts = message_text.split(":")
-    if len(parts) < 2:
-        print(f"[❌ ACTION] Invalid action format: {message_text}")
-        return
-
-    action_type = parts[1].lower()
-    action_type = action_type.strip()
-    incident_id = parts[2] if len(parts) > 2 else None
-
-    print(f"[🎯 ACTION] Type: {action_type}, Incident: {incident_id or 'none'}")
-
-    # Route action to appropriate handler
-    if action_type in {"start_discovery", "resume_flow"}:
-        # Trigger or resume discovery flow
-        print(f"[🔍 ACTION] Resuming flow for {incident_id or 'new incident'}")
-        if incident_id:
-            try:
-                channel.update({"active_incident": incident_id})
-            except Exception as e:
-                print(f"[🔍 ACTION] Failed to set active incident on channel: {e}")
-        modified_message = {**message, "text": "start discovery"}
-        _handle_discovery_message(client, channel, channel_state, modified_message, persona)
-
-    elif action_type == "dismiss":
-        # Send acknowledgment
-        print(f"[👋 ACTION] Dismissing card")
-        post_agent_message(client, channel_id, "Understood. Let me know if you need anything else!")
-
-    elif action_type == "approve" and incident_id:
-        # Handle approval
-        print(f"[✅ ACTION] Approving incident: {incident_id}")
-        post_agent_message(
-            client,
-            channel_id,
-            f"Great! I've approved {incident_id}. A contractor will be scheduled shortly."
+    # Route to PropertyAIBot which has comprehensive action handlers
+    try:
+        bot = get_bot()
+        result = bot.handle_action(
+            action_value=message_text,
+            user_id=user_id,
+            channel_id=channel_id,
+            persona=persona or "tenant"
         )
 
-    elif action_type == "reject" and incident_id:
-        # Handle rejection
-        print(f"[❌ ACTION] Rejecting incident: {incident_id}")
-        post_agent_message(
-            client,
-            channel_id,
-            f"Understood. I've rejected the proposal for {incident_id}. Would you like to explore alternatives?"
-        )
+        if result:
+            print(f"[✅ ACTION] PropertyAIBot handled action successfully: {result}")
+        else:
+            print(f"[⚠️  ACTION] PropertyAIBot returned None - action may not be fully implemented")
 
-    else:
-        # Unknown action - send generic response
-        print(f"[⚠️  ACTION] Unknown action type: {action_type}")
+    except Exception as e:
+        print(f"[❌ ACTION] Error routing to PropertyAIBot: {e}")
+        import traceback
+        traceback.print_exc()
+
+        # Fallback: send error message
         post_agent_message(
             client,
             channel_id,
-            f"I received your action but I'm not sure how to handle '{action_type}'. Could you try a different option?"
+            "I encountered an error processing your action. Please try again or contact support if the issue persists."
         )
 
 
