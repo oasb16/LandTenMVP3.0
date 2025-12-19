@@ -41,9 +41,12 @@ type StreamChatContextValue = {
   reasoningState: ReasoningState;
   loading: boolean;
   error: string | null;
+  hasMoreMessages: boolean;
+  loadingMore: boolean;
   selectChannel: (channel: Channel) => void;
   sendMessage: (text: string, messageData?: any) => Promise<void>;
   triggerAction: (actionValue: string) => Promise<void>;
+  loadMoreMessages: () => Promise<void>;
 };
 
 const StreamChatContext = createContext<StreamChatContextValue | undefined>(undefined);
@@ -63,7 +66,9 @@ type CachedToken = {
   expiresAt: number;
 };
 
-const MAX_RENDERED_MESSAGES = 50;
+const INITIAL_MESSAGE_LOAD = 20; // Load only 20 messages initially
+const LOAD_MORE_BATCH_SIZE = 20; // Load 20 more messages when "Load More" is clicked
+const MAX_RENDERED_MESSAGES = 100; // Maximum messages to keep in memory
 const REASONING_TIMEOUT_MS = 3000;
 const TOKEN_CACHE_TTL = 4 * 60 * 1000; // 4 minutes (tokens expire at 5 min)
 const RECONNECT_BASE_DELAY = 2000; // 2 seconds
@@ -225,11 +230,14 @@ export function StreamChatProvider({ children }: { children: ReactNode }) {
   const [reasoningState, setReasoningState] = useState<ReasoningState>(initialReasoningState);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [hasMoreMessages, setHasMoreMessages] = useState<boolean>(false);
+  const [loadingMore, setLoadingMore] = useState<boolean>(false);
 
   const reasoningTimeout = useRef<NodeJS.Timeout | null>(null);
   const channelSubscriptions = useRef<Array<() => void>>([]);
   const isInitializing = useRef(false);
   const initializationAttempts = useRef(0);
+  const loadedMessageCount = useRef<number>(0);
 
   const resetState = useCallback(() => {
     channelSubscriptions.current.forEach((unsubscribe) => {
@@ -452,10 +460,15 @@ export function StreamChatProvider({ children }: { children: ReactNode }) {
         if (defaultChannel) {
           console.log("[StreamChat] Setting default channel:", defaultChannel.cid);
           setActiveChannel(defaultChannel);
+          const totalMessages = defaultChannel.state.messages.length;
           const initialMessages = defaultChannel.state.messages
-            .slice(-MAX_RENDERED_MESSAGES)
+            .slice(-INITIAL_MESSAGE_LOAD)
             .map((msg) => normaliseMessageDates(msg));
-          console.log("[StreamChat] Loaded", initialMessages.length, "initial messages");
+
+          loadedMessageCount.current = initialMessages.length;
+          setHasMoreMessages(totalMessages > INITIAL_MESSAGE_LOAD);
+
+          console.log("[StreamChat] Loaded", initialMessages.length, "of", totalMessages, "messages");
           setMessages(initialMessages);
           const defaultChannelData = (defaultChannel.data ?? {}) as Record<string, unknown>;
           const initialFlow =
@@ -500,24 +513,35 @@ export function StreamChatProvider({ children }: { children: ReactNode }) {
 
   const updateMessagesFromChannel = useCallback(
     (channel: Channel, forceUpdate = false) => {
-      const latestMessages = channel.state.messages
-        .slice(-MAX_RENDERED_MESSAGES)
-        .map((msg) => normaliseMessageDates(msg));
+      const totalMessages = channel.state.messages.length;
 
       setMessages((prev) => {
+        // Calculate how many messages to show based on what's already loaded
+        const currentLoadCount = Math.max(loadedMessageCount.current, prev.length);
+        const messagesToShow = Math.min(currentLoadCount, totalMessages, MAX_RENDERED_MESSAGES);
+
+        const latestMessages = channel.state.messages
+          .slice(-messagesToShow)
+          .map((msg) => normaliseMessageDates(msg));
+
+        // Update hasMoreMessages flag
+        setHasMoreMessages(totalMessages > messagesToShow);
+
         if (forceUpdate || prev.length !== latestMessages.length) {
+          loadedMessageCount.current = latestMessages.length;
           return latestMessages;
         }
         const prevLast = prev[prev.length - 1];
         const newLast = latestMessages[latestMessages.length - 1];
         if (prevLast?.id !== newLast?.id) {
+          loadedMessageCount.current = latestMessages.length;
           return latestMessages;
         }
         return prev;
       });
 
-      const newest = latestMessages.at(-1);
-      const flowFromMessage = deriveFlowStateFromMessage(newest);
+      const newest = channel.state.messages.at(-1);
+      const flowFromMessage = deriveFlowStateFromMessage(newest ? normaliseMessageDates(newest) : undefined);
       const channelData = (channel.data ?? {}) as Record<string, unknown>;
       const flowFromChannel =
         deriveFlowState(channelData.flow_state as Record<string, unknown>) ??
@@ -703,9 +727,43 @@ export function StreamChatProvider({ children }: { children: ReactNode }) {
       }
       console.log("[StreamChat] Switching to new channel");
       setReasoningState(initialReasoningState);
+      // Reset pagination when switching channels
+      loadedMessageCount.current = 0;
+      setHasMoreMessages(false);
       return channel;
     });
   }, []);
+
+  const loadMoreMessages = useCallback(async () => {
+    if (!activeChannel || loadingMore || !hasMoreMessages) {
+      return;
+    }
+
+    console.log("[StreamChat] Loading more messages...");
+    setLoadingMore(true);
+
+    try {
+      const totalMessages = activeChannel.state.messages.length;
+      const currentCount = loadedMessageCount.current;
+      const newCount = Math.min(currentCount + LOAD_MORE_BATCH_SIZE, totalMessages, MAX_RENDERED_MESSAGES);
+
+      console.log(`[StreamChat] Loading ${newCount - currentCount} more messages (${currentCount} -> ${newCount} of ${totalMessages})`);
+
+      const olderMessages = activeChannel.state.messages
+        .slice(-newCount)
+        .map((msg) => normaliseMessageDates(msg));
+
+      setMessages(olderMessages);
+      loadedMessageCount.current = newCount;
+      setHasMoreMessages(totalMessages > newCount);
+
+      console.log("[StreamChat] Successfully loaded more messages");
+    } catch (err) {
+      console.error("[StreamChat] Failed to load more messages:", err);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [activeChannel, loadingMore, hasMoreMessages]);
 
   const sendMessage = useCallback(
     async (text: string, messageData?: any) => {
@@ -791,9 +849,12 @@ export function StreamChatProvider({ children }: { children: ReactNode }) {
       reasoningState,
       loading,
       error,
+      hasMoreMessages,
+      loadingMore,
       selectChannel,
       sendMessage,
       triggerAction,
+      loadMoreMessages,
     }),
     [
       client,
@@ -805,9 +866,12 @@ export function StreamChatProvider({ children }: { children: ReactNode }) {
       reasoningState,
       loading,
       error,
+      hasMoreMessages,
+      loadingMore,
       selectChannel,
       sendMessage,
       triggerAction,
+      loadMoreMessages,
     ],
   );
 
