@@ -25,3 +25,11 @@ class ContractorRepo:
     def list_all(self) -> List[Dict[str, Any]]:
         resp = self.table.scan()
         return resp.get("Items", [])
+
+    def get_by_email(self, email: str) -> Dict[str, Any]:
+        """Get contractor by email address."""
+        resp = self.table.scan(
+            FilterExpression=Attr("email").eq(email)
+        )
+        items = resp.get("Items", [])
+        return items[0] if items else {}
