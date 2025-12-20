@@ -164,6 +164,16 @@ class Contractor(BaseModel):
         }
 
 
+class ContractorRegisterRequest(BaseModel):
+    """Request model for contractor registration from magic link onboarding."""
+    business_name: str
+    email: EmailStr
+    phone: str
+    categories: List[str] = Field(default_factory=list)
+    service_zip_codes: List[str] = Field(default_factory=list)
+    license_number: Optional[str] = None
+
+
 class ContractorCreate(BaseModel):
     """Request model for contractor registration."""
     user_id: str

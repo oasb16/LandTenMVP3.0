@@ -19,7 +19,7 @@ from datetime import datetime, timedelta
 import logging
 import os
 
-from ..models.contractor import Contractor, ContractorCreate, ContractorStatus
+from ..models.contractor import Contractor, ContractorCreate, ContractorRegisterRequest, ContractorStatus
 from ..models.job import Job, JobStatus, JobPhoto
 from ..deps.auth import verify_firebase_token
 from ..deps.dynamo import get_dynamo_resource, table_name
@@ -234,12 +234,7 @@ async def send_notification(user_id: str, notification_type: str, data: Dict[str
 
 @router.post("/register")
 async def register_contractor(
-    business_name: str,
-    email: str,
-    phone: str,
-    categories: List[str],
-    service_zip_codes: List[str],
-    license_number: Optional[str] = None,
+    request: ContractorRegisterRequest,
     current_user: str = Depends(verify_firebase_token)
 ):
     """
@@ -255,7 +250,7 @@ async def register_contractor(
         Created contractor profile
     """
     logger.info(
-        f"[contractors] Registering contractor | user={current_user} business={business_name}"
+        f"[contractors] Registering contractor | user={current_user} business={request.business_name}"
     )
 
     try:
@@ -270,19 +265,19 @@ async def register_contractor(
         contractor_data = {
             "contractor_id": contractor_id,
             "user_id": user_id,
-            "business_name": business_name,
-            "email": email,
-            "phone": phone,
-            "categories": categories,
-            "service_zip_codes": service_zip_codes,
-            "license_number": license_number,
+            "business_name": request.business_name,
+            "email": request.email,
+            "phone": request.phone,
+            "categories": request.categories,
+            "service_zip_codes": request.service_zip_codes,
+            "license_number": request.license_number,
             "rating": None,  # No rating yet
             "total_jobs": 0,
             "completed_jobs": 0,
             "status": ContractorStatus.PENDING.value,
             "insurance_verified": "not_verified",
             "stripe_onboarding_complete": False,
-            "total_earnings": 0.0,
+            "total_earnings": 0,  # Use int instead of float for DynamoDB
             "created_at": now.isoformat() + "Z",
             "updated_at": now.isoformat() + "Z"
         }
