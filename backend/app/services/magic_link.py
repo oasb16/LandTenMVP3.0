@@ -12,7 +12,9 @@ class MagicLinkService:
     """Service for managing magic link tokens."""
 
     def __init__(self):
-        self.dynamodb = boto3.resource("dynamodb")
+        # Initialize DynamoDB resource with region from environment
+        region = os.getenv("AWS_REGION", "us-east-1")
+        self.dynamodb = boto3.resource("dynamodb", region_name=region)
         table_prefix = os.getenv("TABLE_PREFIX", "landten")
         self.table_name = f"{table_prefix}-magic-links"
         self.table = self.dynamodb.Table(self.table_name)
