@@ -23,9 +23,10 @@ try:
 except ImportError:
     pass
 
-# Configuration
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8080")
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+# Configuration - Get from environment or use defaults
+# Note: BACKEND_URL should point to the API, FRONTEND_URL to the Next.js app
+BACKEND_URL = os.getenv("BACKEND_URL", "https://landtenmvp3-55ce0053f28a.herokuapp.com")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://land-ten-mvp-3-0.vercel.app")
 
 # Colors for terminal output
 GREEN = '\033[92m'
@@ -144,6 +145,11 @@ class ContractorOnboardingTester:
                     return True
                 else:
                     print_error(f"Token is invalid: {data['message']}")
+                    print_info("\nPossible causes:")
+                    print_info("  1. DynamoDB table 'landten-magic-links' doesn't exist")
+                    print_info("     Run: python scripts/create_magic_links_table.py")
+                    print_info("  2. Token was not saved to the database")
+                    print_info("  3. Token has expired (48 hour lifetime)")
                     return False
             else:
                 print_error(f"Failed to verify token: {response.status_code}")
@@ -162,56 +168,22 @@ class ContractorOnboardingTester:
             print_info("Contractor already exists, skipping registration")
             return True
 
-        # Sample contractor data
-        payload = {
-            "business_name": "Test Plumbing Services",
-            "email": "testcontractor@example.com",
-            "phone": "(555) 123-4567",
-            "categories": json.dumps(["plumbing", "hvac"]),
-            "service_zip_codes": json.dumps(["10001", "10002", "10003"]),
-            "license_number": "LIC-TEST-12345"
-        }
+        print_info("Registering contractor: Test Plumbing Services")
 
-        print_info(f"Registering contractor: {payload['business_name']}")
+        # IMPORTANT: This endpoint requires Firebase authentication
+        # For testing purposes, we'll skip this test and note the requirement
+        print_error("SKIPPED - Contractor registration requires Firebase authentication")
+        print_info("To test registration:")
+        print_info("  1. Use the frontend registration form at the magic link URL")
+        print_info("  2. Or obtain a valid Firebase token and add it to the request")
+        print_info("  3. Or temporarily disable auth in contractors.py for testing")
 
-        try:
-            # Note: This endpoint requires authentication in production
-            # For testing, you may need to modify auth requirements
-            response = requests.post(
-                f"{self.backend_url}/api/v1/contractors/register",
-                data=payload,
-                headers={"Content-Type": "application/x-www-form-urlencoded"}
-            )
+        # For the purpose of continuing tests, simulate a contractor ID
+        # In real testing, you'd get this from the actual registration
+        print_info("\nFor testing purposes, we'll create a mock contractor ID")
+        print_info("In production, this would come from actual registration")
 
-            if response.status_code == 200:
-                data = response.json()
-
-                if data.get('success'):
-                    contractor_data = data['contractor']
-                    self.contractor_id = contractor_data['contractor_id']
-
-                    print_success("Contractor registered successfully!")
-                    print(f"Contractor ID: {self.contractor_id}")
-                    print(f"Business Name: {contractor_data['business_name']}")
-                    print(f"Email: {contractor_data['email']}")
-                    print(f"Status: {contractor_data['status']}")
-
-                    # Mark magic link as used
-                    self.mark_magic_link_used()
-
-                    return True
-                else:
-                    print_error("Registration failed")
-                    print_json(data)
-                    return False
-            else:
-                print_error(f"Failed to register contractor: {response.status_code}")
-                print(response.text)
-                return False
-
-        except Exception as e:
-            print_error(f"Error: {str(e)}")
-            return False
+        return False  # Mark as failed since we didn't actually test it
 
     def mark_magic_link_used(self):
         """Mark the magic link as used after registration."""
@@ -300,6 +272,11 @@ class ContractorOnboardingTester:
         print_header(f"Testing Contractor Onboarding Flow")
         print_info(f"Backend URL: {self.backend_url}")
         print_info(f"Frontend URL: {self.frontend_url}")
+
+        # Check prerequisites
+        print_header("Pre-flight Checks")
+        print_info("Checking if DynamoDB table exists...")
+        print_info("Note: If token verification fails, run: python scripts/create_magic_links_table.py")
 
         results = []
 
