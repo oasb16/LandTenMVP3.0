@@ -7,7 +7,7 @@ from ..deps.dynamo import get_dynamo_resource, table_name
 
 class ContractorRepo:
     def __init__(self):
-        self.table = get_dynamo_resource().Table(table_name("contractor_profiles"))
+        self.table = get_dynamo_resource().Table(table_name("contractors"))
 
     def upsert_profile(self, profile: Dict[str, Any]) -> None:
         self.table.put_item(Item=profile)
