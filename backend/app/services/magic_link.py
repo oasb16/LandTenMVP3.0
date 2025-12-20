@@ -43,9 +43,31 @@ class MagicLinkService:
 
         # Save to DynamoDB
         try:
-            self.table.put_item(Item=token.model_dump(mode="json"))
+            # Convert to dict with ISO datetime strings for DynamoDB
+            token_dict = token.model_dump()
+
+            # Convert datetime objects to ISO strings
+            if isinstance(token_dict.get('created_at'), datetime):
+                token_dict['created_at'] = token_dict['created_at'].isoformat()
+            if isinstance(token_dict.get('expires_at'), datetime):
+                token_dict['expires_at'] = token_dict['expires_at'].isoformat()
+            if token_dict.get('used_at') and isinstance(token_dict['used_at'], datetime):
+                token_dict['used_at'] = token_dict['used_at'].isoformat()
+
+            print(f"[MagicLinkService] Saving token to DynamoDB: {token.token_id}")
+            print(f"[MagicLinkService] Token: {token.token[:20]}...")
+            print(f"[MagicLinkService] Table: {self.table_name}")
+            print(f"[MagicLinkService] Token dict keys: {list(token_dict.keys())}")
+
+            self.table.put_item(Item=token_dict)
+
+            print(f"[MagicLinkService] ✓ Token saved successfully to {self.table_name}")
         except ClientError as e:
+            print(f"[MagicLinkService] ✗ DynamoDB ClientError: {str(e)}")
             raise Exception(f"Failed to create magic link: {str(e)}")
+        except Exception as e:
+            print(f"[MagicLinkService] ✗ Unexpected error: {str(e)}")
+            raise
 
         return token
 
@@ -60,24 +82,52 @@ class MagicLinkService:
             MagicLinkToken if valid, None otherwise
         """
         try:
+            print(f"[MagicLinkService] Verifying token: {token[:20]}...")
+            print(f"[MagicLinkService] Scanning table: {self.table_name}")
+
             # Scan for token (in production, consider using GSI)
             response = self.table.scan(
                 FilterExpression="token = :token", ExpressionAttributeValues={":token": token}
             )
 
+            print(f"[MagicLinkService] Scan returned {len(response.get('Items', []))} items")
+
             if not response.get("Items"):
+                print(f"[MagicLinkService] ✗ Token not found in database")
+                # Let's also check what tokens ARE in the table
+                all_response = self.table.scan()
+                print(f"[MagicLinkService] Total items in table: {len(all_response.get('Items', []))}")
+                if all_response.get('Items'):
+                    print(f"[MagicLinkService] Sample token IDs in table: {[item.get('token_id') for item in all_response.get('Items', [])[:3]]}")
                 return None
 
-            magic_link = MagicLinkToken(**response["Items"][0])
+            print(f"[MagicLinkService] ✓ Token found in database")
+            item_data = response["Items"][0]
+            print(f"[MagicLinkService] Token data keys: {list(item_data.keys())}")
+
+            magic_link = MagicLinkToken(**item_data)
 
             # Check if valid
+            print(f"[MagicLinkService] Checking if token is valid...")
+            print(f"[MagicLinkService]   is_used: {magic_link.is_used}")
+            print(f"[MagicLinkService]   is_expired: {magic_link.is_expired}")
+            print(f"[MagicLinkService]   expires_at: {magic_link.expires_at}")
+            print(f"[MagicLinkService]   current time: {datetime.utcnow()}")
+
             if not magic_link.is_valid():
+                print(f"[MagicLinkService] ✗ Token is not valid")
                 return None
 
+            print(f"[MagicLinkService] ✓ Token is valid")
             return magic_link
 
         except ClientError as e:
-            print(f"Error verifying token: {str(e)}")
+            print(f"[MagicLinkService] ✗ DynamoDB ClientError: {str(e)}")
+            return None
+        except Exception as e:
+            print(f"[MagicLinkService] ✗ Unexpected error during verification: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return None
 
     async def mark_token_used(self, token: str, contractor_id: str) -> bool:
