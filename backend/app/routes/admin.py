@@ -9,18 +9,13 @@ from botocore.exceptions import ClientError
 import os
 import logging
 
-from ..deps.dynamo import get_dynamo_resource
+from ..deps.dynamo import get_dynamo_resource, table_name as get_table_name
 
 # Configure router
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
 # Configure logging
 logger = logging.getLogger(__name__)
-
-def get_table_name(base_name: str) -> str:
-    """Get table name with environment prefix."""
-    env = os.getenv("ENVIRONMENT", "prod")
-    return f"landten-{base_name}" if env == "prod" else f"landten-{env}-{base_name}"
 
 
 @router.post("/setup/contractors-table")
@@ -37,18 +32,18 @@ async def create_contractors_table():
     """
     try:
         dynamodb = get_dynamo_resource()
-        table_name = get_table_name("contractors")
+        contractors_table_name = get_table_name("contractors")
 
-        logger.info(f"[admin] Creating contractors table: {table_name}")
+        logger.info(f"[admin] Creating contractors table: {contractors_table_name}")
 
         # Check if table already exists
         try:
-            existing_table = dynamodb.Table(table_name)
+            existing_table = dynamodb.Table(contractors_table_name)
             existing_table.load()
             return {
                 "status": "already_exists",
-                "message": f"Table {table_name} already exists",
-                "table_name": table_name,
+                "message": f"Table {contractors_table_name} already exists",
+                "table_name": contractors_table_name,
                 "table_status": existing_table.table_status
             }
         except ClientError as e:
@@ -57,7 +52,7 @@ async def create_contractors_table():
 
         # Create table
         table = dynamodb.create_table(
-            TableName=table_name,
+            TableName=contractors_table_name,
             KeySchema=[
                 {
                     'AttributeName': 'contractor_id',
@@ -100,14 +95,14 @@ async def create_contractors_table():
         )
 
         # Wait for table to be created
-        table.meta.client.get_waiter('table_exists').wait(TableName=table_name)
+        table.meta.client.get_waiter('table_exists').wait(TableName=contractors_table_name)
 
-        logger.info(f"[admin] ✅ Table created successfully: {table_name}")
+        logger.info(f"[admin] ✅ Table created successfully: {contractors_table_name}")
 
         return {
             "status": "created",
-            "message": f"Table {table_name} created successfully",
-            "table_name": table_name,
+            "message": f"Table {contractors_table_name} created successfully",
+            "table_name": contractors_table_name,
             "table_arn": table.table_arn,
             "table_status": table.table_status
         }
@@ -141,13 +136,13 @@ async def get_tables_status():
         status = {}
 
         for base_name in tables_to_check:
-            table_name = get_table_name(base_name)
+            tbl_name = get_table_name(base_name)
             try:
-                table = dynamodb.Table(table_name)
+                table = dynamodb.Table(tbl_name)
                 table.load()
                 status[base_name] = {
                     "exists": True,
-                    "table_name": table_name,
+                    "table_name": tbl_name,
                     "status": table.table_status,
                     "item_count": table.item_count
                 }
@@ -155,7 +150,7 @@ async def get_tables_status():
                 if e.response['Error']['Code'] == 'ResourceNotFoundException':
                     status[base_name] = {
                         "exists": False,
-                        "table_name": table_name
+                        "table_name": tbl_name
                     }
                 else:
                     status[base_name] = {
