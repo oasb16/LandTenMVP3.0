@@ -88,11 +88,16 @@ async def verify_magic_link(request: MagicLinkVerify):
             )
 
         # Check if contractor already exists with this email
-        contractor = await contractor_service.get_contractor_by_email(
-            magic_link_token.email
-        )
-
-        contractor_id = contractor.contractor_id if contractor else None
+        contractor_id = None
+        try:
+            contractor = await contractor_service.get_contractor_by_email(
+                magic_link_token.email
+            )
+            contractor_id = contractor.contractor_id if contractor else None
+            print(f"[magic_links] Contractor lookup for {magic_link_token.email}: {contractor_id or 'Not found'}")
+        except Exception as e:
+            print(f"[magic_links] Error looking up contractor: {str(e)}")
+            # Continue without contractor_id - they'll register as new
 
         return MagicLinkVerifyResponse(
             valid=True,
