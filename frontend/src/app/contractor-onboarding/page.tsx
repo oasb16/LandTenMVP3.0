@@ -180,13 +180,13 @@ function ContractorOnboardingContent() {
       // Submit registration
       const response = await fetch(`${backendUrl}/api/v1/contractors/register`, {
         method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
           business_name: formData.business_name,
           email: formData.email,
           phone: formData.phone,
-          categories: JSON.stringify(formData.categories),
-          service_zip_codes: JSON.stringify(formData.service_zip_codes),
+          categories: formData.categories,
+          service_zip_codes: formData.service_zip_codes,
           license_number: formData.license_number || "",
         }),
       });
