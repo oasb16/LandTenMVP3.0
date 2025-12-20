@@ -26,6 +26,7 @@ from .routes import (
     payments,        # ✅ PHASE 2D: Stripe payment processing with 15% platform fee
     checkout_payments,  # ✅ Stripe Checkout for job/rent/platform payments
     magic_links,     # ✅ Contractor onboarding magic links
+    admin,           # ✅ Admin endpoints for database setup
     agent,
     thread,
     agent_summary,
@@ -336,6 +337,7 @@ app.include_router(contractors.router)  # ✅ PHASE 2C: Contractor work scheduli
 app.include_router(payments.router)  # ✅ PHASE 2D: Stripe payment processing with 15% platform fee
 app.include_router(checkout_payments.router, prefix="/api/checkout", tags=["checkout-payments"])  # ✅ Stripe Checkout sessions
 app.include_router(magic_links.router)  # ✅ Contractor onboarding magic links
+app.include_router(admin.router)  # ✅ Admin endpoints for database setup
 app.include_router(agent.router)
 app.include_router(thread.router)
 app.include_router(agent_summary.router)
