@@ -277,7 +277,7 @@ async def register_contractor(
             "status": ContractorStatus.PENDING.value,
             "insurance_verified": "not_verified",
             "stripe_onboarding_complete": False,
-            "total_earnings": 0.0,
+            "total_earnings": 0,  # Use int instead of float for DynamoDB
             "created_at": now.isoformat() + "Z",
             "updated_at": now.isoformat() + "Z"
         }
