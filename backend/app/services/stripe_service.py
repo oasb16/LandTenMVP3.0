@@ -1,13 +1,16 @@
 """
-Stripe payment service for contractor payouts.
+Stripe payment service for LandTen platform.
 
 This service handles:
 - Creating Stripe Connect accounts for contractors
 - Adding external bank accounts
-- Making payouts from landlord to contractor
+- Landlord → Contractor payments (job completion)
+- Tenant → Landlord payments (rent/fees)
+- Landlord → Platform payments (platform fees)
 """
 
 import os
+import logging
 from typing import Dict, Any, Optional
 import stripe
 from dotenv import load_dotenv
@@ -15,6 +18,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+logger = logging.getLogger(__name__)
 
 
 class StripeService:
@@ -207,3 +211,288 @@ class StripeService:
             "payouts_enabled": account.payouts_enabled,
             "requirements": account.requirements
         }
+
+    @staticmethod
+    def create_job_payment_session(
+        job_id: str,
+        bid_id: str,
+        contractor_name: str,
+        contractor_email: str,
+        landlord_email: str,
+        amount: float,
+        description: str = "",
+        success_url: str = None,
+        cancel_url: str = None
+    ) -> Dict[str, Any]:
+        """
+        Create a Stripe checkout session for landlord paying contractor.
+
+        Args:
+            job_id: Job ID
+            bid_id: Winning bid ID
+            contractor_name: Contractor name
+            contractor_email: Contractor email
+            landlord_email: Landlord email (payer)
+            amount: Amount in dollars
+            description: Job description
+            success_url: Success redirect URL
+            cancel_url: Cancel redirect URL
+
+        Returns:
+            Dict containing checkout URL and session ID
+        """
+        try:
+            # Find or create customer for landlord
+            customer = None
+            if landlord_email:
+                existing_customers = stripe.Customer.list(
+                    email=landlord_email,
+                    limit=1
+                )
+
+                if existing_customers.data:
+                    customer = existing_customers.data[0]
+                else:
+                    customer = stripe.Customer.create(
+                        email=landlord_email,
+                    )
+
+            # Create checkout session
+            session_params = {
+                "mode": "payment",
+                "line_items": [
+                    {
+                        "price_data": {
+                            "currency": "usd",
+                            "product_data": {
+                                "name": f"Job Payment - {contractor_name}",
+                                "description": description or "Payment for completed work",
+                            },
+                            "unit_amount": int(round(amount * 100)),  # Convert to cents
+                        },
+                        "quantity": 1,
+                    },
+                ],
+                "metadata": {
+                    "job_id": job_id,
+                    "bid_id": bid_id,
+                    "contractor_email": contractor_email,
+                    "payment_type": "job_completion",
+                },
+                "success_url": success_url or f"{os.getenv('FRONTEND_URL', 'http://localhost:3000')}/landlord/jobs/{job_id}?payment=success",
+                "cancel_url": cancel_url or f"{os.getenv('FRONTEND_URL', 'http://localhost:3000')}/landlord/jobs/{job_id}?payment=cancelled",
+            }
+
+            if customer:
+                session_params["customer"] = customer.id
+            else:
+                session_params["customer_email"] = landlord_email
+
+            session = stripe.checkout.Session.create(**session_params)
+
+            return {
+                "success": True,
+                "checkoutUrl": session.url,
+                "sessionId": session.id,
+            }
+
+        except stripe.error.StripeError as e:
+            logger.error(f"Stripe error: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+        except Exception as e:
+            logger.error(f"Error creating checkout session: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+    @staticmethod
+    def create_rent_payment_session(
+        property_id: str,
+        tenant_name: str,
+        tenant_email: str,
+        landlord_email: str,
+        amount: float,
+        period: str = "",
+        success_url: str = None,
+        cancel_url: str = None
+    ) -> Dict[str, Any]:
+        """
+        Create a Stripe checkout session for tenant paying rent.
+
+        Args:
+            property_id: Property ID
+            tenant_name: Tenant name
+            tenant_email: Tenant email (payer)
+            landlord_email: Landlord email (receiver)
+            amount: Rent amount in dollars
+            period: Rent period (e.g., "January 2024")
+            success_url: Success redirect URL
+            cancel_url: Cancel redirect URL
+
+        Returns:
+            Dict containing checkout URL and session ID
+        """
+        try:
+            # Find or create customer for tenant
+            customer = None
+            if tenant_email:
+                existing_customers = stripe.Customer.list(
+                    email=tenant_email,
+                    limit=1
+                )
+
+                if existing_customers.data:
+                    customer = existing_customers.data[0]
+                else:
+                    customer = stripe.Customer.create(
+                        email=tenant_email,
+                        name=tenant_name,
+                    )
+
+            # Create checkout session
+            session_params = {
+                "mode": "payment",
+                "line_items": [
+                    {
+                        "price_data": {
+                            "currency": "usd",
+                            "product_data": {
+                                "name": f"Rent Payment{' - ' + period if period else ''}",
+                                "description": f"Property: {property_id}",
+                            },
+                            "unit_amount": int(round(amount * 100)),
+                        },
+                        "quantity": 1,
+                    },
+                ],
+                "metadata": {
+                    "property_id": property_id,
+                    "landlord_email": landlord_email,
+                    "period": period or "",
+                    "payment_type": "rent",
+                },
+                "success_url": success_url or f"{os.getenv('FRONTEND_URL', 'http://localhost:3000')}/tenant/payments?status=success",
+                "cancel_url": cancel_url or f"{os.getenv('FRONTEND_URL', 'http://localhost:3000')}/tenant/payments?status=cancelled",
+            }
+
+            if customer:
+                session_params["customer"] = customer.id
+            else:
+                session_params["customer_email"] = tenant_email
+
+            session = stripe.checkout.Session.create(**session_params)
+
+            return {
+                "success": True,
+                "checkoutUrl": session.url,
+                "sessionId": session.id,
+            }
+
+        except stripe.error.StripeError as e:
+            logger.error(f"Stripe error: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+        except Exception as e:
+            logger.error(f"Error creating checkout session: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+    @staticmethod
+    def create_platform_fee_session(
+        landlord_id: str,
+        landlord_email: str,
+        landlord_name: str,
+        amount: float,
+        description: str = "Platform subscription fee",
+        success_url: str = None,
+        cancel_url: str = None
+    ) -> Dict[str, Any]:
+        """
+        Create a Stripe checkout session for landlord paying platform fees.
+
+        Args:
+            landlord_id: Landlord ID
+            landlord_email: Landlord email (payer)
+            landlord_name: Landlord name
+            amount: Fee amount in dollars
+            description: Fee description
+            success_url: Success redirect URL
+            cancel_url: Cancel redirect URL
+
+        Returns:
+            Dict containing checkout URL and session ID
+        """
+        try:
+            # Find or create customer for landlord
+            customer = None
+            if landlord_email:
+                existing_customers = stripe.Customer.list(
+                    email=landlord_email,
+                    limit=1
+                )
+
+                if existing_customers.data:
+                    customer = existing_customers.data[0]
+                else:
+                    customer = stripe.Customer.create(
+                        email=landlord_email,
+                        name=landlord_name,
+                    )
+
+            # Create checkout session
+            session_params = {
+                "mode": "payment",
+                "line_items": [
+                    {
+                        "price_data": {
+                            "currency": "usd",
+                            "product_data": {
+                                "name": "LandTen Platform Fee",
+                                "description": description,
+                            },
+                            "unit_amount": int(round(amount * 100)),
+                        },
+                        "quantity": 1,
+                    },
+                ],
+                "metadata": {
+                    "landlord_id": landlord_id,
+                    "payment_type": "platform_fee",
+                },
+                "success_url": success_url or f"{os.getenv('FRONTEND_URL', 'http://localhost:3000')}/landlord/billing?status=success",
+                "cancel_url": cancel_url or f"{os.getenv('FRONTEND_URL', 'http://localhost:3000')}/landlord/billing?status=cancelled",
+            }
+
+            if customer:
+                session_params["customer"] = customer.id
+            else:
+                session_params["customer_email"] = landlord_email
+
+            session = stripe.checkout.Session.create(**session_params)
+
+            return {
+                "success": True,
+                "checkoutUrl": session.url,
+                "sessionId": session.id,
+            }
+
+        except stripe.error.StripeError as e:
+            logger.error(f"Stripe error: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+        except Exception as e:
+            logger.error(f"Error creating checkout session: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
