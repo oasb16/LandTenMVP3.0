@@ -23,7 +23,7 @@ import json
 from datetime import datetime
 
 # API base URL - adjust as needed
-API_BASE_URL = os.getenv("BACKEND_URL", "http://localhost:8080")
+API_BASE_URL = os.getenv("BACKEND_URL", "https://landtenmvp3-55ce0053f28a.herokuapp.com/")
 
 
 class Colors:

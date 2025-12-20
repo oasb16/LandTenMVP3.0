@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 # AWS Configuration
 dynamodb = get_dynamo_resource()
 s3_client = boto3.client('s3')
-contractors_table = dynamodb.Table(table_name("contractors"))
+contractors_table = dynamodb.Table(table_name("landten-contractors"))
 jobs_table = dynamodb.Table(table_name("jobs"))
 
 # S3 Bucket for completion photos
