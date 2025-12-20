@@ -111,7 +111,7 @@ function ContractorOnboardingContent() {
 
       try {
         const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL;
-        const response = await fetch(`${backendUrl}/magic-links/verify`, {
+        const response = await fetch(`${backendUrl}/api/v1/magic-links/verify`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ token }),
@@ -155,7 +155,7 @@ function ContractorOnboardingContent() {
   const loadDashboard = async (contractorId: string) => {
     try {
       const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL;
-      const response = await fetch(`${backendUrl}/magic-links/onboarding-dashboard/${contractorId}`);
+      const response = await fetch(`${backendUrl}/api/v1/magic-links/onboarding-dashboard/${contractorId}`);
 
       if (!response.ok) {
         throw new Error("Failed to load dashboard data");
@@ -178,7 +178,7 @@ function ContractorOnboardingContent() {
       const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL;
 
       // Submit registration
-      const response = await fetch(`${backendUrl}/contractors/register`, {
+      const response = await fetch(`${backendUrl}/api/v1/contractors/register`, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({
@@ -204,7 +204,7 @@ function ContractorOnboardingContent() {
       }
 
       // Mark magic link as used
-      await fetch(`${backendUrl}/magic-links/mark-used/${token}?contractor_id=${contractorId}`, {
+      await fetch(`${backendUrl}/api/v1/magic-links/mark-used/${token}?contractor_id=${contractorId}`, {
         method: "POST",
       });
 
