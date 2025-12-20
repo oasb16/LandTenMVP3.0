@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 # AWS Configuration
 dynamodb = get_dynamo_resource()
 s3_client = boto3.client('s3')
-contractors_table = dynamodb.Table(table_name("landten-contractors"))
+contractors_table = dynamodb.Table(table_name("contractors"))
 jobs_table = dynamodb.Table(table_name("jobs"))
 
 # S3 Bucket for completion photos
@@ -284,6 +284,9 @@ async def register_contractor(
 
         # Save to DynamoDB
         try:
+            logger.info(f"Putting item in {table_name('landten-contractors')}")
+            logger.info(f"[contractors] Saving contractor: {contractor_id}")
+            logger.info(f"Contractor Data: {contractor_data}")
             contractors_table.put_item(Item=contractor_data)
             logger.info(f"[contractors] ✅ Contractor registered: {contractor_id}")
         except ClientError as e:
