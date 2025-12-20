@@ -24,7 +24,7 @@ from .routes import (
     contractor,      # ✅ Contractor profile + payouts (simple API)
     contractors,     # ✅ PHASE 2C: Contractor work scheduling and completion
     payments,        # ✅ PHASE 2D: Stripe payment processing with 15% platform fee
-    payment,         # ✅ Hotel payment integration (Elavon + Stripe checkout)
+    checkout_payments,  # ✅ Stripe Checkout for job/rent/platform payments
     magic_links,     # ✅ Contractor onboarding magic links
     agent,
     thread,
@@ -334,7 +334,7 @@ app.include_router(jobs.router)  # ✅ PHASE 2B: Landlord job creation and bid m
 app.include_router(contractor.router)  # ✅ Contractor profile + payouts (simple API)
 app.include_router(contractors.router)  # ✅ PHASE 2C: Contractor work scheduling and completion
 app.include_router(payments.router)  # ✅ PHASE 2D: Stripe payment processing with 15% platform fee
-app.include_router(payment.router, prefix="/api/payment", tags=["hotel-payment"])  # ✅ Hotel payment integration (Elavon + Stripe)
+app.include_router(checkout_payments.router, prefix="/api/checkout", tags=["checkout-payments"])  # ✅ Stripe Checkout sessions
 app.include_router(magic_links.router)  # ✅ Contractor onboarding magic links
 app.include_router(agent.router)
 app.include_router(thread.router)
