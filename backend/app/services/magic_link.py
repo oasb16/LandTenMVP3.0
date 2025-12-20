@@ -86,8 +86,11 @@ class MagicLinkService:
             print(f"[MagicLinkService] Scanning table: {self.table_name}")
 
             # Scan for token (in production, consider using GSI)
+            # Note: 'token' is a reserved keyword in DynamoDB, so we use ExpressionAttributeNames
             response = self.table.scan(
-                FilterExpression="token = :token", ExpressionAttributeValues={":token": token}
+                FilterExpression="#token = :token_value",
+                ExpressionAttributeNames={"#token": "token"},
+                ExpressionAttributeValues={":token_value": token}
             )
 
             print(f"[MagicLinkService] Scan returned {len(response.get('Items', []))} items")
@@ -143,8 +146,11 @@ class MagicLinkService:
         """
         try:
             # Find token first
+            # Note: 'token' is a reserved keyword in DynamoDB, so we use ExpressionAttributeNames
             response = self.table.scan(
-                FilterExpression="token = :token", ExpressionAttributeValues={":token": token}
+                FilterExpression="#token = :token_value",
+                ExpressionAttributeNames={"#token": "token"},
+                ExpressionAttributeValues={":token_value": token}
             )
 
             if not response.get("Items"):
