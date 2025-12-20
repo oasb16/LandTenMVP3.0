@@ -1,7 +1,7 @@
 """Contractor Service for business logic."""
 from typing import Optional
-from app.repos.contractor_repo import ContractorRepo
-from app.models.contractor import Contractor
+from ..repos.contractor_repo import ContractorRepo
+from ..models.contractor import Contractor
 
 
 class ContractorService:

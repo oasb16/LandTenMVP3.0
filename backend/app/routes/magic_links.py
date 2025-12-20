@@ -5,15 +5,15 @@ from typing import Optional, List, Dict, Any
 import boto3
 from botocore.exceptions import ClientError
 
-from app.models.magic_link import (
+from ..models.magic_link import (
     MagicLinkCreate,
     MagicLinkVerify,
     MagicLinkResponse,
     MagicLinkVerifyResponse,
 )
-from app.services.magic_link import magic_link_service
-from app.services.contractor import contractor_service
-from app.deps.dynamo import get_dynamo_resource, table_name
+from ..services.magic_link import magic_link_service
+from ..services.contractor import contractor_service
+from ..deps.dynamo import get_dynamo_resource, table_name
 
 router = APIRouter(prefix="/api/v1/magic-links", tags=["magic-links"])
 

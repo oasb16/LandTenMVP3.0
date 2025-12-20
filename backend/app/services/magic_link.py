@@ -5,7 +5,7 @@ from typing import Optional
 import boto3
 from botocore.exceptions import ClientError
 
-from app.models.magic_link import MagicLinkToken, MagicLinkCreate
+from ..models.magic_link import MagicLinkToken, MagicLinkCreate
 
 
 class MagicLinkService:
