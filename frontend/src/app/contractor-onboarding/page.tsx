@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -77,7 +77,7 @@ interface DashboardData {
   payments: Payment;
 }
 
-export default function ContractorOnboardingPage() {
+function ContractorOnboardingContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const token = searchParams.get("token");
@@ -692,4 +692,24 @@ export default function ContractorOnboardingPage() {
   }
 
   return null;
+}
+
+// Wrapper component with Suspense boundary for useSearchParams
+export default function ContractorOnboardingPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
+          <Card className="w-full max-w-md">
+            <CardContent className="pt-6 pb-6 flex flex-col items-center">
+              <Loader2 className="h-12 w-12 animate-spin text-blue-600 mb-4" />
+              <p className="text-lg font-medium text-gray-700">Loading...</p>
+            </CardContent>
+          </Card>
+        </div>
+      }
+    >
+      <ContractorOnboardingContent />
+    </Suspense>
+  );
 }
