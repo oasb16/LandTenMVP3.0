@@ -2,10 +2,11 @@
 
 import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2, AlertCircle, CheckCircle2, Lock } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Loader2, AlertCircle } from "lucide-react";
 import { ContractorChatProvider } from "@/components/ContractorChatProvider";
 import ContractorChatPane from "@/components/ContractorChatPane";
+import ContractorOnboardingDashboardPro from "@/components/ContractorOnboardingDashboardPro";
 
 interface OnboardingStatus {
   contractor_id: string;
@@ -169,115 +170,11 @@ function ContractorOnboardingContent() {
   return (
     <ContractorChatProvider contractorId={contractorId} contractorEmail={contractorEmail || ""}>
       <div className="flex h-screen bg-gray-50">
-        {/* Left side: Dashboard Preview (grayed out until complete) */}
-        <div
-        className={`flex-1 overflow-y-auto p-6 transition-opacity duration-300 ${
-          !onboardingStatus?.onboarding_complete ? 'opacity-40 pointer-events-none' : ''
-        }`}
-      >
-        <div className="max-w-6xl mx-auto space-y-6">
-          {/* Header */}
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900">Contractor Dashboard</h1>
-              <p className="text-gray-600 mt-1">Welcome to HomeAI</p>
-            </div>
-            {!onboardingStatus?.onboarding_complete && (
-              <div className="flex items-center gap-2 text-amber-600 bg-amber-50 px-4 py-2 rounded-lg">
-                <Lock className="h-5 w-5" />
-                <span className="font-medium">Complete onboarding to unlock</span>
-              </div>
-            )}
-          </div>
-
-          {/* Profile Section */}
-          <Card className={onboardingStatus?.onboarding_license_verified ? 'border-green-200' : ''}>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2">
-                  Profile
-                  {onboardingStatus?.onboarding_license_verified && (
-                    <CheckCircle2 className="h-5 w-5 text-green-600" />
-                  )}
-                </CardTitle>
-              </div>
-              <CardDescription>Your business information</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm text-gray-600">Business Name</p>
-                  <p className="font-medium">Your Business Name</p>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-600">License Number</p>
-                  <p className="font-medium">License #XXXXX</p>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-600">Email</p>
-                  <p className="font-medium">{contractorEmail}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-600">Service Areas</p>
-                  <p className="font-medium">ZIP codes</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Jobs Section */}
-          <Card className={onboardingStatus?.onboarding_identity_verified ? 'border-green-200' : ''}>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2">
-                  Available Jobs
-                  {onboardingStatus?.onboarding_identity_verified && (
-                    <CheckCircle2 className="h-5 w-5 text-green-600" />
-                  )}
-                </CardTitle>
-              </div>
-              <CardDescription>Jobs you can bid on</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="text-center py-8 text-gray-500">
-                <p>No jobs available yet</p>
-                <p className="text-sm mt-2">Complete onboarding to see available jobs</p>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Payments Section */}
-          <Card className={onboardingStatus?.onboarding_payment_setup ? 'border-green-200' : ''}>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2">
-                  Payments
-                  {onboardingStatus?.onboarding_payment_setup && (
-                    <CheckCircle2 className="h-5 w-5 text-green-600" />
-                  )}
-                </CardTitle>
-              </div>
-              <CardDescription>Your earnings and payouts</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-3 gap-4">
-                <div className="text-center p-4 bg-gray-50 rounded-lg">
-                  <p className="text-sm text-gray-600">Total Earnings</p>
-                  <p className="text-2xl font-bold text-gray-900">$0</p>
-                </div>
-                <div className="text-center p-4 bg-gray-50 rounded-lg">
-                  <p className="text-sm text-gray-600">Pending</p>
-                  <p className="text-2xl font-bold text-gray-900">$0</p>
-                </div>
-                <div className="text-center p-4 bg-gray-50 rounded-lg">
-                  <p className="text-sm text-gray-600">Paid Out</p>
-                  <p className="text-2xl font-bold text-gray-900">$0</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+        {/* Left side: Enhanced Dashboard with Psychological Hooks */}
+        <ContractorOnboardingDashboardPro
+          onboardingStatus={onboardingStatus}
+          contractorEmail={contractorEmail}
+        />
 
       {/* Right side: Chat Interface */}
       <div className="w-96 border-l border-gray-200 bg-white flex flex-col">
