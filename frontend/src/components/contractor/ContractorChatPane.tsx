@@ -8,7 +8,7 @@ import {
   IdentityVerificationCard,
   BankAccountSetupCard,
   SuccessCard,
-} from "./onboarding/OnboardingCards";
+} from "../onboarding/OnboardingCards";
 
 type Props = {
   className?: string;

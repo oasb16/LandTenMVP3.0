@@ -435,7 +435,7 @@ def _sanitize_members(members: List[str]) -> Tuple[List[str], Dict[str, Dict[str
 
 
 @router.get("/chat/stream/token")
-def get_stream_token(user_id: str, persona: str, token: str = Depends(verify_firebase_token)):
+def get_stream_token(user_id: str, persona: str, contractor_id: Optional[str] = None, token: str = Depends(verify_firebase_token)):
     api_key = os.getenv("STREAM_CHAT_API_KEY")
     allowed_roles = {
         role.strip() for role in os.getenv("STREAM_ALLOWED_ROLES", "user,admin,guest").split(",") if role.strip()
@@ -458,14 +458,24 @@ def get_stream_token(user_id: str, persona: str, token: str = Depends(verify_fir
             sanitized_user_id = f"user-{uuid4().hex[:8]}"
             print(f"[stream] sanitized user_id empty; generated {sanitized_user_id}")
 
+        # Determine channel ID based on persona and contractor_id
+        # For contractor onboarding, create unique channel per contractor
+        if persona == "contractor_onboarding" and contractor_id:
+            channel_id = f"contractor-{_slugify(contractor_id)}"
+            channel_name = f"Contractor Onboarding - {contractor_id}"
+            print(f"[stream] Creating unique contractor channel: {channel_id}")
+        else:
+            channel_id = DEFAULT_CHANNEL_ID
+            channel_name = "LandTen Conversations"
+
         # Check token cache first
         cached_token = _token_cache.get(sanitized_user_id, persona)
         if cached_token:
-            print(f"[stream] Returning cached token for {sanitized_user_id}")
+            print(f"[stream] Returning cached token for {sanitized_user_id} with channel {channel_id}")
             return {
                 "api_key": api_key,
                 "token": cached_token,
-                "channel_id": DEFAULT_CHANNEL_ID,
+                "channel_id": channel_id,
                 "user_id": sanitized_user_id,
                 "display_user_id": user_id,
                 "persona": persona,
@@ -482,7 +492,7 @@ def get_stream_token(user_id: str, persona: str, token: str = Depends(verify_fir
         client.upsert_user(user_payload)
 
         # Ensure channel exists and has member
-        channel = client.channel("messaging", DEFAULT_CHANNEL_ID, {"name": "LandTen Conversations"})
+        channel = client.channel("messaging", channel_id, {"name": channel_name})
         try:
             channel.create(user_id=sanitized_user_id)
         except (KeyError, StreamAPIException) as exc:
@@ -515,7 +525,7 @@ def get_stream_token(user_id: str, persona: str, token: str = Depends(verify_fir
                 print(f"[stream] agent add_members skipped: {exc}")
 
         # Generate new token
-        print(f"[stream] Generating new token for {sanitized_user_id}")
+        print(f"[stream] Generating new token for {sanitized_user_id} with channel {channel_id}")
         token_value = client.create_token(sanitized_user_id)
 
         # Cache the token
@@ -524,7 +534,7 @@ def get_stream_token(user_id: str, persona: str, token: str = Depends(verify_fir
         return {
             "api_key": api_key,
             "token": token_value,
-            "channel_id": DEFAULT_CHANNEL_ID,
+            "channel_id": channel_id,
             "user_id": sanitized_user_id,
             "display_user_id": user_id,
             "persona": persona,

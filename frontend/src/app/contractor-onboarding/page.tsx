@@ -4,8 +4,8 @@ import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Loader2, AlertCircle } from "lucide-react";
-import { ContractorChatProvider } from "@/components/ContractorChatProvider";
-import ContractorChatPane from "@/components/ContractorChatPane";
+import { ContractorChatProvider } from "@/components/contractor/ContractorChatProvider";
+import ContractorChatPane from "@/components/contractor/ContractorChatPane";
 import ContractorOnboardingDashboardPro from "@/components/ContractorOnboardingDashboardPro";
 
 interface OnboardingStatus {
