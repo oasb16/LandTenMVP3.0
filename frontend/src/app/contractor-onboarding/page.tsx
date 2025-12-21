@@ -325,6 +325,7 @@ function ContractorOnboardingContent() {
           <ContractorChatPane className="h-full" />
         </div>
       </div>
+      </div>
     </ContractorChatProvider>
   );
 }
