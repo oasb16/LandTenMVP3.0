@@ -21,7 +21,7 @@ import os
 
 from ..models.contractor import Contractor, ContractorCreate, ContractorRegisterRequest, ContractorStatus
 from ..models.job import Job, JobStatus, JobPhoto
-from ..deps.auth import verify_firebase_token
+from ..deps.auth import verify_firebase_token, optional_firebase_token
 from ..deps.dynamo import get_dynamo_resource, table_name
 from ..services.notification_service import get_notification_service
 
@@ -235,13 +235,13 @@ async def send_notification(user_id: str, notification_type: str, data: Dict[str
 @router.post("/register")
 async def register_contractor(
     request: ContractorRegisterRequest,
-    current_user: str = Depends(verify_firebase_token)
+    current_user: Optional[str] = Depends(optional_firebase_token)
 ):
     """
     Register as a contractor.
 
     Flow:
-    1. Get user_id from token
+    1. Get user_id from token (or use email if no token - magic link flow)
     2. Create Contractor model with initial stats (rating=0, jobs=0)
     3. Save to DynamoDB contractors table
     4. Return contractor profile
@@ -254,8 +254,11 @@ async def register_contractor(
     )
 
     try:
-        # Get user ID
-        user_id = get_current_user_from_token(current_user)
+        # Get user ID - use token if available, otherwise use email (magic link flow)
+        if current_user:
+            user_id = get_current_user_from_token(current_user)
+        else:
+            user_id = request.email  # For magic link onboarding, use email as user_id
 
         # Generate contractor ID
         contractor_id = f"cont_{uuid.uuid4().hex[:12]}"

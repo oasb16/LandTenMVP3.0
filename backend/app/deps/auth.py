@@ -41,3 +41,38 @@ def verify_firebase_token(credentials: HTTPAuthorizationCredentials = Depends(be
 
     # Fallback accepts any non-empty token
     return token
+
+
+def optional_firebase_token(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)) -> Optional[str]:
+    """
+    Optional Firebase token verification - returns None if no token provided.
+    Used for endpoints that support both authenticated and unauthenticated access.
+    """
+    # Dev-mode bypass controlled by env AUTH_DISABLED
+    if os.getenv("AUTH_DISABLED", "false").lower() in {"1", "true", "yes"}:
+        return "dev-mode"
+
+    # If no credentials, return None (no error)
+    if not credentials or not credentials.credentials:
+        return None
+
+    token = credentials.credentials
+
+    # Production path using firebase-admin if available and enabled
+    if os.getenv("USE_FIREBASE_ADMIN", "false").lower() in {"1","true","yes"}:
+        if not firebase_admin_available:
+            return None
+        if not firebase_admin._apps:
+            cred_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or os.getenv("FIREBASE_CREDENTIALS")
+            if cred_path and os.path.isfile(cred_path):
+                firebase_admin.initialize_app(fb_credentials.Certificate(cred_path))
+            else:
+                firebase_admin.initialize_app()
+        try:
+            decoded = fb_auth.verify_id_token(token)
+            return decoded.get("uid", "user")
+        except Exception:
+            return None
+
+    # Fallback accepts any non-empty token
+    return token
