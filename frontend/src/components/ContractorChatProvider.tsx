@@ -34,6 +34,7 @@ export function ContractorChatProvider({ children, contractorId, contractorEmail
   // Initialize Stream client and channel
   useEffect(() => {
     let isMounted = true;
+    let streamClient: StreamChat | null = null;
 
     const initialize = async () => {
       setLoading(true);
@@ -58,8 +59,11 @@ export function ContractorChatProvider({ children, contractorId, contractorEmail
           throw new Error("Stream credentials incomplete");
         }
 
-        // Create Stream client
-        const streamClient = StreamChat.getInstance(api_key, { timeout: 6000 });
+        // Create Stream client (use unique instance, not singleton)
+        // This avoids conflicts with other Stream sessions in the app
+        streamClient = new StreamChat(api_key, { timeout: 6000 });
+
+        console.log("[ContractorChat] Connecting user:", user_id);
 
         // Connect user
         await streamClient.connectUser(
@@ -72,7 +76,10 @@ export function ContractorChatProvider({ children, contractorId, contractorEmail
 
         console.log("[ContractorChat] Connected to Stream as:", user_id);
 
-        if (!isMounted) return;
+        if (!isMounted) {
+          await streamClient.disconnectUser();
+          return;
+        }
 
         setClient(streamClient);
 
@@ -103,7 +110,10 @@ export function ContractorChatProvider({ children, contractorId, contractorEmail
             messages: { limit: INITIAL_MESSAGE_LOAD },
           });
 
-          if (!isMounted) return;
+          if (!isMounted) {
+            await streamClient.disconnectUser();
+            return;
+          }
 
           setActiveChannel(defaultChannel);
           setMessages(channelState.messages || []);
@@ -138,6 +148,14 @@ export function ContractorChatProvider({ children, contractorId, contractorEmail
           setError(err instanceof Error ? err.message : "Failed to connect to chat");
           setLoading(false);
         }
+        // Clean up on error
+        if (streamClient) {
+          try {
+            await streamClient.disconnectUser();
+          } catch (disconnectErr) {
+            console.warn("[ContractorChat] Failed to disconnect on error:", disconnectErr);
+          }
+        }
       }
     };
 
@@ -145,8 +163,11 @@ export function ContractorChatProvider({ children, contractorId, contractorEmail
 
     return () => {
       isMounted = false;
-      if (client) {
-        client.disconnectUser().catch(console.warn);
+      // Clean up: disconnect when component unmounts
+      if (streamClient) {
+        streamClient.disconnectUser().catch((err) => {
+          console.warn("[ContractorChat] Cleanup disconnect error:", err);
+        });
       }
     };
   }, [contractorId, contractorEmail]);
