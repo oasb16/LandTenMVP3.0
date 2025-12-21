@@ -129,17 +129,6 @@ function ContractorOnboardingContent() {
     }
   };
 
-  // Poll for onboarding status updates every 2 seconds
-  useEffect(() => {
-    if (!contractorId) return;
-
-    const interval = setInterval(async () => {
-      await loadOnboardingStatus(contractorId);
-    }, 2000);
-
-    return () => clearInterval(interval);
-  }, [contractorId]);
-
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
