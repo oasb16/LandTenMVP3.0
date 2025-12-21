@@ -3,6 +3,12 @@
 import { useCallback, useRef, useEffect } from "react";
 import { Loader2, WifiOff, Send } from "lucide-react";
 import { useContractorChat } from "./ContractorChatProvider";
+import {
+  LicenseVerificationCard,
+  IdentityVerificationCard,
+  BankAccountSetupCard,
+  SuccessCard,
+} from "./onboarding/OnboardingCards";
 
 type Props = {
   className?: string;
@@ -37,6 +43,45 @@ export default function ContractorChatPane({ className }: Props) {
       } catch (err) {
         console.error("Failed to send message:", err);
       }
+    },
+    [sendMessage]
+  );
+
+  // Card submit handlers
+  const handleLicenseSubmit = useCallback(
+    async (licenseNumber: string, businessAddress: string) => {
+      await sendMessage(`License #${licenseNumber}, Address: ${businessAddress}`, {
+        metadata: {
+          agentEnabled: true,
+          cardAction: "license_submit",
+          licenseNumber,
+          businessAddress,
+        },
+      });
+    },
+    [sendMessage]
+  );
+
+  const handleIdentityStart = useCallback(async () => {
+    await sendMessage("Starting identity verification", {
+      metadata: {
+        agentEnabled: true,
+        cardAction: "identity_start",
+      },
+    });
+  }, [sendMessage]);
+
+  const handleBankSubmit = useCallback(
+    async (routingNumber: string, accountNumber: string, accountName: string) => {
+      await sendMessage(`Bank account linked: ${accountName}`, {
+        metadata: {
+          agentEnabled: true,
+          cardAction: "bank_submit",
+          routingNumber,
+          accountNumber,
+          accountName,
+        },
+      });
     },
     [sendMessage]
   );
@@ -76,7 +121,36 @@ export default function ContractorChatPane({ className }: Props) {
       <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
         {messages.map((msg) => {
           const isBot = msg.user?.id?.startsWith("ai-") || msg.user?.name?.toLowerCase().includes("assistant");
+          const metadata = msg.metadata || {};
+          const cardType = metadata.card_type || metadata.cardType;
 
+          // Render dynamic cards for bot messages with card_type
+          if (isBot && cardType) {
+            return (
+              <div key={msg.id} className="flex justify-center">
+                <div className="max-w-md w-full">
+                  {cardType === "license_verification" && (
+                    <LicenseVerificationCard onSubmit={handleLicenseSubmit} />
+                  )}
+                  {cardType === "identity_verification" && (
+                    <IdentityVerificationCard onStart={handleIdentityStart} />
+                  )}
+                  {cardType === "bank_setup" && (
+                    <BankAccountSetupCard onSubmit={handleBankSubmit} />
+                  )}
+                  {cardType === "success" && (
+                    <SuccessCard
+                      title={metadata.title || "Success!"}
+                      message={metadata.message || "Step completed successfully"}
+                      icon={metadata.icon || "license"}
+                    />
+                  )}
+                </div>
+              </div>
+            );
+          }
+
+          // Regular text message rendering
           return (
             <div
               key={msg.id}
