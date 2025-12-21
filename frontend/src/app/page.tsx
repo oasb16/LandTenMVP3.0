@@ -51,6 +51,12 @@ export default async function LandingPage() {
           >
             ⚡ Full Workflow Experience
           </Link>
+          <Link
+            href="/test-contractor-onboarding"
+            className="inline-flex items-center justify-center rounded-md bg-gradient-to-r from-orange-600 to-red-600 px-6 py-3 font-semibold text-white hover:from-orange-700 hover:to-red-700 transition shadow-lg col-span-1 sm:col-span-2 md:col-span-3"
+          >
+            🧪 Test Contractor Onboarding (E2E)
+          </Link>
         </div>
         <div className="grid sm:grid-cols-3 gap-6 text-left">
           <div className="rounded-lg border border-slate-700 p-4 bg-slate-900/60">

@@ -278,6 +278,13 @@ async def register_contractor(
             "insurance_verified": "not_verified",
             "stripe_onboarding_complete": False,
             "total_earnings": 0,  # Use int instead of float for DynamoDB
+            # Onboarding progress for chat-based onboarding
+            "onboarding_license_submitted": False,
+            "onboarding_license_verified": False,
+            "onboarding_identity_verified": False,
+            "onboarding_payment_setup": False,
+            "onboarding_complete": False,
+            "onboarding_current_step": "welcome",
             "created_at": now.isoformat() + "Z",
             "updated_at": now.isoformat() + "Z"
         }
@@ -309,6 +316,113 @@ async def register_contractor(
             status_code=500,
             detail=f"Internal server error: {str(e)}"
         )
+
+
+# ============================================================================
+# ONBOARDING STATUS ENDPOINTS
+# ============================================================================
+
+@router.get("/{contractor_id}/onboarding-status")
+async def get_onboarding_status(contractor_id: str):
+    """
+    Get contractor onboarding status.
+
+    Returns current onboarding progress for chat-based onboarding flow.
+    """
+    try:
+        response = contractors_table.get_item(Key={"contractor_id": contractor_id})
+        contractor = response.get("Item")
+
+        if not contractor:
+            raise HTTPException(status_code=404, detail="Contractor not found")
+
+        return {
+            "contractor_id": contractor_id,
+            "onboarding_license_submitted": contractor.get("onboarding_license_submitted", False),
+            "onboarding_license_verified": contractor.get("onboarding_license_verified", False),
+            "onboarding_identity_verified": contractor.get("onboarding_identity_verified", False),
+            "onboarding_payment_setup": contractor.get("onboarding_payment_setup", False),
+            "onboarding_complete": contractor.get("onboarding_complete", False),
+            "onboarding_current_step": contractor.get("onboarding_current_step", "welcome"),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[contractors] Error getting onboarding status: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.patch("/{contractor_id}/onboarding-status")
+async def update_onboarding_status(
+    contractor_id: str,
+    license_submitted: Optional[bool] = None,
+    license_verified: Optional[bool] = None,
+    identity_verified: Optional[bool] = None,
+    payment_setup: Optional[bool] = None,
+    complete: Optional[bool] = None,
+    current_step: Optional[str] = None
+):
+    """
+    Update contractor onboarding status.
+
+    This endpoint is called by the chat agent tools to update progress.
+    """
+    try:
+        # Build update expression
+        update_parts = []
+        expression_values = {}
+
+        if license_submitted is not None:
+            update_parts.append("onboarding_license_submitted = :ls")
+            expression_values[":ls"] = license_submitted
+        if license_verified is not None:
+            update_parts.append("onboarding_license_verified = :lv")
+            expression_values[":lv"] = license_verified
+        if identity_verified is not None:
+            update_parts.append("onboarding_identity_verified = :iv")
+            expression_values[":iv"] = identity_verified
+        if payment_setup is not None:
+            update_parts.append("onboarding_payment_setup = :ps")
+            expression_values[":ps"] = payment_setup
+        if complete is not None:
+            update_parts.append("onboarding_complete = :oc")
+            expression_values[":oc"] = complete
+            # If onboarding is complete, activate the contractor
+            if complete:
+                update_parts.append("#status = :active")
+                expression_values[":active"] = "active"
+        if current_step is not None:
+            update_parts.append("onboarding_current_step = :cs")
+            expression_values[":cs"] = current_step
+
+        # Add updated_at timestamp
+        update_parts.append("updated_at = :updated")
+        expression_values[":updated"] = datetime.utcnow().isoformat() + "Z"
+
+        if not update_parts:
+            raise HTTPException(status_code=400, detail="No fields to update")
+
+        update_expression = "SET " + ", ".join(update_parts)
+
+        # Use ExpressionAttributeNames for reserved keyword 'status'
+        expression_names = {"#status": "status"} if complete else None
+
+        contractors_table.update_item(
+            Key={"contractor_id": contractor_id},
+            UpdateExpression=update_expression,
+            ExpressionAttributeValues=expression_values,
+            ExpressionAttributeNames=expression_names
+        )
+
+        logger.info(f"[contractors] Updated onboarding status for {contractor_id}")
+
+        return {"success": True, "contractor_id": contractor_id}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[contractors] Error updating onboarding status: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ============================================================================
