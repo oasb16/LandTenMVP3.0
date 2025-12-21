@@ -20,8 +20,9 @@ export async function GET(request: NextRequest) {
   const persona = "contractor_onboarding";
   const user_id = contractorEmail;
 
-  const url = `${backendBase}/chat/stream/token?user_id=${encodeURIComponent(user_id)}&persona=${encodeURIComponent(persona)}`;
-  console.log("[contractor-token] Fetching token for contractor:", contractorEmail, "from:", url);
+  // Include contractor_id so each contractor gets their own unique channel
+  const url = `${backendBase}/chat/stream/token?user_id=${encodeURIComponent(user_id)}&persona=${encodeURIComponent(persona)}&contractor_id=${encodeURIComponent(contractorId || "")}`;
+  console.log("[contractor-token] Fetching token for contractor:", contractorEmail, "contractor_id:", contractorId, "from:", url);
 
   try {
     const res = await fetch(url);
