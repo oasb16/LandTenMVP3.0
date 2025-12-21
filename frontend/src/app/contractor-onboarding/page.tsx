@@ -3,8 +3,9 @@
 import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Loader2, AlertCircle, CheckCircle2, Lock } from "lucide-react";
+import { ContractorChatProvider } from "@/components/ContractorChatProvider";
+import ContractorChatPane from "@/components/ContractorChatPane";
 
 interface OnboardingStatus {
   contractor_id: string;
@@ -166,9 +167,10 @@ function ContractorOnboardingContent() {
   }
 
   return (
-    <div className="flex h-screen bg-gray-50">
-      {/* Left side: Dashboard Preview (grayed out until complete) */}
-      <div
+    <ContractorChatProvider contractorId={contractorId} contractorEmail={contractorEmail || ""}>
+      <div className="flex h-screen bg-gray-50">
+        {/* Left side: Dashboard Preview (grayed out until complete) */}
+        <div
         className={`flex-1 overflow-y-auto p-6 transition-opacity duration-300 ${
           !onboardingStatus?.onboarding_complete ? 'opacity-40 pointer-events-none' : ''
         }`}
@@ -318,33 +320,12 @@ function ContractorOnboardingContent() {
           </div>
         </div>
 
-        {/* Chat placeholder - will be replaced with actual StreamChatPane */}
-        <div className="flex-1 p-4 overflow-y-auto bg-gray-50">
-          <div className="space-y-4">
-            <Alert>
-              <AlertDescription>
-                <strong>Chat onboarding coming soon!</strong>
-                <br />
-                This will be replaced with StreamChatPane for interactive onboarding.
-                <br /><br />
-                Contractor ID: <code className="text-xs">{contractorId}</code>
-              </AlertDescription>
-            </Alert>
-          </div>
-        </div>
-
-        {/* Chat input placeholder */}
-        <div className="p-4 border-t border-gray-200">
-          <input
-            type="text"
-            placeholder="Type your message..."
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-            disabled
-          />
-          <p className="text-xs text-gray-500 mt-2">Chat interface will be integrated here</p>
+        {/* Chat Interface */}
+        <div className="flex-1 overflow-hidden">
+          <ContractorChatPane className="h-full" />
         </div>
       </div>
-    </div>
+    </ContractorChatProvider>
   );
 }
 
