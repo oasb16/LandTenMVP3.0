@@ -2706,6 +2706,99 @@ def get_function_definitions() -> List[FunctionDefinition]:
                 "required": [],
             },
         ),
+        # Contractor Onboarding Tools
+        FunctionDefinition(
+            name="submit_license",
+            description="Submit contractor license information. Call this after collecting license number and business address during onboarding.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "license_number": {
+                        "type": "string",
+                        "description": "The contractor's license number"
+                    },
+                    "business_address": {
+                        "type": "string",
+                        "description": "The business address associated with the license"
+                    },
+                    "contractor_id": {
+                        "type": "string",
+                        "description": "The contractor's ID from the onboarding session"
+                    },
+                    "user_id": {
+                        "type": "string",
+                        "description": "The user's ID"
+                    },
+                },
+                "required": ["license_number", "business_address", "contractor_id", "user_id"],
+            },
+        ),
+        FunctionDefinition(
+            name="trigger_identity_verification",
+            description="Trigger identity verification for the contractor during onboarding. Call this when ready to verify identity.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "contractor_id": {
+                        "type": "string",
+                        "description": "The contractor's ID"
+                    },
+                    "user_id": {
+                        "type": "string",
+                        "description": "The user's ID"
+                    },
+                },
+                "required": ["contractor_id", "user_id"],
+            },
+        ),
+        FunctionDefinition(
+            name="setup_bank_account",
+            description="Set up bank account for receiving payments during contractor onboarding. Call this after collecting bank account details.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "account_holder": {
+                        "type": "string",
+                        "description": "Name on the bank account"
+                    },
+                    "routing_number": {
+                        "type": "string",
+                        "description": "Bank routing number (9 digits)"
+                    },
+                    "account_number": {
+                        "type": "string",
+                        "description": "Bank account number"
+                    },
+                    "contractor_id": {
+                        "type": "string",
+                        "description": "The contractor's ID"
+                    },
+                    "user_id": {
+                        "type": "string",
+                        "description": "The user's ID"
+                    },
+                },
+                "required": ["account_holder", "routing_number", "account_number", "contractor_id", "user_id"],
+            },
+        ),
+        FunctionDefinition(
+            name="mark_onboarding_complete",
+            description="Mark contractor onboarding as complete and activate the account. Call this when the user types 'done' and all steps are finished.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "contractor_id": {
+                        "type": "string",
+                        "description": "The contractor's ID"
+                    },
+                    "user_id": {
+                        "type": "string",
+                        "description": "The user's ID"
+                    },
+                },
+                "required": ["contractor_id", "user_id"],
+            },
+        ),
     ]
 
     # 🚀 PHASE OMEGA: Add dynamic tools to function definitions
@@ -2722,6 +2815,14 @@ def get_function_definitions() -> List[FunctionDefinition]:
         logger.error(f"Error loading dynamic tools: {e}", exc_info=True)
         return built_in_functions
 
+
+# Import contractor onboarding tools
+from .contractor_onboarding_tools import (
+    submit_license,
+    trigger_identity_verification,
+    setup_bank_account,
+    mark_onboarding_complete,
+)
 
 # Function name to implementation mapping
 FUNCTION_IMPLEMENTATIONS = {
@@ -2752,6 +2853,11 @@ FUNCTION_IMPLEMENTATIONS = {
     # PHASE OMEGA: Dynamic tool management
     "register_dynamic_tool": register_dynamic_tool,
     "list_dynamic_tools": list_dynamic_tools,
+    # Contractor Onboarding Tools
+    "submit_license": submit_license,
+    "trigger_identity_verification": trigger_identity_verification,
+    "setup_bank_account": setup_bank_account,
+    "mark_onboarding_complete": mark_onboarding_complete,
 }
 
 
