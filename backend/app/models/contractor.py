@@ -102,6 +102,32 @@ class Contractor(BaseModel):
         description="Account status"
     )
 
+    # Onboarding Progress (for chat-based onboarding)
+    onboarding_license_submitted: bool = Field(
+        default=False,
+        description="Whether license info has been submitted"
+    )
+    onboarding_license_verified: bool = Field(
+        default=False,
+        description="Whether license has been verified"
+    )
+    onboarding_identity_verified: bool = Field(
+        default=False,
+        description="Whether identity verification is complete"
+    )
+    onboarding_payment_setup: bool = Field(
+        default=False,
+        description="Whether payment setup is complete"
+    )
+    onboarding_complete: bool = Field(
+        default=False,
+        description="Whether full onboarding is complete"
+    )
+    onboarding_current_step: str = Field(
+        default="welcome",
+        description="Current onboarding step: welcome, license, identity, payment, done"
+    )
+
     # Timestamps
     created_at: datetime = Field(
         default_factory=datetime.utcnow,
