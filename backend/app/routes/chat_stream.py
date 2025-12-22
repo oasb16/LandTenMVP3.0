@@ -22,6 +22,7 @@ from ..services.chatbot import (
     agent_reply,
     agent_reply_async,
     post_agent_message,
+    get_simple_conversational_response_async,
 )
 from ..services.context_manager import get_context_manager
 from ..services.dynamo_service import save_channel_snapshot
@@ -1308,9 +1309,26 @@ async def _handle_contractor_message(
     print(prompt)
     print(f"{'='*80}\n")
 
-    # Generate AI response
-    print(f"[🔧 CONTRACTOR HANDLER] Calling agent_reply_async with persona={persona}")
-    reply = await agent_reply_async(prompt, context, persona)
+    # Generate AI response using SIMPLE CONVERSATIONAL mode (NOT the tenant analysis framework)
+    print(f"[🔧 CONTRACTOR HANDLER] Calling get_simple_conversational_response_async (BYPASS tenant analysis)")
+    contractor_system_prompt = (
+        "You are a friendly, helpful onboarding assistant for contractors joining HomeAI Pro. "
+        "Your role is to guide contractors through:\n"
+        "- License verification\n"
+        "- Identity verification (Jumio)\n"
+        "- Bank account setup for payments\n"
+        "- Getting started with jobs\n"
+        "- Platform features and benefits\n\n"
+        "Always be warm, professional, and encouraging. "
+        "Keep responses concise and actionable. "
+        "NEVER discuss tenant maintenance issues or property management - focus ONLY on contractor onboarding."
+    )
+    reply = await get_simple_conversational_response_async(
+        system_prompt=contractor_system_prompt,
+        user_message=prompt,
+        temperature=0.7,
+        max_tokens=512
+    )
     reply_text = reply if isinstance(reply, str) else (json.dumps(reply, ensure_ascii=False) if isinstance(reply, (dict, list)) else str(reply))
 
     print(f"\n{'='*80}")
@@ -1366,8 +1384,25 @@ async def _handle_landlord_message(
         f"Provide actionable insights and clear next steps."
     )
 
-    # Generate AI response
-    reply = await agent_reply_async(prompt, context, persona)
+    # Generate AI response using SIMPLE CONVERSATIONAL mode (NOT the tenant analysis framework)
+    print(f"[landlord-handler] Calling get_simple_conversational_response_async (BYPASS tenant analysis)")
+    landlord_system_prompt = (
+        "You are a professional property management assistant for landlords. "
+        "Your role is to help with:\n"
+        "- Reviewing and approving maintenance requests\n"
+        "- Managing properties and tenants\n"
+        "- Evaluating contractor bids and work orders\n"
+        "- Property analytics and reports\n"
+        "- Cost management and budgets\n\n"
+        "Always be professional, data-driven, and provide clear actionable insights. "
+        "Focus on helping landlords make informed decisions about their properties."
+    )
+    reply = await get_simple_conversational_response_async(
+        system_prompt=landlord_system_prompt,
+        user_message=prompt,
+        temperature=0.5,
+        max_tokens=512
+    )
     reply_text = reply if isinstance(reply, str) else (json.dumps(reply, ensure_ascii=False) if isinstance(reply, (dict, list)) else str(reply))
 
     # Post response to channel
