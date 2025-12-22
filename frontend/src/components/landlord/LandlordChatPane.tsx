@@ -2,14 +2,14 @@
 
 import { useCallback, useRef, useEffect } from "react";
 import { Loader2, WifiOff, Send } from "lucide-react";
-import { useContractorChat } from "./ContractorChatProvider";
+import { useLandlordChat } from "./LandlordChatProvider";
 
 type Props = {
   className?: string;
 };
 
-export default function ContractorChatPane({ className }: Props) {
-  const { client, activeChannel, messages, loading, error, sendMessage } = useContractorChat();
+export default function LandlordChatPane({ className }: Props) {
+  const { client, activeChannel, messages, loading, error, sendMessage } = useLandlordChat();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -31,7 +31,8 @@ export default function ContractorChatPane({ className }: Props) {
       try {
         await sendMessage(text, {
           metadata: {
-            agentEnabled: true, // Always enable agent for contractor onboarding
+            agentEnabled: true,
+            persona: "landlord",
           },
         });
       } catch (err) {

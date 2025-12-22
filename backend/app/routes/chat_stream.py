@@ -20,7 +20,9 @@ from ..services.chatbot import (
     ensure_agent_user as bot_ensure_agent_user,
     build_context,
     agent_reply,
+    agent_reply_async,
     post_agent_message,
+    get_simple_conversational_response_async,
 )
 from ..services.context_manager import get_context_manager
 from ..services.dynamo_service import save_channel_snapshot
@@ -36,6 +38,7 @@ from ..services.incident_flow import (
 from ..services.ai_reasoning_v2 import get_ai_reasoning_v2 as get_ai_reasoning
 from ..services.dynamo_service import record_mttr_event, record_ai_feedback, get_aggregated_metrics
 from ..services.incident_flow import create_work_order
+from ..services.contractor_onboarding_service import contractor_onboarding_service
 
 try:
     from stream_chat import StreamChat
@@ -435,7 +438,7 @@ def _sanitize_members(members: List[str]) -> Tuple[List[str], Dict[str, Dict[str
 
 
 @router.get("/chat/stream/token")
-def get_stream_token(user_id: str, persona: str, token: str = Depends(verify_firebase_token)):
+def get_stream_token(user_id: str, persona: str, contractor_id: Optional[str] = None, token: str = Depends(verify_firebase_token)):
     api_key = os.getenv("STREAM_CHAT_API_KEY")
     allowed_roles = {
         role.strip() for role in os.getenv("STREAM_ALLOWED_ROLES", "user,admin,guest").split(",") if role.strip()
@@ -458,14 +461,24 @@ def get_stream_token(user_id: str, persona: str, token: str = Depends(verify_fir
             sanitized_user_id = f"user-{uuid4().hex[:8]}"
             print(f"[stream] sanitized user_id empty; generated {sanitized_user_id}")
 
+        # Determine channel ID based on persona and contractor_id
+        # For contractor onboarding, create unique channel per contractor
+        if persona == "contractor_onboarding" and contractor_id:
+            channel_id = f"contractor-{_slugify(contractor_id)}"
+            channel_name = f"Contractor Onboarding - {contractor_id}"
+            print(f"[stream] Creating unique contractor channel: {channel_id}")
+        else:
+            channel_id = DEFAULT_CHANNEL_ID
+            channel_name = "LandTen Conversations"
+
         # Check token cache first
         cached_token = _token_cache.get(sanitized_user_id, persona)
         if cached_token:
-            print(f"[stream] Returning cached token for {sanitized_user_id}")
+            print(f"[stream] Returning cached token for {sanitized_user_id} with channel {channel_id}")
             return {
                 "api_key": api_key,
                 "token": cached_token,
-                "channel_id": DEFAULT_CHANNEL_ID,
+                "channel_id": channel_id,
                 "user_id": sanitized_user_id,
                 "display_user_id": user_id,
                 "persona": persona,
@@ -482,7 +495,7 @@ def get_stream_token(user_id: str, persona: str, token: str = Depends(verify_fir
         client.upsert_user(user_payload)
 
         # Ensure channel exists and has member
-        channel = client.channel("messaging", DEFAULT_CHANNEL_ID, {"name": "LandTen Conversations"})
+        channel = client.channel("messaging", channel_id, {"name": channel_name})
         try:
             channel.create(user_id=sanitized_user_id)
         except (KeyError, StreamAPIException) as exc:
@@ -515,7 +528,7 @@ def get_stream_token(user_id: str, persona: str, token: str = Depends(verify_fir
                 print(f"[stream] agent add_members skipped: {exc}")
 
         # Generate new token
-        print(f"[stream] Generating new token for {sanitized_user_id}")
+        print(f"[stream] Generating new token for {sanitized_user_id} with channel {channel_id}")
         token_value = client.create_token(sanitized_user_id)
 
         # Cache the token
@@ -524,7 +537,7 @@ def get_stream_token(user_id: str, persona: str, token: str = Depends(verify_fir
         return {
             "api_key": api_key,
             "token": token_value,
-            "channel_id": DEFAULT_CHANNEL_ID,
+            "channel_id": channel_id,
             "user_id": sanitized_user_id,
             "display_user_id": user_id,
             "persona": persona,
@@ -1206,6 +1219,290 @@ def _handle_action_message(
         )
 
 
+async def _handle_contractor_message(
+    client: Any,
+    channel,
+    channel_state: Dict[str, Any],
+    message: Dict[str, Any],
+    persona: Optional[str] = None,
+) -> None:
+    """
+    Handle contractor onboarding messages with contractor-specific AI responses.
+    No tenant discovery flows, no incident creation - just onboarding assistance.
+    Automatically spawns interactive card micro-flows based on onboarding stage.
+    """
+    print(f"\n{'🔧'*40}")
+    print(f"[🔧 CONTRACTOR HANDLER] CALLED - This is the CONTRACTOR-SPECIFIC handler")
+    print(f"[🔧 CONTRACTOR HANDLER] Persona: {persona}")
+    print(f"{'🔧'*40}\n")
+
+    channel_id = _channel_identifier(channel, channel_state)
+    message_text = message.get("text", "").strip()
+
+    print(f"[🔧 CONTRACTOR HANDLER] Channel ID: {channel_id}")
+    print(f"[🔧 CONTRACTOR HANDLER] Message text: {message_text}")
+
+    if not message_text:
+        print(f"[🔧 CONTRACTOR HANDLER] Empty message, returning")
+        return
+
+    # Build context from recent messages
+    messages = channel_state.get("messages", [])
+    recent_messages = messages[-5:] if len(messages) > 5 else messages
+    context_lines = []
+    for msg in recent_messages:
+        user_id = msg.get("user", {}).get("id", "unknown")
+        text = msg.get("text", "")
+        context_lines.append(f"{user_id}: {text}")
+    context = "\n".join(context_lines)
+
+    print(f"[🔧 CONTRACTOR HANDLER] Built context from {len(recent_messages)} recent messages")
+
+    # Check for card-specific responses
+    metadata = message.get("metadata", {})
+    card_action = metadata.get("cardAction")
+    print(f"[🔧 CONTRACTOR HANDLER] Card action: {card_action}")
+
+    # Determine response and next card to spawn
+    card_to_spawn = None
+    card_metadata = {}
+
+    if card_action == "license_submit":
+        license_number = metadata.get("licenseNumber", "")
+        business_address = metadata.get("businessAddress", "")
+        prompt = (
+            f"A contractor just submitted their license information:\n"
+            f"License: {license_number}\n"
+            f"Address: {business_address}\n\n"
+            f"Respond warmly in 1-2 sentences, confirm you received it, and let them know you're verifying it. "
+            f"Then mention the next step is identity verification."
+        )
+        card_to_spawn = "identity_verification"
+
+    elif card_action == "identity_start":
+        prompt = (
+            "A contractor just started the identity verification process. "
+            "Acknowledge in 1-2 sentences that they're going through Jumio verification, "
+            "and let them know it usually takes 1-2 minutes. "
+            "Mention that once approved, they can set up payment info."
+        )
+        card_to_spawn = "bank_setup"
+
+    elif card_action == "bank_submit":
+        account_name = metadata.get("accountName", "")
+        prompt = (
+            f"A contractor just linked their bank account ({account_name}). "
+            f"Congratulate them in 1-2 sentences on completing onboarding! "
+            f"Let them know they'll start receiving job opportunities soon. "
+            f"Keep it warm and encouraging."
+        )
+        card_to_spawn = "success"
+        card_metadata = {
+            "title": "🎉 Onboarding Complete!",
+            "message": "You're all set to start receiving jobs on HomeAI Pro. Welcome aboard!",
+            "icon": "payment"
+        }
+
+    else:
+        # AGGRESSIVE DEBUGGING: Print ALL messages and their metadata
+        print(f"\n{'🔍'*40}")
+        print(f"[🔍 CARD DEBUG] Checking {len(messages)} messages for license card:")
+        for i, msg in enumerate(messages):
+            msg_user = msg.get("user", {}).get("id", "unknown")
+            msg_text = (msg.get("text", "") or "")[:50]
+            msg_metadata = msg.get("metadata", {})
+            card_type = msg_metadata.get("card_type")
+            print(f"  [{i}] User: {msg_user}, Text: '{msg_text}', card_type: {card_type}, Metadata: {msg_metadata}")
+        print(f"{'🔍'*40}\n")
+
+        # Check if we've already sent a license verification card
+        has_sent_license_card = any(
+            msg.get("metadata", {}).get("card_type") == "license_verification"
+            for msg in messages
+        )
+
+        # Count contractor messages (not AI messages)
+        contractor_message_count = sum(
+            1 for msg in messages
+            if not (msg.get("user", {}).get("id", "").startswith("ai-") or
+                   msg.get("user", {}).get("name", "").lower().startswith("ai-") or
+                   msg.get("user", {}).get("name", "").lower().startswith("homeai"))
+        )
+
+        print(f"[🔍 CARD DEBUG] has_sent_license_card: {has_sent_license_card}")
+        print(f"[🔍 CARD DEBUG] contractor_message_count: {contractor_message_count}")
+
+        # If this is one of the first few contractor messages AND we haven't sent the card, spawn it
+        should_spawn_license_card = (contractor_message_count <= 5 and not has_sent_license_card)
+
+        prompt = (
+            f"You are a friendly onboarding assistant for contractors joining HomeAI Pro. "
+            f"Recent conversation:\n{context}\n\n"
+            f"Contractor said: {message_text}\n\n"
+            f"{'Give a warm, brief welcome and let them know you will help them get started with license verification.' if should_spawn_license_card else 'Respond helpfully in 1-2 sentences.'}\n"
+            f"Keep it friendly, professional, and encouraging. "
+            f"Do NOT talk about maintenance issues or tenant problems - this is contractor onboarding only."
+        )
+
+        # Spawn license card if appropriate
+        if should_spawn_license_card:
+            card_to_spawn = "license_verification"
+            print(f"[🔧 CONTRACTOR HANDLER] 🎯 Contractor message #{contractor_message_count}, spawning license card")
+        elif has_sent_license_card:
+            print(f"[🔧 CONTRACTOR HANDLER] ℹ️ License card already sent, not spawning duplicate")
+        else:
+            print(f"[🔧 CONTRACTOR HANDLER] ℹ️ Too many messages ({contractor_message_count}), not spawning initial card")
+
+    # CRITICAL LOGGING: Print the exact prompt being sent to AI
+    print(f"\n{'='*80}")
+    print(f"[🔧 CONTRACTOR HANDLER] PROMPT BEING SENT TO AI:")
+    print(f"{'='*80}")
+    print(prompt)
+    print(f"{'='*80}\n")
+
+    # Generate AI response using SIMPLE CONVERSATIONAL mode (NOT the tenant analysis framework)
+    print(f"[🔧 CONTRACTOR HANDLER] Calling get_simple_conversational_response_async (BYPASS tenant analysis)")
+    contractor_system_prompt = (
+        "You are a friendly, helpful onboarding assistant for contractors joining HomeAI Pro. "
+        "Your role is to guide contractors through:\n"
+        "- License verification\n"
+        "- Identity verification (Jumio)\n"
+        "- Bank account setup for payments\n"
+        "- Getting started with jobs\n"
+        "- Platform features and benefits\n\n"
+        "Always be warm, professional, and encouraging. "
+        "Keep responses SHORT (1-2 sentences max) and actionable. "
+        "NEVER discuss tenant maintenance issues or property management - focus ONLY on contractor onboarding."
+    )
+    reply = await get_simple_conversational_response_async(
+        system_prompt=contractor_system_prompt,
+        user_message=prompt,
+        temperature=0.7,
+        max_tokens=150  # Shorter responses
+    )
+    reply_text = reply if isinstance(reply, str) else (json.dumps(reply, ensure_ascii=False) if isinstance(reply, (dict, list)) else str(reply))
+
+    print(f"\n{'='*80}")
+    print(f"[🔧 CONTRACTOR HANDLER] AI RESPONSE:")
+    print(f"{'='*80}")
+    print(reply_text)
+    print(f"{'='*80}\n")
+
+    # Post text response to channel
+    post_agent_message(client, channel_id, reply_text)
+    print(f"[🔧 CONTRACTOR HANDLER] ✅ Posted contractor onboarding response to channel {channel_id}")
+
+    # Spawn interactive card if needed
+    if card_to_spawn:
+        print(f"[🔧 CONTRACTOR HANDLER] 🎴 Spawning card: {card_to_spawn}")
+        _send_contractor_card(client, channel_id, card_to_spawn, card_metadata)
+        print(f"[🔧 CONTRACTOR HANDLER] ✅ Posted {card_to_spawn} card to channel {channel_id}")
+
+
+def _send_contractor_card(client: Any, channel_id: str, card_type: str, extra_metadata: Dict[str, Any] = None) -> None:
+    """
+    Send an interactive card message to the contractor chat.
+    Cards are rendered by ContractorChatPane when it detects card_type in metadata.
+    """
+    from ..services.chatbot import ensure_agent_user, AGENT_USER_ID
+
+    if StreamChat is None:
+        raise RuntimeError("stream-chat SDK not installed")
+
+    ensure_agent_user(client)
+
+    # Parse channel type and ID
+    channel_type, parsed_channel_id = (
+        tuple(channel_id.split(":", 1)) if ":" in channel_id
+        else ("messaging", channel_id)
+    )
+
+    channel = client.channel(channel_type, parsed_channel_id)
+
+    # Build card metadata
+    card_metadata = {
+        "card_type": card_type,
+        "is_card": True,
+        **(extra_metadata or {})
+    }
+
+    # Send card message (empty text, metadata triggers card rendering)
+    print(f"[card-sender] Sending {card_type} card with metadata: {card_metadata}")
+    channel.send_message({
+        "text": "",  # Empty text - card is rendered by metadata
+        "metadata": card_metadata,
+        "type": "regular"
+    }, user_id=AGENT_USER_ID)
+
+
+async def _handle_landlord_message(
+    client: Any,
+    channel,
+    channel_state: Dict[str, Any],
+    message: Dict[str, Any],
+    persona: Optional[str] = None,
+) -> None:
+    """
+    Handle landlord messages with landlord-specific AI responses.
+    Focus on property management, tenant issues, contractor approvals.
+    """
+    channel_id = _channel_identifier(channel, channel_state)
+    message_text = message.get("text", "").strip()
+
+    if not message_text:
+        return
+
+    # Build context from recent messages
+    messages = channel_state.get("messages", [])
+    recent_messages = messages[-5:] if len(messages) > 5 else messages
+    context_lines = []
+    for msg in recent_messages:
+        user_id = msg.get("user", {}).get("id", "unknown")
+        text = msg.get("text", "")
+        context_lines.append(f"{user_id}: {text}")
+    context = "\n".join(context_lines)
+
+    # Landlord-specific prompt
+    prompt = (
+        f"You are a property management assistant for landlords. "
+        f"Recent conversation:\n{context}\n\n"
+        f"Landlord said: {message_text}\n\n"
+        f"Respond helpfully about:\n"
+        f"- Reviewing and approving maintenance requests\n"
+        f"- Managing properties and tenants\n"
+        f"- Contractor bids and work orders\n"
+        f"- Property analytics and reports\n"
+        f"- Cost management and budgets\n\n"
+        f"Keep it professional and focused on landlord concerns. "
+        f"Provide actionable insights and clear next steps."
+    )
+
+    # Generate AI response using SIMPLE CONVERSATIONAL mode (NOT the tenant analysis framework)
+    print(f"[landlord-handler] Calling get_simple_conversational_response_async (BYPASS tenant analysis)")
+    landlord_system_prompt = (
+        "You are a professional property management assistant for landlords. "
+        "Your role is to help with:\n"
+        "- Reviewing and approving maintenance requests\n"
+        "- Managing properties and tenants\n"
+        "- Evaluating contractor bids and work orders\n"
+        "- Property analytics and reports\n"
+        "- Cost management and budgets\n\n"
+        "Always be professional, data-driven, and provide clear actionable insights. "
+        "Focus on helping landlords make informed decisions about their properties."
+    )
+    reply = await get_simple_conversational_response_async(
+        system_prompt=landlord_system_prompt,
+        user_message=prompt,
+        temperature=0.5,
+        max_tokens=512
+    )
+    reply_text = reply if isinstance(reply, str) else (json.dumps(reply, ensure_ascii=False) if isinstance(reply, (dict, list)) else str(reply))
+
+    # Post response to channel
+    post_agent_message(client, channel_id, reply_text)
+    print(f"[landlord-handler] Posted landlord response")
+
+
 @router.post("/chat/stream/webhook")
 # @router.post("/ai/stream-webhook")  # Alternative path for compatibility
 async def stream_webhook(request: Request):
@@ -1306,10 +1603,22 @@ async def stream_webhook(request: Request):
             for msg in channel_state.get("messages", [])[-10:]
         ],
     }
-    persona = channel_data.get("persona")
+
+    # Extract persona from message metadata first, fall back to channel data
+    message_metadata = message.get("metadata", {})
+    persona = message_metadata.get("persona") or channel_data.get("persona") or "tenant"
+
+    # AGGRESSIVE LOGGING FOR DEBUGGING
+    print(f"\n{'='*80}")
+    print(f"[🔍 PERSONA DEBUG] Message metadata: {json.dumps(message_metadata, indent=2)}")
+    print(f"[🔍 PERSONA DEBUG] Channel data persona: {channel_data.get('persona')}")
+    print(f"[🔍 PERSONA DEBUG] Final persona: {persona}")
+    print(f"[🔍 PERSONA DEBUG] Persona source: {'message metadata' if message_metadata.get('persona') else 'channel data' if channel_data.get('persona') else 'default (tenant)'}")
+    print(f"{'='*80}\n")
+
     discovery = channel_data.get("discovery") or {}
 
-    print(f"[👔 WEBHOOK] Persona: {persona}")
+    print(f"[👔 WEBHOOK] Persona: {persona} (from: {'message metadata' if message_metadata.get('persona') else 'channel data'})")
     print(f"[🔍 WEBHOOK] Discovery stage: {discovery.get('stage', 'none')}")
 
     # Print a concise channel summary for logging / dashboards
@@ -1371,12 +1680,33 @@ async def stream_webhook(request: Request):
         print(f"[✅ WEBHOOK] Action handled successfully")
         return {"status": "ok", "action_handled": True}
 
-    # Handle regular message with intelligent routing
-    print(f"[🧠 WEBHOOK] Routing to intelligent message handler")
-    _handle_intelligent_message(client, channel, channel_state, message, persona)
-    print(f"[✅ WEBHOOK] Message handled successfully")
-    print(f"{'='*80}\n")
-    return {"status": "ok"}
+    # Route based on persona
+    print(f"\n{'⚡'*40}")
+    print(f"[⚡ ROUTING] Persona value: '{persona}'")
+    print(f"[⚡ ROUTING] Type: {type(persona)}")
+    print(f"[⚡ ROUTING] Checking equality: persona == 'contractor_onboarding' = {persona == 'contractor_onboarding'}")
+    print(f"[⚡ ROUTING] Checking equality: persona == 'landlord' = {persona == 'landlord'}")
+    print(f"{'⚡'*40}\n")
+
+    if persona == "contractor_onboarding":
+        print(f"[🔧 WEBHOOK] ✅ ROUTING TO CONTRACTOR ONBOARDING HANDLER")
+        await _handle_contractor_message(client, channel, channel_state, message, persona)
+        print(f"[✅ WEBHOOK] Contractor message handled successfully")
+        print(f"{'='*80}\n")
+        return {"status": "ok", "persona": "contractor_onboarding"}
+    elif persona == "landlord":
+        print(f"[🏠 WEBHOOK] ✅ ROUTING TO LANDLORD HANDLER")
+        await _handle_landlord_message(client, channel, channel_state, message, persona)
+        print(f"[✅ WEBHOOK] Landlord message handled successfully")
+        print(f"{'='*80}\n")
+        return {"status": "ok", "persona": "landlord"}
+    else:
+        # Default to tenant intelligent handler with discovery flows
+        print(f"[🧠 WEBHOOK] ⚠️  ROUTING TO TENANT HANDLER (DEFAULT) - persona='{persona}'")
+        _handle_intelligent_message(client, channel, channel_state, message, persona)
+        print(f"[✅ WEBHOOK] Tenant message handled successfully")
+        print(f"{'='*80}\n")
+        return {"status": "ok", "persona": "tenant"}
 
 
 def summarize_channel_state(channel_state: Dict[str, Any]) -> Dict[str, Any]:

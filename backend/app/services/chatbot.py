@@ -1,7 +1,7 @@
 import os
 from typing import List, Dict, Any, Optional
 
-from ..services.ai_service import get_ai_response
+from ..services.ai_service import get_ai_response, get_ai_response_async
 
 try:  # pragma: no cover
     from stream_chat import StreamChat
@@ -52,6 +52,73 @@ def agent_reply(prompt: str, context: Optional[str], persona: Optional[str]) -> 
     else:
         combined = prompt
     return get_ai_response(combined, persona=persona, context=context)
+
+
+async def agent_reply_async(prompt: str, context: Optional[str], persona: Optional[str]) -> str:
+    """Async version of agent_reply for use in async webhook handlers"""
+    if context:
+        combined = f"Context:\n{context}\n\nUser:\n{prompt}"
+    else:
+        combined = prompt
+    return await get_ai_response_async(combined, persona=persona, context=context)
+
+
+async def get_simple_conversational_response_async(
+    system_prompt: str,
+    user_message: str,
+    temperature: float = 0.7,
+    max_tokens: int = 1024
+) -> str:
+    """
+    Simple, direct conversational AI call WITHOUT the 3-step refinement loop.
+
+    Use this for contractor/landlord onboarding where we need natural conversation,
+    NOT structured JSON incident analysis.
+
+    Args:
+        system_prompt: System instructions for the AI
+        user_message: The user's message to respond to
+        temperature: Creativity level (0.7 = balanced)
+        max_tokens: Max response length
+
+    Returns:
+        Natural conversational text response
+    """
+    from .openai_wrapper import get_openai_wrapper, RateLimitExceeded
+    import os
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    try:
+        openai_wrapper = get_openai_wrapper()
+        model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+
+        logger.info(f"🤖 [Simple Conversational] Sending to OpenAI")
+        logger.info(f"🤖 [Simple Conversational] System: {system_prompt[:100]}...")
+        logger.info(f"🤖 [Simple Conversational] User: {user_message[:100]}...")
+
+        response = await openai_wrapper.chat_completion(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+
+        reply = response.choices[0].message.content.strip()
+        logger.info(f"✅ [Simple Conversational] Response: {reply[:100]}...")
+
+        return reply
+
+    except RateLimitExceeded:
+        return "I'm experiencing high demand right now. Please try again in a moment!"
+
+    except Exception as e:
+        logger.error(f"❌ [Simple Conversational] Error: {e}", exc_info=True)
+        return f"I apologize, but I encountered an error. Please try again."
 
 
 def post_agent_message(client: Any, channel_id: str, text: str, msg_type: str = "agent") -> None:
