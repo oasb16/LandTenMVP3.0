@@ -20,6 +20,7 @@ from ..services.chatbot import (
     ensure_agent_user as bot_ensure_agent_user,
     build_context,
     agent_reply,
+    agent_reply_async,
     post_agent_message,
 )
 from ..services.context_manager import get_context_manager
@@ -1216,7 +1217,7 @@ def _handle_action_message(
         )
 
 
-def _handle_contractor_message(
+async def _handle_contractor_message(
     client: Any,
     channel,
     channel_state: Dict[str, Any],
@@ -1308,8 +1309,8 @@ def _handle_contractor_message(
     print(f"{'='*80}\n")
 
     # Generate AI response
-    print(f"[🔧 CONTRACTOR HANDLER] Calling agent_reply with persona={persona}")
-    reply = agent_reply(prompt, context, persona)
+    print(f"[🔧 CONTRACTOR HANDLER] Calling agent_reply_async with persona={persona}")
+    reply = await agent_reply_async(prompt, context, persona)
     reply_text = reply if isinstance(reply, str) else (json.dumps(reply, ensure_ascii=False) if isinstance(reply, (dict, list)) else str(reply))
 
     print(f"\n{'='*80}")
@@ -1323,7 +1324,7 @@ def _handle_contractor_message(
     print(f"[🔧 CONTRACTOR HANDLER] ✅ Posted contractor onboarding response to channel {channel_id}")
 
 
-def _handle_landlord_message(
+async def _handle_landlord_message(
     client: Any,
     channel,
     channel_state: Dict[str, Any],
@@ -1366,7 +1367,7 @@ def _handle_landlord_message(
     )
 
     # Generate AI response
-    reply = agent_reply(prompt, context, persona)
+    reply = await agent_reply_async(prompt, context, persona)
     reply_text = reply if isinstance(reply, str) else (json.dumps(reply, ensure_ascii=False) if isinstance(reply, (dict, list)) else str(reply))
 
     # Post response to channel
@@ -1561,13 +1562,13 @@ async def stream_webhook(request: Request):
 
     if persona == "contractor_onboarding":
         print(f"[🔧 WEBHOOK] ✅ ROUTING TO CONTRACTOR ONBOARDING HANDLER")
-        _handle_contractor_message(client, channel, channel_state, message, persona)
+        await _handle_contractor_message(client, channel, channel_state, message, persona)
         print(f"[✅ WEBHOOK] Contractor message handled successfully")
         print(f"{'='*80}\n")
         return {"status": "ok", "persona": "contractor_onboarding"}
     elif persona == "landlord":
         print(f"[🏠 WEBHOOK] ✅ ROUTING TO LANDLORD HANDLER")
-        _handle_landlord_message(client, channel, channel_state, message, persona)
+        await _handle_landlord_message(client, channel, channel_state, message, persona)
         print(f"[✅ WEBHOOK] Landlord message handled successfully")
         print(f"{'='*80}\n")
         return {"status": "ok", "persona": "landlord"}

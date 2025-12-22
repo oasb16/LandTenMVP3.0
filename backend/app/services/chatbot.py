@@ -1,7 +1,7 @@
 import os
 from typing import List, Dict, Any, Optional
 
-from ..services.ai_service import get_ai_response
+from ..services.ai_service import get_ai_response, get_ai_response_async
 
 try:  # pragma: no cover
     from stream_chat import StreamChat
@@ -52,6 +52,15 @@ def agent_reply(prompt: str, context: Optional[str], persona: Optional[str]) -> 
     else:
         combined = prompt
     return get_ai_response(combined, persona=persona, context=context)
+
+
+async def agent_reply_async(prompt: str, context: Optional[str], persona: Optional[str]) -> str:
+    """Async version of agent_reply for use in async webhook handlers"""
+    if context:
+        combined = f"Context:\n{context}\n\nUser:\n{prompt}"
+    else:
+        combined = prompt
+    return await get_ai_response_async(combined, persona=persona, context=context)
 
 
 def post_agent_message(client: Any, channel_id: str, text: str, msg_type: str = "agent") -> None:
