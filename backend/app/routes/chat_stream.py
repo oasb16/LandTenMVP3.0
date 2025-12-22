@@ -1228,6 +1228,7 @@ async def _handle_contractor_message(
     """
     Handle contractor onboarding messages with contractor-specific AI responses.
     No tenant discovery flows, no incident creation - just onboarding assistance.
+    Automatically spawns interactive card micro-flows based on onboarding stage.
     """
     print(f"\n{'🔧'*40}")
     print(f"[🔧 CONTRACTOR HANDLER] CALLED - This is the CONTRACTOR-SPECIFIC handler")
@@ -1261,6 +1262,10 @@ async def _handle_contractor_message(
     card_action = metadata.get("cardAction")
     print(f"[🔧 CONTRACTOR HANDLER] Card action: {card_action}")
 
+    # Determine response and next card to spawn
+    card_to_spawn = None
+    card_metadata = {}
+
     if card_action == "license_submit":
         license_number = metadata.get("licenseNumber", "")
         business_address = metadata.get("businessAddress", "")
@@ -1268,39 +1273,51 @@ async def _handle_contractor_message(
             f"A contractor just submitted their license information:\n"
             f"License: {license_number}\n"
             f"Address: {business_address}\n\n"
-            f"Respond warmly, confirm you received it, and let them know we're verifying it. "
+            f"Respond warmly in 1-2 sentences, confirm you received it, and let them know you're verifying it. "
             f"Then mention the next step is identity verification."
         )
+        card_to_spawn = "identity_verification"
+
     elif card_action == "identity_start":
         prompt = (
             "A contractor just started the identity verification process. "
-            "Acknowledge that they're going through Jumio verification, "
+            "Acknowledge in 1-2 sentences that they're going through Jumio verification, "
             "and let them know it usually takes 1-2 minutes. "
             "Mention that once approved, they can set up payment info."
         )
+        card_to_spawn = "bank_setup"
+
     elif card_action == "bank_submit":
         account_name = metadata.get("accountName", "")
         prompt = (
             f"A contractor just linked their bank account ({account_name}). "
-            f"Congratulate them on completing onboarding! "
+            f"Congratulate them in 1-2 sentences on completing onboarding! "
             f"Let them know they'll start receiving job opportunities soon. "
             f"Keep it warm and encouraging."
         )
+        card_to_spawn = "success"
+        card_metadata = {
+            "title": "🎉 Onboarding Complete!",
+            "message": "You're all set to start receiving jobs on HomeAI Pro. Welcome aboard!",
+            "icon": "payment"
+        }
+
     else:
-        # General contractor conversation
+        # First message or general conversation - spawn license card
+        # Check if this is a new contractor (few messages in channel)
+        is_new_contractor = len(messages) <= 3  # First few messages
+
         prompt = (
             f"You are a friendly onboarding assistant for contractors joining HomeAI Pro. "
             f"Recent conversation:\n{context}\n\n"
             f"Contractor said: {message_text}\n\n"
-            f"Respond helpfully about:\n"
-            f"- License verification process\n"
-            f"- Identity verification (Jumio)\n"
-            f"- Payment setup (bank account linking)\n"
-            f"- Getting started with jobs\n"
-            f"- Platform features and benefits\n\n"
+            f"{'Give a warm welcome in 1-2 sentences and let them know you will help them get started with onboarding.' if is_new_contractor else 'Respond helpfully in 1-2 sentences about their question.'}\n"
             f"Keep it friendly, professional, and encouraging. "
             f"Do NOT talk about maintenance issues or tenant problems - this is contractor onboarding only."
         )
+
+        if is_new_contractor:
+            card_to_spawn = "license_verification"
 
     # CRITICAL LOGGING: Print the exact prompt being sent to AI
     print(f"\n{'='*80}")
@@ -1320,14 +1337,14 @@ async def _handle_contractor_message(
         "- Getting started with jobs\n"
         "- Platform features and benefits\n\n"
         "Always be warm, professional, and encouraging. "
-        "Keep responses concise and actionable. "
+        "Keep responses SHORT (1-2 sentences max) and actionable. "
         "NEVER discuss tenant maintenance issues or property management - focus ONLY on contractor onboarding."
     )
     reply = await get_simple_conversational_response_async(
         system_prompt=contractor_system_prompt,
         user_message=prompt,
         temperature=0.7,
-        max_tokens=512
+        max_tokens=150  # Shorter responses
     )
     reply_text = reply if isinstance(reply, str) else (json.dumps(reply, ensure_ascii=False) if isinstance(reply, (dict, list)) else str(reply))
 
@@ -1337,9 +1354,51 @@ async def _handle_contractor_message(
     print(reply_text)
     print(f"{'='*80}\n")
 
-    # Post response to channel
+    # Post text response to channel
     post_agent_message(client, channel_id, reply_text)
     print(f"[🔧 CONTRACTOR HANDLER] ✅ Posted contractor onboarding response to channel {channel_id}")
+
+    # Spawn interactive card if needed
+    if card_to_spawn:
+        print(f"[🔧 CONTRACTOR HANDLER] 🎴 Spawning card: {card_to_spawn}")
+        _send_contractor_card(client, channel_id, card_to_spawn, card_metadata)
+        print(f"[🔧 CONTRACTOR HANDLER] ✅ Posted {card_to_spawn} card to channel {channel_id}")
+
+
+def _send_contractor_card(client: Any, channel_id: str, card_type: str, extra_metadata: Dict[str, Any] = None) -> None:
+    """
+    Send an interactive card message to the contractor chat.
+    Cards are rendered by ContractorChatPane when it detects card_type in metadata.
+    """
+    from ..services.chatbot import ensure_agent_user, AGENT_USER_ID
+
+    if StreamChat is None:
+        raise RuntimeError("stream-chat SDK not installed")
+
+    ensure_agent_user(client)
+
+    # Parse channel type and ID
+    channel_type, parsed_channel_id = (
+        tuple(channel_id.split(":", 1)) if ":" in channel_id
+        else ("messaging", channel_id)
+    )
+
+    channel = client.channel(channel_type, parsed_channel_id)
+
+    # Build card metadata
+    card_metadata = {
+        "card_type": card_type,
+        "is_card": True,
+        **(extra_metadata or {})
+    }
+
+    # Send card message (empty text, metadata triggers card rendering)
+    print(f"[card-sender] Sending {card_type} card with metadata: {card_metadata}")
+    channel.send_message({
+        "text": "",  # Empty text - card is rendered by metadata
+        "metadata": card_metadata,
+        "type": "regular"
+    }, user_id=AGENT_USER_ID)
 
 
 async def _handle_landlord_message(
