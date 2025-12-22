@@ -1303,6 +1303,17 @@ async def _handle_contractor_message(
         }
 
     else:
+        # AGGRESSIVE DEBUGGING: Print ALL messages and their metadata
+        print(f"\n{'🔍'*40}")
+        print(f"[🔍 CARD DEBUG] Checking {len(messages)} messages for license card:")
+        for i, msg in enumerate(messages):
+            msg_user = msg.get("user", {}).get("id", "unknown")
+            msg_text = (msg.get("text", "") or "")[:50]
+            msg_metadata = msg.get("metadata", {})
+            card_type = msg_metadata.get("card_type")
+            print(f"  [{i}] User: {msg_user}, Text: '{msg_text}', card_type: {card_type}, Metadata: {msg_metadata}")
+        print(f"{'🔍'*40}\n")
+
         # Check if we've already sent a license verification card
         has_sent_license_card = any(
             msg.get("metadata", {}).get("card_type") == "license_verification"
@@ -1316,6 +1327,9 @@ async def _handle_contractor_message(
                    msg.get("user", {}).get("name", "").lower().startswith("ai-") or
                    msg.get("user", {}).get("name", "").lower().startswith("homeai"))
         )
+
+        print(f"[🔍 CARD DEBUG] has_sent_license_card: {has_sent_license_card}")
+        print(f"[🔍 CARD DEBUG] contractor_message_count: {contractor_message_count}")
 
         # If this is one of the first few contractor messages AND we haven't sent the card, spawn it
         should_spawn_license_card = (contractor_message_count <= 5 and not has_sent_license_card)
