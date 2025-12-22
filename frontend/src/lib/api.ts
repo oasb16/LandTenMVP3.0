@@ -664,3 +664,45 @@ export async function getAnalyticsDashboard(): Promise<AnalyticsDashboard> {
   const data = await response.json();
   return data.data;
 }
+
+// ==================== GAMIFICATION ====================
+
+export interface LeaderboardEntry {
+  contractor_id: string;
+  rank: number;
+  display_name: string;
+  score: number;
+  level: string;
+  jobs_completed: number;
+  rating: number;
+  badges_count: number;
+  show_name: boolean;
+}
+
+/**
+ * Get leaderboard rankings
+ */
+export async function getLeaderboard(
+  category?: string,
+  zipCode?: string,
+  limit = 50
+): Promise<LeaderboardEntry[]> {
+  const backendUrl = getBackendUrl();
+  if (!backendUrl) throw new Error('Backend URL not configured');
+
+  const params = new URLSearchParams();
+  if (category) params.append('category', category);
+  if (zipCode) params.append('zip_code', zipCode);
+  params.append('limit', limit.toString());
+
+  const response = await fetch(`${backendUrl}/gamification/leaderboard?${params}`, {
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to get leaderboard: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return data.leaderboard;
+}

@@ -53,9 +53,15 @@ export default async function LandingPage() {
           </Link>
           <Link
             href="/analytics"
-            className="inline-flex items-center justify-center rounded-md bg-gradient-to-r from-green-600 to-teal-600 px-6 py-3 font-semibold text-white hover:from-green-700 hover:to-teal-700 transition shadow-lg col-span-1 sm:col-span-2"
+            className="inline-flex items-center justify-center rounded-md bg-gradient-to-r from-green-600 to-teal-600 px-6 py-3 font-semibold text-white hover:from-green-700 hover:to-teal-700 transition shadow-lg"
           >
             📊 Analytics Dashboard
+          </Link>
+          <Link
+            href="/leaderboard"
+            className="inline-flex items-center justify-center rounded-md bg-gradient-to-r from-yellow-600 to-orange-600 px-6 py-3 font-semibold text-white hover:from-yellow-700 hover:to-orange-700 transition shadow-lg"
+          >
+            🏆 Contractor Leaderboard
           </Link>
           <Link
             href="/contractor-onboarding"
