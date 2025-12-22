@@ -1227,10 +1227,19 @@ def _handle_contractor_message(
     Handle contractor onboarding messages with contractor-specific AI responses.
     No tenant discovery flows, no incident creation - just onboarding assistance.
     """
+    print(f"\n{'🔧'*40}")
+    print(f"[🔧 CONTRACTOR HANDLER] CALLED - This is the CONTRACTOR-SPECIFIC handler")
+    print(f"[🔧 CONTRACTOR HANDLER] Persona: {persona}")
+    print(f"{'🔧'*40}\n")
+
     channel_id = _channel_identifier(channel, channel_state)
     message_text = message.get("text", "").strip()
 
+    print(f"[🔧 CONTRACTOR HANDLER] Channel ID: {channel_id}")
+    print(f"[🔧 CONTRACTOR HANDLER] Message text: {message_text}")
+
     if not message_text:
+        print(f"[🔧 CONTRACTOR HANDLER] Empty message, returning")
         return
 
     # Build context from recent messages
@@ -1243,9 +1252,12 @@ def _handle_contractor_message(
         context_lines.append(f"{user_id}: {text}")
     context = "\n".join(context_lines)
 
+    print(f"[🔧 CONTRACTOR HANDLER] Built context from {len(recent_messages)} recent messages")
+
     # Check for card-specific responses
     metadata = message.get("metadata", {})
     card_action = metadata.get("cardAction")
+    print(f"[🔧 CONTRACTOR HANDLER] Card action: {card_action}")
 
     if card_action == "license_submit":
         license_number = metadata.get("licenseNumber", "")
@@ -1288,13 +1300,27 @@ def _handle_contractor_message(
             f"Do NOT talk about maintenance issues or tenant problems - this is contractor onboarding only."
         )
 
+    # CRITICAL LOGGING: Print the exact prompt being sent to AI
+    print(f"\n{'='*80}")
+    print(f"[🔧 CONTRACTOR HANDLER] PROMPT BEING SENT TO AI:")
+    print(f"{'='*80}")
+    print(prompt)
+    print(f"{'='*80}\n")
+
     # Generate AI response
+    print(f"[🔧 CONTRACTOR HANDLER] Calling agent_reply with persona={persona}")
     reply = agent_reply(prompt, context, persona)
     reply_text = reply if isinstance(reply, str) else (json.dumps(reply, ensure_ascii=False) if isinstance(reply, (dict, list)) else str(reply))
 
+    print(f"\n{'='*80}")
+    print(f"[🔧 CONTRACTOR HANDLER] AI RESPONSE:")
+    print(f"{'='*80}")
+    print(reply_text)
+    print(f"{'='*80}\n")
+
     # Post response to channel
     post_agent_message(client, channel_id, reply_text)
-    print(f"[contractor-handler] Posted contractor onboarding response")
+    print(f"[🔧 CONTRACTOR HANDLER] ✅ Posted contractor onboarding response to channel {channel_id}")
 
 
 def _handle_landlord_message(
@@ -1453,6 +1479,14 @@ async def stream_webhook(request: Request):
     message_metadata = message.get("metadata", {})
     persona = message_metadata.get("persona") or channel_data.get("persona") or "tenant"
 
+    # AGGRESSIVE LOGGING FOR DEBUGGING
+    print(f"\n{'='*80}")
+    print(f"[🔍 PERSONA DEBUG] Message metadata: {json.dumps(message_metadata, indent=2)}")
+    print(f"[🔍 PERSONA DEBUG] Channel data persona: {channel_data.get('persona')}")
+    print(f"[🔍 PERSONA DEBUG] Final persona: {persona}")
+    print(f"[🔍 PERSONA DEBUG] Persona source: {'message metadata' if message_metadata.get('persona') else 'channel data' if channel_data.get('persona') else 'default (tenant)'}")
+    print(f"{'='*80}\n")
+
     discovery = channel_data.get("discovery") or {}
 
     print(f"[👔 WEBHOOK] Persona: {persona} (from: {'message metadata' if message_metadata.get('persona') else 'channel data'})")
@@ -1518,21 +1552,28 @@ async def stream_webhook(request: Request):
         return {"status": "ok", "action_handled": True}
 
     # Route based on persona
+    print(f"\n{'⚡'*40}")
+    print(f"[⚡ ROUTING] Persona value: '{persona}'")
+    print(f"[⚡ ROUTING] Type: {type(persona)}")
+    print(f"[⚡ ROUTING] Checking equality: persona == 'contractor_onboarding' = {persona == 'contractor_onboarding'}")
+    print(f"[⚡ ROUTING] Checking equality: persona == 'landlord' = {persona == 'landlord'}")
+    print(f"{'⚡'*40}\n")
+
     if persona == "contractor_onboarding":
-        print(f"[🔧 WEBHOOK] Routing to contractor onboarding handler")
+        print(f"[🔧 WEBHOOK] ✅ ROUTING TO CONTRACTOR ONBOARDING HANDLER")
         _handle_contractor_message(client, channel, channel_state, message, persona)
         print(f"[✅ WEBHOOK] Contractor message handled successfully")
         print(f"{'='*80}\n")
         return {"status": "ok", "persona": "contractor_onboarding"}
     elif persona == "landlord":
-        print(f"[🏠 WEBHOOK] Routing to landlord handler")
+        print(f"[🏠 WEBHOOK] ✅ ROUTING TO LANDLORD HANDLER")
         _handle_landlord_message(client, channel, channel_state, message, persona)
         print(f"[✅ WEBHOOK] Landlord message handled successfully")
         print(f"{'='*80}\n")
         return {"status": "ok", "persona": "landlord"}
     else:
         # Default to tenant intelligent handler with discovery flows
-        print(f"[🧠 WEBHOOK] Routing to tenant intelligent message handler")
+        print(f"[🧠 WEBHOOK] ⚠️  ROUTING TO TENANT HANDLER (DEFAULT) - persona='{persona}'")
         _handle_intelligent_message(client, channel, channel_state, message, persona)
         print(f"[✅ WEBHOOK] Tenant message handled successfully")
         print(f"{'='*80}\n")
