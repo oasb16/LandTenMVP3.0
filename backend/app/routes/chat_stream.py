@@ -38,6 +38,7 @@ from ..services.incident_flow import (
 from ..services.ai_reasoning_v2 import get_ai_reasoning_v2 as get_ai_reasoning
 from ..services.dynamo_service import record_mttr_event, record_ai_feedback, get_aggregated_metrics
 from ..services.incident_flow import create_work_order
+from ..services.contractor_onboarding_service import contractor_onboarding_service
 
 try:
     from stream_chat import StreamChat

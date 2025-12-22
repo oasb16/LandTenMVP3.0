@@ -36,6 +36,7 @@ from .routes import (
     ai_webhooks,     # ✅ V2 FALLBACK
     ai_webhooks_v3,  # ✅ V3 ORCHESTRATOR
     ai_analytics,    # ✅ ANALYTICS DASHBOARD
+    contractor_onboarding,  # ✅ Production-grade contractor onboarding with Stripe
 )
 from .utils.rate_limit import SimpleRateLimiter
 from .utils.startup_checks import validate_env
@@ -333,6 +334,7 @@ app.include_router(jobs.router)  # ✅ PHASE 2B: Landlord job creation and bid m
 app.include_router(contractors.router)  # ✅ PHASE 2C: Contractor work scheduling and completion
 app.include_router(payments.router)  # ✅ PHASE 2D: Stripe payment processing with 15% platform fee
 app.include_router(magic_links.router)  # ✅ Contractor onboarding magic links
+app.include_router(contractor_onboarding.router)  # ✅ Production-grade contractor onboarding with Stripe Connect
 app.include_router(admin.router)  # ✅ Admin endpoints for database setup
 app.include_router(agent.router)
 app.include_router(thread.router)
