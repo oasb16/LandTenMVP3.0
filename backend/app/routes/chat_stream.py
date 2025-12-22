@@ -1303,21 +1303,33 @@ async def _handle_contractor_message(
         }
 
     else:
-        # First message or general conversation - spawn license card
-        # Check if this is a new contractor (few messages in channel)
-        is_new_contractor = len(messages) <= 3  # First few messages
+        # Check if we've already sent a license verification card
+        has_sent_license_card = any(
+            msg.get("metadata", {}).get("card_type") == "license_verification"
+            for msg in messages
+        )
+
+        # Detect if contractor is asking to start onboarding or providing license info
+        message_lower = message_text.lower()
+        wants_to_start = any(keyword in message_lower for keyword in [
+            "start", "begin", "onboard", "license", "get started", "ready", "proceed", "hi", "hello"
+        ])
 
         prompt = (
             f"You are a friendly onboarding assistant for contractors joining HomeAI Pro. "
             f"Recent conversation:\n{context}\n\n"
             f"Contractor said: {message_text}\n\n"
-            f"{'Give a warm welcome in 1-2 sentences and let them know you will help them get started with onboarding.' if is_new_contractor else 'Respond helpfully in 1-2 sentences about their question.'}\n"
+            f"{'Give a warm welcome in 1-2 sentences and let them know you will help them get started with the license verification process.' if wants_to_start and not has_sent_license_card else 'Respond helpfully in 1-2 sentences about their question.'}\n"
             f"Keep it friendly, professional, and encouraging. "
             f"Do NOT talk about maintenance issues or tenant problems - this is contractor onboarding only."
         )
 
-        if is_new_contractor:
+        # Spawn license card if they want to start AND we haven't sent it yet
+        if wants_to_start and not has_sent_license_card:
             card_to_spawn = "license_verification"
+            print(f"[🔧 CONTRACTOR HANDLER] 🎯 Detected onboarding intent, will spawn license card")
+        elif has_sent_license_card:
+            print(f"[🔧 CONTRACTOR HANDLER] ℹ️ License card already sent, not spawning duplicate")
 
     # CRITICAL LOGGING: Print the exact prompt being sent to AI
     print(f"\n{'='*80}")
