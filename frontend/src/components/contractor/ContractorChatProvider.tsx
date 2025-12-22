@@ -199,7 +199,9 @@ export function ContractorChatProvider({ children, contractorId, contractorEmail
       if (messageData?.metadata?.agentEnabled !== false) {
         const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL?.replace(/\/api$/, "") || window.location.origin;
 
-        await fetch(`${backendUrl}/ai/stream-webhook`, {
+        // CRITICAL: Use /chat/stream/webhook for persona-based routing
+        // NOT /ai/stream-webhook (which always uses tenant prompt)
+        await fetch(`${backendUrl}/chat/stream/webhook`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
