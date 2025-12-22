@@ -47,15 +47,21 @@ export default async function LandingPage() {
           </a>
           <Link
             href="/workflow"
-            className="inline-flex items-center justify-center rounded-md bg-blue-600 px-6 py-3 font-semibold text-white hover:bg-blue-500 transition shadow-lg col-span-1 sm:col-span-2"
+            className="inline-flex items-center justify-center rounded-md bg-blue-600 px-6 py-3 font-semibold text-white hover:bg-blue-500 transition shadow-lg"
           >
             ⚡ Full Workflow Experience
           </Link>
           <Link
-            href="/test-contractor-onboarding"
-            className="inline-flex items-center justify-center rounded-md bg-gradient-to-r from-orange-600 to-red-600 px-6 py-3 font-semibold text-white hover:from-orange-700 hover:to-red-700 transition shadow-lg col-span-1 sm:col-span-2 md:col-span-3"
+            href="/analytics"
+            className="inline-flex items-center justify-center rounded-md bg-gradient-to-r from-green-600 to-teal-600 px-6 py-3 font-semibold text-white hover:from-green-700 hover:to-teal-700 transition shadow-lg col-span-1 sm:col-span-2"
           >
-            🧪 Test Contractor Onboarding (E2E)
+            📊 Analytics Dashboard
+          </Link>
+          <Link
+            href="/contractor-onboarding"
+            className="inline-flex items-center justify-center rounded-md bg-gradient-to-r from-orange-600 to-red-600 px-6 py-3 font-semibold text-white hover:from-orange-700 hover:to-red-700 transition shadow-lg"
+          >
+            🔧 Contractor Onboarding
           </Link>
         </div>
         <div className="grid sm:grid-cols-3 gap-6 text-left">
