@@ -120,12 +120,12 @@ export default function ContractorChatPane({ className }: Props) {
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
         {messages.map((msg) => {
-          const isBot = msg.user?.id?.startsWith("ai-") || msg.user?.name?.toLowerCase().includes("assistant");
+          const isBot = msg.user?.id?.startsWith("ai-") || msg.user?.id === "landten-agent" || msg.user?.name?.toLowerCase().includes("assistant");
           const metadata = msg.metadata || {};
           const cardType = metadata.card_type || metadata.cardType;
 
-          // Render dynamic cards for bot messages with card_type
-          if (isBot && cardType) {
+          // Render dynamic cards whenever card_type is present (cards should render based on metadata, not sender)
+          if (cardType) {
             return (
               <div key={msg.id} className="flex justify-center">
                 <div className="max-w-md w-full">
