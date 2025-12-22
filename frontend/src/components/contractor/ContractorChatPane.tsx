@@ -15,7 +15,7 @@ type Props = {
 };
 
 export default function ContractorChatPane({ className }: Props) {
-  const { client, activeChannel, messages, loading, error, sendMessage } = useContractorChat();
+  const { client, activeChannel, messages, loading, error, sendMessage, contractorId } = useContractorChat();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -140,13 +140,13 @@ export default function ContractorChatPane({ className }: Props) {
               <div key={msg.id} className="flex justify-center">
                 <div className="max-w-md w-full">
                   {cardType === "license_verification" && (
-                    <LicenseVerificationCard onSubmit={handleLicenseSubmit} />
+                    <LicenseVerificationCard contractorId={contractorId} onSubmit={handleLicenseSubmit} />
                   )}
                   {cardType === "identity_verification" && (
-                    <IdentityVerificationCard onStart={handleIdentityStart} />
+                    <IdentityVerificationCard contractorId={contractorId} onStart={handleIdentityStart} />
                   )}
                   {cardType === "bank_setup" && (
-                    <BankAccountSetupCard onSubmit={handleBankSubmit} />
+                    <BankAccountSetupCard contractorId={contractorId} onSubmit={handleBankSubmit} />
                   )}
                   {cardType === "success" && (
                     <SuccessCard
