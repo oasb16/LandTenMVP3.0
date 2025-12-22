@@ -1216,6 +1216,138 @@ def _handle_action_message(
         )
 
 
+def _handle_contractor_message(
+    client: Any,
+    channel,
+    channel_state: Dict[str, Any],
+    message: Dict[str, Any],
+    persona: Optional[str] = None,
+) -> None:
+    """
+    Handle contractor onboarding messages with contractor-specific AI responses.
+    No tenant discovery flows, no incident creation - just onboarding assistance.
+    """
+    channel_id = _channel_identifier(channel, channel_state)
+    message_text = message.get("text", "").strip()
+
+    if not message_text:
+        return
+
+    # Build context from recent messages
+    messages = channel_state.get("messages", [])
+    recent_messages = messages[-5:] if len(messages) > 5 else messages
+    context_lines = []
+    for msg in recent_messages:
+        user_id = msg.get("user", {}).get("id", "unknown")
+        text = msg.get("text", "")
+        context_lines.append(f"{user_id}: {text}")
+    context = "\n".join(context_lines)
+
+    # Check for card-specific responses
+    metadata = message.get("metadata", {})
+    card_action = metadata.get("cardAction")
+
+    if card_action == "license_submit":
+        license_number = metadata.get("licenseNumber", "")
+        business_address = metadata.get("businessAddress", "")
+        prompt = (
+            f"A contractor just submitted their license information:\n"
+            f"License: {license_number}\n"
+            f"Address: {business_address}\n\n"
+            f"Respond warmly, confirm you received it, and let them know we're verifying it. "
+            f"Then mention the next step is identity verification."
+        )
+    elif card_action == "identity_start":
+        prompt = (
+            "A contractor just started the identity verification process. "
+            "Acknowledge that they're going through Jumio verification, "
+            "and let them know it usually takes 1-2 minutes. "
+            "Mention that once approved, they can set up payment info."
+        )
+    elif card_action == "bank_submit":
+        account_name = metadata.get("accountName", "")
+        prompt = (
+            f"A contractor just linked their bank account ({account_name}). "
+            f"Congratulate them on completing onboarding! "
+            f"Let them know they'll start receiving job opportunities soon. "
+            f"Keep it warm and encouraging."
+        )
+    else:
+        # General contractor conversation
+        prompt = (
+            f"You are a friendly onboarding assistant for contractors joining HomeAI Pro. "
+            f"Recent conversation:\n{context}\n\n"
+            f"Contractor said: {message_text}\n\n"
+            f"Respond helpfully about:\n"
+            f"- License verification process\n"
+            f"- Identity verification (Jumio)\n"
+            f"- Payment setup (bank account linking)\n"
+            f"- Getting started with jobs\n"
+            f"- Platform features and benefits\n\n"
+            f"Keep it friendly, professional, and encouraging. "
+            f"Do NOT talk about maintenance issues or tenant problems - this is contractor onboarding only."
+        )
+
+    # Generate AI response
+    reply = agent_reply(prompt, context, persona)
+    reply_text = reply if isinstance(reply, str) else (json.dumps(reply, ensure_ascii=False) if isinstance(reply, (dict, list)) else str(reply))
+
+    # Post response to channel
+    post_agent_message(client, channel_id, reply_text)
+    print(f"[contractor-handler] Posted contractor onboarding response")
+
+
+def _handle_landlord_message(
+    client: Any,
+    channel,
+    channel_state: Dict[str, Any],
+    message: Dict[str, Any],
+    persona: Optional[str] = None,
+) -> None:
+    """
+    Handle landlord messages with landlord-specific AI responses.
+    Focus on property management, tenant issues, contractor approvals.
+    """
+    channel_id = _channel_identifier(channel, channel_state)
+    message_text = message.get("text", "").strip()
+
+    if not message_text:
+        return
+
+    # Build context from recent messages
+    messages = channel_state.get("messages", [])
+    recent_messages = messages[-5:] if len(messages) > 5 else messages
+    context_lines = []
+    for msg in recent_messages:
+        user_id = msg.get("user", {}).get("id", "unknown")
+        text = msg.get("text", "")
+        context_lines.append(f"{user_id}: {text}")
+    context = "\n".join(context_lines)
+
+    # Landlord-specific prompt
+    prompt = (
+        f"You are a property management assistant for landlords. "
+        f"Recent conversation:\n{context}\n\n"
+        f"Landlord said: {message_text}\n\n"
+        f"Respond helpfully about:\n"
+        f"- Reviewing and approving maintenance requests\n"
+        f"- Managing properties and tenants\n"
+        f"- Contractor bids and work orders\n"
+        f"- Property analytics and reports\n"
+        f"- Cost management and budgets\n\n"
+        f"Keep it professional and focused on landlord concerns. "
+        f"Provide actionable insights and clear next steps."
+    )
+
+    # Generate AI response
+    reply = agent_reply(prompt, context, persona)
+    reply_text = reply if isinstance(reply, str) else (json.dumps(reply, ensure_ascii=False) if isinstance(reply, (dict, list)) else str(reply))
+
+    # Post response to channel
+    post_agent_message(client, channel_id, reply_text)
+    print(f"[landlord-handler] Posted landlord response")
+
+
 @router.post("/chat/stream/webhook")
 # @router.post("/ai/stream-webhook")  # Alternative path for compatibility
 async def stream_webhook(request: Request):
@@ -1316,10 +1448,14 @@ async def stream_webhook(request: Request):
             for msg in channel_state.get("messages", [])[-10:]
         ],
     }
-    persona = channel_data.get("persona")
+
+    # Extract persona from message metadata first, fall back to channel data
+    message_metadata = message.get("metadata", {})
+    persona = message_metadata.get("persona") or channel_data.get("persona") or "tenant"
+
     discovery = channel_data.get("discovery") or {}
 
-    print(f"[👔 WEBHOOK] Persona: {persona}")
+    print(f"[👔 WEBHOOK] Persona: {persona} (from: {'message metadata' if message_metadata.get('persona') else 'channel data'})")
     print(f"[🔍 WEBHOOK] Discovery stage: {discovery.get('stage', 'none')}")
 
     # Print a concise channel summary for logging / dashboards
@@ -1381,12 +1517,26 @@ async def stream_webhook(request: Request):
         print(f"[✅ WEBHOOK] Action handled successfully")
         return {"status": "ok", "action_handled": True}
 
-    # Handle regular message with intelligent routing
-    print(f"[🧠 WEBHOOK] Routing to intelligent message handler")
-    _handle_intelligent_message(client, channel, channel_state, message, persona)
-    print(f"[✅ WEBHOOK] Message handled successfully")
-    print(f"{'='*80}\n")
-    return {"status": "ok"}
+    # Route based on persona
+    if persona == "contractor_onboarding":
+        print(f"[🔧 WEBHOOK] Routing to contractor onboarding handler")
+        _handle_contractor_message(client, channel, channel_state, message, persona)
+        print(f"[✅ WEBHOOK] Contractor message handled successfully")
+        print(f"{'='*80}\n")
+        return {"status": "ok", "persona": "contractor_onboarding"}
+    elif persona == "landlord":
+        print(f"[🏠 WEBHOOK] Routing to landlord handler")
+        _handle_landlord_message(client, channel, channel_state, message, persona)
+        print(f"[✅ WEBHOOK] Landlord message handled successfully")
+        print(f"{'='*80}\n")
+        return {"status": "ok", "persona": "landlord"}
+    else:
+        # Default to tenant intelligent handler with discovery flows
+        print(f"[🧠 WEBHOOK] Routing to tenant intelligent message handler")
+        _handle_intelligent_message(client, channel, channel_state, message, persona)
+        print(f"[✅ WEBHOOK] Tenant message handled successfully")
+        print(f"{'='*80}\n")
+        return {"status": "ok", "persona": "tenant"}
 
 
 def summarize_channel_state(channel_state: Dict[str, Any]) -> Dict[str, Any]:
