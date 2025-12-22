@@ -124,6 +124,16 @@ export default function ContractorChatPane({ className }: Props) {
           const metadata = msg.metadata || {};
           const cardType = metadata.card_type || metadata.cardType;
 
+          // DEBUG: Log message details to console
+          console.log('[CONTRACTOR CHAT DEBUG]', {
+            id: msg.id,
+            user_id: msg.user?.id,
+            text: msg.text?.substring(0, 30),
+            metadata: metadata,
+            cardType: cardType,
+            hasCardType: !!cardType
+          });
+
           // Render dynamic cards whenever card_type is present (cards should render based on metadata, not sender)
           if (cardType) {
             return (
