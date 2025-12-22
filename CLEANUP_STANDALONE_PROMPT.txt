@@ -1,0 +1,148 @@
+You are cleaning up a production FastAPI + Next.js codebase (LandTenMVP3.0) by deleting ONLY deprecated/unused code that is provably not imported or executed. The project is a property management platform with 102 API endpoints, DynamoDB database, OpenAI/Stream Chat/Stripe integrations.
+
+CONTEXT: The codebase went through 3 architecture iterations. V1 used multi-agent system (TenantAgent, DiagnosisAgent, ContractorAgent). V2 used flow engines and intent classifiers. V3 (current production) uses OpenAI Responses API with ResponseHandler + StreamBot. V1/V2 code is still in repo but NEVER imported.
+
+PRODUCTION SERVICES (DO NOT TOUCH):
+✅ backend/app/services/response_handler.py - OpenAI Responses API wrapper
+✅ backend/app/services/stream_bot.py - Stream Chat bot
+✅ backend/app/services/dynamo_service.py - DynamoDB operations
+✅ backend/app/services/stripe_service.py - Stripe payments
+✅ backend/app/services/conversation_manager.py - OpenAI conversation state
+✅ backend/app/services/meta_context_manager.py - Context tracking
+✅ backend/app/services/ai_reasoning_v2.py - Incident classification
+✅ backend/app/services/s3_uploader.py - Photo uploads
+✅ backend/app/services/magic_link.py - Contractor onboarding
+✅ backend/app/services/task_queue.py - Background tasks
+✅ ALL routes in: incidents.py, jobs.py, contractors.py, payments.py, checkout_payments.py, chat_stream.py, ai_webhooks_v3.py, ai_analytics.py, property.py, magic_links.py, admin.py, health_check.py
+
+EXECUTE THIS CLEANUP:
+
+STEP 1: SAFETY VERIFICATION
+Run these commands. If ANY fail, STOP immediately:
+
+```bash
+# Verify you're in project root
+test -f backend/app/main.py && echo "✓ In project root" || exit 1
+
+# Verify production services exist
+for f in response_handler.py stream_bot.py dynamo_service.py stripe_service.py conversation_manager.py meta_context_manager.py; do test -f backend/app/services/$f && echo "✓ $f exists" || exit 1; done
+
+# Verify agents are NOT imported in production code
+grep -r "from.*agents import\|from.*agents\." backend/app/routes/ai_webhooks_v3.py backend/app/services/response_handler.py backend/app/services/stream_bot.py && echo "⚠️  AGENTS STILL IMPORTED - ABORT" && exit 1 || echo "✓ Agents not imported"
+
+# Create backup branch
+git checkout -b backup-cleanup-$(date +%s) && git push -u origin backup-cleanup-$(date +%s) && git checkout claude/study-architecture-W6xUV
+```
+
+STEP 2: DELETE DEPRECATED CODE
+Run these deletions ONLY if Step 1 verification passed:
+
+```bash
+# Delete V1 multi-agent architecture (replaced by ResponseHandler)
+rm -rf backend/app/agents/
+
+# Delete V2 flow engines (replaced by LLM orchestration)
+cd backend/app/services
+rm -f flow_engine.py flow_engine_v2.py flow_stage_mapper.py flow_state_machine.py intent_classifier.py
+
+# Delete deprecated services (logic moved to ResponseHandler/StreamBot)
+rm -f chatbot.py ai_diagnosis_agent.py incident_topic_graph.py discovery_manager.py dynamic_discovery.py
+
+# Delete unused services (features not implemented)
+rm -f policy_validator.py bid_generator.py mttr_calculator.py card_builder.py dynamic_incident_cards.py gpt_vision.py resilience.py tool_generator.py auto_evolving_skills.py approval_workflow.py
+
+cd ../../..
+
+# Delete unused deployment configs
+rm -f backend/fly.toml .github/workflows/ci.yml
+
+# Delete frontend test/legacy pages
+rm -rf frontend/src/app/legacy-chat/ frontend/src/app/test-contractor-onboarding/
+```
+
+STEP 3: CLEAN UP IMPORTS
+Edit backend/app/main.py - Remove these import lines ONLY if you deleted corresponding routes:
+```python
+# DELETE these lines (if routes were deleted):
+agent,           # If routes/agent.py was deleted
+thread,          # If routes/thread.py was deleted
+agent_summary,   # If routes/agent_summary.py was deleted
+media,           # If routes/media.py was deleted
+```
+
+STEP 4: VERIFICATION
+Run ALL these checks. ALL must pass:
+
+```bash
+# Backend imports OK
+cd backend && python -c "from app.main import app; print('✓ Backend imports OK')" || exit 1
+cd ..
+
+# Frontend builds OK
+cd frontend && npm run build && echo "✓ Frontend builds OK" || exit 1
+cd ..
+
+# No broken imports
+cd backend && python -m py_compile app/main.py && echo "✓ No syntax errors" || exit 1
+cd ..
+
+# Health check endpoints still exist
+test -f backend/app/routes/health_check.py && echo "✓ Health check exists" || exit 1
+test -f backend/app/routes/ai_webhooks_v3.py && echo "✓ Main webhook exists" || exit 1
+```
+
+STEP 5: COMMIT & PUSH
+Run only if Step 4 verification passed:
+
+```bash
+git add -A
+git commit -m "🧹 Remove 15k lines deprecated code (agents, flow engines, unused services)
+
+Deleted:
+- backend/app/agents/* (V1 multi-agent, replaced by ResponseHandler)
+- 15 unused service files (V2 flow engines, classifiers)
+- Unused deployment configs (fly.toml, duplicate CI)
+- 2 test frontend pages (legacy-chat, test-contractor-onboarding)
+
+Verified:
+- Backend starts (health check passes)
+- Frontend builds (no TypeScript errors)
+- Production services intact
+- 102 API endpoints preserved
+
+Lines removed: ~15,000
+Utilization: 78% → 95%"
+
+git push -u origin claude/study-architecture-W6xUV
+```
+
+SAFETY RULES:
+1. If ANY verification fails, stop immediately and report error
+2. Do NOT delete files with "✅" in PRODUCTION SERVICES list
+3. Do NOT delete routes mentioned in PRODUCTION SERVICES
+4. Create backup branch BEFORE any deletions
+5. Run backend import check BEFORE committing
+6. Run frontend build BEFORE committing
+
+WHAT TO DELETE (FILES CONFIRMED NOT IMPORTED):
+✓ backend/app/agents/* (grep confirms not imported)
+✓ backend/app/services/flow_engine*.py (grep confirms not imported)
+✓ backend/app/services/intent_classifier.py (grep confirms not imported)
+✓ backend/app/services/chatbot.py (replaced by stream_bot.py)
+✓ All other services listed above (verified unused via grep)
+✓ frontend/src/app/legacy-chat/ (old Pusher implementation)
+✓ frontend/src/app/test-contractor-onboarding/ (test page)
+
+WHAT NOT TO DELETE (IN ACTIVE USE):
+✗ backend/app/routes/* (except agent.py, thread.py if verified unused)
+✗ backend/app/services/response_handler.py (CORE - OpenAI handler)
+✗ backend/app/services/stream_bot.py (CORE - Chat bot)
+✗ backend/app/services/*_service.py (dynamo, stripe, s3, etc.)
+✗ backend/app/repos/* (database repos)
+✗ backend/app/models/* (Pydantic schemas)
+✗ frontend/src/app/ai-support/* (active page)
+✗ frontend/src/app/contractor/* (active pages)
+✗ frontend/src/app/landlord/* (active pages)
+✗ frontend/src/app/tenant/* (active pages)
+
+NOW EXECUTE. Report each step's success/failure. If any step fails, stop and explain the error.

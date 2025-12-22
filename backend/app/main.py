@@ -36,6 +36,7 @@ from .routes import (
     ai_webhooks,     # ✅ V2 FALLBACK
     ai_webhooks_v3,  # ✅ V3 ORCHESTRATOR
     ai_analytics,    # ✅ ANALYTICS DASHBOARD
+    gamification,    # ✅ GAMIFICATION & LEADERBOARDS
     contractor_onboarding,  # ✅ Production-grade contractor onboarding with Stripe
 )
 from .utils.rate_limit import SimpleRateLimiter
@@ -358,6 +359,9 @@ except Exception as e:
 
 # Register analytics dashboard
 app.include_router(ai_analytics.router, tags=["analytics"])
+
+# Register gamification & leaderboards
+app.include_router(gamification.router, tags=["gamification"])
 
 
 # Health Check Endpoints

@@ -522,3 +522,187 @@ export async function initiatePayment(payment: PaymentRequest): Promise<PaymentR
 
   return await response.json();
 }
+
+// ==================== ANALYTICS ====================
+
+export interface AnalyticsSummary {
+  total_sessions: number;
+  completion_rate: number;
+  personas: { [key: string]: number };
+  top_ctas: Array<{ name: string; count: number }>;
+  top_items: Array<{ name: string; count: number }>;
+  top_reasons: Array<{ name: string; count: number }>;
+  top_actions: Array<{ name: string; count: number }>;
+  dropoff_stages: { [key: string]: number };
+}
+
+export interface PersonaAnalytics {
+  persona: string;
+  total_sessions: number;
+  completion_rate: number;
+  top_reasons: Array<{ name: string; count: number }>;
+  top_actions: Array<{ name: string; count: number }>;
+}
+
+export interface IssueTrends {
+  total_issues: number;
+  reasons: Array<{ name: string; count: number; percentage: number }>;
+  cta_reason_patterns: { [key: string]: { [key: string]: number } };
+}
+
+export interface SatisfactionMetrics {
+  satisfied: number;
+  neutral: number;
+  unsatisfied: number;
+  abandoned: number;
+  overall_score: number;
+}
+
+export interface AnalyticsDashboard {
+  summary: AnalyticsSummary;
+  trends: IssueTrends;
+  satisfaction: SatisfactionMetrics;
+  personas: {
+    tenant: PersonaAnalytics;
+    landlord: PersonaAnalytics;
+    contractor: PersonaAnalytics;
+    property_manager: PersonaAnalytics;
+  };
+}
+
+/**
+ * Get analytics summary
+ */
+export async function getAnalyticsSummary(): Promise<AnalyticsSummary> {
+  const backendUrl = getBackendUrl();
+  if (!backendUrl) throw new Error('Backend URL not configured');
+
+  const response = await fetch(`${backendUrl}/ai/analytics/summary`, {
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to get analytics summary: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return data.data;
+}
+
+/**
+ * Get persona-specific analytics
+ */
+export async function getPersonaAnalytics(persona: string): Promise<PersonaAnalytics> {
+  const backendUrl = getBackendUrl();
+  if (!backendUrl) throw new Error('Backend URL not configured');
+
+  const response = await fetch(`${backendUrl}/ai/analytics/persona/${encodeURIComponent(persona)}`, {
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to get persona analytics: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return data.data;
+}
+
+/**
+ * Get issue trends
+ */
+export async function getIssueTrends(): Promise<IssueTrends> {
+  const backendUrl = getBackendUrl();
+  if (!backendUrl) throw new Error('Backend URL not configured');
+
+  const response = await fetch(`${backendUrl}/ai/analytics/trends`, {
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to get issue trends: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return data.data;
+}
+
+/**
+ * Get satisfaction metrics
+ */
+export async function getSatisfactionMetrics(): Promise<SatisfactionMetrics> {
+  const backendUrl = getBackendUrl();
+  if (!backendUrl) throw new Error('Backend URL not configured');
+
+  const response = await fetch(`${backendUrl}/ai/analytics/satisfaction`, {
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to get satisfaction metrics: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return data.data;
+}
+
+/**
+ * Get full analytics dashboard
+ */
+export async function getAnalyticsDashboard(): Promise<AnalyticsDashboard> {
+  const backendUrl = getBackendUrl();
+  if (!backendUrl) throw new Error('Backend URL not configured');
+
+  const response = await fetch(`${backendUrl}/ai/analytics/dashboard`, {
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to get analytics dashboard: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return data.data;
+}
+
+// ==================== GAMIFICATION ====================
+
+export interface LeaderboardEntry {
+  contractor_id: string;
+  rank: number;
+  display_name: string;
+  score: number;
+  level: string;
+  jobs_completed: number;
+  rating: number;
+  badges_count: number;
+  show_name: boolean;
+}
+
+/**
+ * Get leaderboard rankings
+ */
+export async function getLeaderboard(
+  category?: string,
+  zipCode?: string,
+  limit = 50
+): Promise<LeaderboardEntry[]> {
+  const backendUrl = getBackendUrl();
+  if (!backendUrl) throw new Error('Backend URL not configured');
+
+  const params = new URLSearchParams();
+  if (category) params.append('category', category);
+  if (zipCode) params.append('zip_code', zipCode);
+  params.append('limit', limit.toString());
+
+  const response = await fetch(`${backendUrl}/gamification/leaderboard?${params}`, {
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to get leaderboard: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return data.leaderboard;
+}
